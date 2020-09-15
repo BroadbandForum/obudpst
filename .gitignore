@@ -1,0 +1,5 @@
+udpst
+*.o
+*.tar
+*.tar.gz
+package
