@@ -21,7 +21,7 @@
 
 ## Building OB-UDPST
 
-For any build considerations, please refer to the [README](https://github.com/BroadbandForum/obudpst/blob/master/README.md).
+For any build considerations, please refer to the README.
 
 ## Contributor License Agreement
 
