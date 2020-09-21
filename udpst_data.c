@@ -46,6 +46,8 @@
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
  * Len Ciavattone          09/05/2020    Allow socket_error() & receive_trunc()
  *                                       to be redefined externally
+ * Len Ciavattone          09/18/2020    Use usec instead of ms for delta time
+ *                                       values (new protocol version required)
  *
  */
 
@@ -624,7 +626,7 @@ int send_statuspdu(int connindex) {
         // Include trial interval info
         //
         tspecminus(&repo.systemClock, &c->trialIntClock, &tspecvar);
-        c->tiDeltaTime      = (unsigned int) tspecmsec(&tspecvar);
+        c->tiDeltaTime      = (unsigned int) tspecusec(&tspecvar);
         sHdr->tiDeltaTime   = htonl((uint32_t) c->tiDeltaTime);
         sHdr->tiRxDatagrams = htonl((uint32_t) c->tiRxDatagrams);
         sHdr->tiRxBytes     = htonl((uint32_t) c->tiRxBytes);
@@ -980,8 +982,8 @@ int proc_subinterval(int connindex, BOOL initialize) {
         //
         c->subIntSeqNo++; // Indicate updated stats
         tspecminus(&repo.systemClock, &c->subIntClock, &tspecvar);
-        c->sisAct.deltaTime = (uint32_t) tspecmsec(&tspecvar); // Measured sub-interval time
-        c->accumTime += (unsigned int) c->sisAct.deltaTime;
+        c->sisAct.deltaTime = (uint32_t) tspecusec(&tspecvar); // Measured sub-interval time
+        c->accumTime += (unsigned int) tspecmsec(&tspecvar);
         c->sisAct.accumTime = (uint32_t) c->accumTime;
         memcpy(&c->sisSav, &c->sisAct, sizeof(struct subIntStats));
 
@@ -1175,9 +1177,8 @@ double get_rate(int connindex, struct subIntStats *sis, int overhead) {
                 mbps = (double) dgrams;
                 mbps *= (double) overhead;
                 mbps += (double) bytes;
+                mbps *= 8.0;
                 mbps /= (double) delta;
-                mbps *= 8;
-                mbps /= 1000;
         }
         return mbps;
 }

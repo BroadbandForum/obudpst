@@ -40,7 +40,7 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 6 // Protocol version between client and server
+#define PROTOCOL_VER 7 // Protocol version between client and server
 
 //----------------------------------------------------------------------------
 //
