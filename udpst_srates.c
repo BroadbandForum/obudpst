@@ -37,6 +37,7 @@
  * Author                  Date          Comments
  * --------------------    ----------    ----------------------------------
  * Len Ciavattone          09/05/2019    Split off from udpst.c
+ * Len Ciavattone          09/24/2019    Include max burst when jumbo false
  *
  */
 
@@ -162,7 +163,7 @@ int def_sending_rates(void) {
                         }
                 }
         } else {
-                for (i = 11; i < MAX_BURST_SIZE; i++) {
+                for (i = 11; i <= MAX_BURST_SIZE; i++) {
                         sr              = &repo.sendingRates[repo.maxSendingRates++];
                         sr->txInterval1 = BASE_SEND_TIMER1;
                         sr->udpPayload1 = MAX_PAYLOAD_SIZE;
