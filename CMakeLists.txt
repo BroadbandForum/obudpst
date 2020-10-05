@@ -75,6 +75,8 @@ add_definitions(-DLOCALSTATEDIR=\"${CMAKE_INSTALL_PREFIX}/var/lib\")
 add_definitions(-DLOGDIR=\"${CMAKE_INSTALL_PREFIX}/var/log\")
 add_definitions(-DRUNDIR=\"${CMAKE_INSTALL_PREFIX}/run\")
 
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+
 add_executable(udpst udpst.c udpst_control.c udpst_data.c udpst_srates.c)
 target_link_libraries(udpst ${libraries})
 

@@ -46,6 +46,8 @@
  *
  */
 
+#include "config.h"
+
 #define UDPST
 #ifdef __linux__
 #define _GNU_SOURCE
