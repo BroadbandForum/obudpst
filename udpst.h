@@ -77,6 +77,9 @@
 #define DEF_CONTROL_PORT  25000      // Control port
 #define MIN_CONTROL_PORT  0          // (0 = Random UDP ephemeral port)
 #define MAX_CONTROL_PORT  UINT16_MAX //
+#define DEF_BIMODAL_COUNT 0          // Bimodal initial sub-interval count
+#define MIN_BIMODAL_COUNT 1          //
+#define MAX_BIMODAL_COUNT (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
 #define DEF_SOCKET_BUF    1024000    // Socket buffer to request
 #define MIN_SOCKET_BUF    0          // (0 = System default/minimum)
 #define MAX_SOCKET_BUF    16777216   //
@@ -160,6 +163,7 @@ struct configuration {
         BOOL debug;                      // Enable debug messaging
         BOOL showSendingRates;           // Display sending rate table parameters
         BOOL showLossRatio;              // Display loss ratio
+        int bimodalCount;                // Bimodal initial sub-interval count
         BOOL useOwDelVar;                // Use one-way delay instead of RTT
         char authKey[AUTH_KEY_SIZE + 1]; // Authentication key
         int ipTosByte;                   // IP ToS byte for testing
@@ -277,13 +281,14 @@ struct connection {
         struct timespec timer3Thresh; // Third timer threshold
         int (*timer3Action)(int);     // Third action upon expiry
         //
-        struct timespec subIntClock; // Sub-interval clock
-        unsigned int accumTime;      // Accumulated time
-        unsigned int subIntSeqNo;    // Sub-interval sequence number
-        struct subIntStats sisAct;   // Sub-interval active stats
-        struct subIntStats sisSav;   // Sub-interval saved stats
-        struct subIntStats sisMax;   // Sub-interval maximum stats
-        double rateMaxL3;            // Rate maximum at L3
+        struct timespec subIntClock;  // Sub-interval clock
+        unsigned int accumTime;       // Accumulated time
+        unsigned int subIntSeqNo;     // Sub-interval sequence number
+        struct subIntStats sisAct;    // Sub-interval active stats
+        struct subIntStats sisSav;    // Sub-interval saved stats
+        struct subIntStats sisMax[2]; // Sub-interval maximum stats (bimodal)
+        double rateMaxL3;             // Rate maximum at L3
+        int subIntCount;              // Sub-interval count
         //
         unsigned int seqErrLoss; // Loss sum
         unsigned int seqErrOoo;  // Out-of-Order sum

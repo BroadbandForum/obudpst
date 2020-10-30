@@ -43,6 +43,7 @@
  * Len Ciavattone          07/02/2020    Added (HMAC-SHA256) authentication
  * Len Ciavattone          08/04/2020    Rearranged source files
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
+ * Len Ciavattone          10/09/2020    Add parameter for bimodal support
  *
  */
 
@@ -557,7 +558,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsjDSroa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsjDSri:oa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
 
         //
         // Clear configuration and global repository data
@@ -685,6 +686,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                         break;
                 case 'r':
                         conf.showLossRatio = TRUE;
+                        break;
+                case 'i':
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_BIMODAL_COUNT, MAX_BIMODAL_COUNT)) > 0) {
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.bimodalCount = value;
                         break;
                 case 'o':
                         if (repo.isServer) {
@@ -884,6 +893,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                         var = sprintf(scratch,
                                       "       -S           Show server sending rate table and exit\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
+                                      "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"

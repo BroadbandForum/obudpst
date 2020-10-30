@@ -48,6 +48,8 @@
  *                                       to be redefined externally
  * Len Ciavattone          09/18/2020    Use usec instead of ms for delta time
  *                                       values (new protocol version required)
+ * Len Ciavattone          10/09/2020    Add support for bimodal maxima (and
+ *                                       include sub-interval count in output)
  *
  */
 
@@ -1010,7 +1012,7 @@ int proc_subinterval(int connindex, BOOL initialize) {
 //
 int output_currate(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
+        int i, var;
         unsigned int dvmin, dvavg, rttmin;
         double mbps, delivered = 0;
         char connid[8];
@@ -1019,11 +1021,17 @@ int output_currate(int connindex) {
         //
         // Perform rate calculation and check if max rate so far
         //
+        i = 0; // Initialize to single maximum or first bimodal maximum
+        c->subIntCount++;
+        if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount)
+                i++; // Adjust to save as second bimodal maximum
         mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
         if (mbps > c->rateMaxL3) {
-                memcpy(&c->sisMax, &c->sisSav, sizeof(struct subIntStats));
+                memcpy(&c->sisMax[i], &c->sisSav, sizeof(struct subIntStats));
                 c->rateMaxL3 = mbps;
         }
+        if (conf.bimodalCount > 0 && c->subIntCount == conf.bimodalCount)
+                c->rateMaxL3 = 0.0; // Reset for second bimodal maximum
 
         //
         // Output sampled rate info
@@ -1048,15 +1056,28 @@ int output_currate(int connindex) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
         if (!conf.summaryOnly) {
-                var = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
-                strcpy(scratch2, "%sSub-Interval(sec): %2d, ");
+                i = 1; // Determine required width of accumulated time field
+                if (c->testIntTime > 999)
+                        i = 7;
+                else if (c->testIntTime > 99)
+                        i = 5;
+                else if (c->testIntTime > 9)
+                        i = 3;
+                if (c->subIntCount > 999)
+                        i -= 3;
+                else if (c->subIntCount > 99)
+                        i -= 2;
+                else if (c->subIntCount > 9)
+                        i -= 1;
+                strcpy(scratch2, "%sSub-Interval[%d](sec): %*d, "); // Use variable-width accumulated time for text alignment
                 if (!conf.showLossRatio) {
                         strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
                 } else {
                         strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
                 }
-                var = sprintf(scratch, scratch2, connid, var, delivered, c->sisSav.seqErrLoss, c->sisSav.seqErrOoo, dvmin, dvavg,
-                              c->sisSav.delayVarMax, rttmin, c->sisSav.rttMaximum, mbps);
+                var = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
+                var = sprintf(scratch, scratch2, connid, c->subIntCount, i, var, delivered, c->sisSav.seqErrLoss,
+                              c->sisSav.seqErrOoo, dvmin, dvavg, c->sisSav.delayVarMax, rttmin, c->sisSav.rttMaximum, mbps);
                 send_proc(errConn, scratch, var);
         }
 
@@ -1096,8 +1117,8 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8];
-        int var;
+        char *testtype, connid[8], maxtext[24];
+        int i, sibegin, siend, var;
         unsigned int uvar;
         struct testSummary *ts = &c->testSum;
 
@@ -1142,13 +1163,31 @@ int output_maxrate(int connindex) {
         send_proc(errConn, scratch, var);
 
         //
-        // Output rate info
+        // Output rate info for either single maximum or both bimodal maxima
         //
-        strcpy(scratch2, "%s%s Maximum Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-        var = sprintf(scratch, scratch2, connid, testtype, get_rate(connindex, &c->sisMax, L3DG_OVERHEAD),
-                      get_rate(connindex, &c->sisMax, L2DG_OVERHEAD), get_rate(connindex, &c->sisMax, L1DG_OVERHEAD),
-                      get_rate(connindex, &c->sisMax, L0DG_OVERHEAD));
-        send_proc(errConn, scratch, var);
+        sibegin = 1;
+        if (conf.bimodalCount >= c->subIntCount) {
+                siend = c->subIntCount;
+        } else {
+                siend = conf.bimodalCount;
+        }
+        for (i = 0; i < 2; i++) {
+                if (conf.bimodalCount == 0) {
+                        strcpy(maxtext, "Maximum");
+                } else {
+                        sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
+                }
+                strcpy(scratch2, "%s%s %s Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
+                var = sprintf(scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
+                              get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),
+                              get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
+                send_proc(errConn, scratch, var);
+                if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
+                        break; // Either a single maximum or bimodal count exceeds sub-interval count
+
+                sibegin = conf.bimodalCount + 1;
+                siend   = c->subIntCount;
+        }
 
         return 0;
 }
