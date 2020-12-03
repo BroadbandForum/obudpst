@@ -79,7 +79,7 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 
 # Define a library called udpst_core containing all core functionality
 add_library(udpst_core udpst_control.c udpst_data.c udpst_srates.c)
-set(libraries ${libraries} udpst_core)
+set(libraries udpst_core ${libraries})
 
 add_executable(udpst udpst.c)
 target_link_libraries(udpst ${libraries})
