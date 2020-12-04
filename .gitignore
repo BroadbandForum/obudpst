@@ -10,3 +10,4 @@ package
 *.tar
 *.tar.gz
 udpst
+config.h

@@ -62,6 +62,7 @@
 //
 #define DEF_JUMBO_STATUS  TRUE       // Enable/disable jumbo datagram sizes
 #define DEF_USE_OWDELVAR  FALSE      // Use one-way delay instead of RTT
+#define DEF_IGNORE_OOODUP FALSE      // Ignore Out-of-Order/Duplicate datagrams
 #define DEF_IPTOS_BYTE    0          // IP ToS byte for testing
 #define MIN_IPTOS_BYTE    0          //
 #define MAX_IPTOS_BYTE    UINT8_MAX  //
@@ -165,6 +166,7 @@ struct configuration {
         BOOL showLossRatio;              // Display loss ratio
         int bimodalCount;                // Bimodal initial sub-interval count
         BOOL useOwDelVar;                // Use one-way delay instead of RTT
+        BOOL ignoreOooDup;               // Ignore Out-of-Order/Duplicate datagrams
         char authKey[AUTH_KEY_SIZE + 1]; // Authentication key
         int ipTosByte;                   // IP ToS byte for testing
         int srIndexConf;                 // Configured sending rate index
@@ -212,6 +214,7 @@ struct testSummary {
         double deliveredSum;      // Delivered sum
         unsigned int seqErrLoss;  // Loss sum
         unsigned int seqErrOoo;   // Out-of-Order sum
+        unsigned int seqErrDup;   // Duplicate sum
         unsigned int delayVarMin; // Delay variation minimum
         unsigned int delayVarMax; // Delay variation maximum
         unsigned int delayVarSum; // Delay variation sum
@@ -290,8 +293,14 @@ struct connection {
         double rateMaxL3;             // Rate maximum at L3
         int subIntCount;              // Sub-interval count
         //
-        unsigned int seqErrLoss; // Loss sum
-        unsigned int seqErrOoo;  // Out-of-Order sum
+#define LPDU_HISTORY_SIZE 32 // Size must be power of 2
+#define LPDU_HISTORY_MASK (LPDU_HISTORY_SIZE - 1)
+        unsigned int lpduHistBuf[LPDU_HISTORY_SIZE]; // History buffer of last seq numbers
+        unsigned int lpduHistIdx;                    // History buffer index of next seq number
+        BOOL ignoreOooDup;                           // Ignore Out-of-Order/Duplicate datagrams
+        unsigned int seqErrLoss;                     // Loss sum
+        unsigned int seqErrOoo;                      // Out-of-Order sum
+        unsigned int seqErrDup;                      // Duplicate sum
         //
         BOOL useOwDelVar;         // Use one-way delay instead of RTT
         int clockDeltaMin;        // Clock delta minimum
