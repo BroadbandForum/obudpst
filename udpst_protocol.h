@@ -40,7 +40,7 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 6 // Protocol version between client and server
+#define PROTOCOL_VER 8 // Protocol version between client and server
 
 //----------------------------------------------------------------------------
 //
@@ -68,6 +68,7 @@ struct subIntStats {
         uint32_t deltaTime;   // Time delta
         uint32_t seqErrLoss;  // Loss sum
         uint32_t seqErrOoo;   // Out-of-Order sum
+        uint32_t seqErrDup;   // Duplicate sum
         uint32_t delayVarMin; // Delay variation minimum
         uint32_t delayVarMax; // Delay variation maximum
         uint32_t delayVarSum; // Delay variation sum
@@ -139,6 +140,9 @@ struct controlHdrTA {
         uint8_t highSpeedDelta;      // High-speed row adjustment delta
         uint16_t slowAdjThresh;      // Slow rate adjustment threshold
         uint16_t seqErrThresh;       // Sequence error threshold
+        uint8_t ignoreOooDup;        // Ignore Out-of-Order/Duplicate datagrams
+        uint8_t reserved1;           // (Alignment)
+        uint16_t reserved2;          // (Alignment)
         struct sendingRate srStruct; // Sending rate structure
 };
 //----------------------------------------------------------------------------
@@ -180,6 +184,7 @@ struct statusHdr {
         //
         uint32_t seqErrLoss; // Loss sum
         uint32_t seqErrOoo;  // Out-of-Order sum
+        uint32_t seqErrDup;  // Duplicate sum
         //
         uint32_t clockDeltaMin; // Clock delta minimum
         uint32_t delayVarMin;   // Delay variation minimum

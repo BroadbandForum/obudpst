@@ -46,6 +46,11 @@
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
  * Len Ciavattone          09/05/2020    Allow socket_error() & receive_trunc()
  *                                       to be redefined externally
+ * Len Ciavattone          09/18/2020    Use usec instead of ms for delta time
+ *                                       values (new protocol version required)
+ * Len Ciavattone          10/09/2020    Add support for bimodal maxima (and
+ *                                       include sub-interval count in output)
+ * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
  *
  */
 
@@ -114,9 +119,9 @@ extern struct connection *conn;
 #define WARN_REM_STOPPED 3 // Remotely received traffic has stopped
 #define LOSSRATIO_TEXT   "LossRatio: %.2E, "
 #define DELIVERED_TEXT   "Delivered(%%): %6.2f, "
-#define SUMMARY_TEXT     "Loss/OoO: %u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f\n"
+#define SUMMARY_TEXT     "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f\n"
 #define MINIMUM_TEXT     "One-Way Delay(ms): %d [w/clock difference], Round-Trip Time(ms): %u\n"
-#define DEBUG_STATS      "[Loss/OoO: %u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
+#define DEBUG_STATS      "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
 #define CLIENT_DEBUG     "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
 #define SERVER_DEBUG     "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
 #define MINIMUM_DEBUG    "[%d]DEBUG Minimum " MINIMUM_TEXT
@@ -328,7 +333,7 @@ int send_loadpdu(int connindex, int transmitter) {
 //
 int service_loadpdu(int connindex) {
         register struct connection *c = &conn[connindex];
-        int delta, var;
+        int i, delta, var;
         BOOL bvar, firstpdu = FALSE;
         unsigned int uvar, seqno;
         struct loadHdr *lHdr = (struct loadHdr *) repo.defBuffer;
@@ -418,22 +423,63 @@ int service_loadpdu(int connindex) {
         c->tiRxBytes += uvar;
 
         //
-        // Check sequence number for loss or reordering (end processing if reordered)
+        // Check sequence number for loss, also reordering/duplication (end processing if so)
         //
         if (c->lpduSeqNo == 0)
                 firstpdu = TRUE;
+        var   = 0; // Used below for history buffer processing
         seqno = (unsigned int) ntohl(lHdr->lpduSeqNo);
         if (seqno >= c->lpduSeqNo + 1) {
+                //
+                // Sequence number greater than or equal to expected
+                //
                 if (seqno > c->lpduSeqNo + 1) {
-                        uvar = seqno - c->lpduSeqNo - 1;
+                        uvar = seqno - c->lpduSeqNo - 1; // Calculate loss
                         c->seqErrLoss += uvar;
                         c->sisAct.seqErrLoss += (uint32_t) uvar;
                 }
-                c->lpduSeqNo = seqno;
+                c->lpduSeqNo = seqno; // Update for next expected
         } else {
-                c->seqErrOoo++;
-                c->sisAct.seqErrOoo++;
-                return 0; // No further processing for reordered PDUs
+                //
+                // Sequence number less than expected, check history buffer
+                //
+                for (i = 0; i < LPDU_HISTORY_SIZE; i++) {
+                        if (seqno == c->lpduHistBuf[i])
+                                break;
+                }
+                if (i < LPDU_HISTORY_SIZE) {
+                        //
+                        // Sequence number in history buffer, increment duplicate count
+                        //
+                        c->seqErrDup++;
+                        c->sisAct.seqErrDup++;
+                        var = 2; // Skip history buffer insertion as well as subsequent processing
+                } else {
+                        //
+                        // Sequence number NOT in history buffer, increment out-of-order count
+                        //
+                        c->seqErrOoo++;
+                        c->sisAct.seqErrOoo++;
+                        var = 1; // Skip subsequent processing
+
+                        //
+                        // Correct previous loss count that resulted from this "late" datagram
+                        //
+                        // NOTE: If this datagram arrives after either of these have been cleared (because they were just sent
+                        // in a status feedback message), the previous trial or sub-interval will still show the loss.
+                        //
+                        if (c->seqErrLoss > 0)
+                                c->seqErrLoss--;
+                        if (c->sisAct.seqErrLoss > 0)
+                                c->sisAct.seqErrLoss--;
+                }
+        }
+        if (var < 2) {
+                c->lpduHistBuf[c->lpduHistIdx] = seqno;                                // Save sequence number in history buffer
+                c->lpduHistIdx                 = ++c->lpduHistIdx & LPDU_HISTORY_MASK; // Update history buffer index
+        }
+        if (var > 0) {
+                return 0; // No further processing for non-increasing sequence numbers
         }
 
         //
@@ -601,10 +647,11 @@ int send_statuspdu(int connindex) {
         sis_copy(&c->sisSav, &sHdr->sisSav, TRUE);
 
         //
-        // Include sequence error loss and out-of-order stats
+        // Include sequence error loss, out-of-order, and duplicate stats
         //
         sHdr->seqErrLoss = htonl((uint32_t) c->seqErrLoss);
         sHdr->seqErrOoo  = htonl((uint32_t) c->seqErrOoo);
+        sHdr->seqErrDup  = htonl((uint32_t) c->seqErrDup);
 
         //
         // Include delay info
@@ -624,7 +671,7 @@ int send_statuspdu(int connindex) {
         // Include trial interval info
         //
         tspecminus(&repo.systemClock, &c->trialIntClock, &tspecvar);
-        c->tiDeltaTime      = (unsigned int) tspecmsec(&tspecvar);
+        c->tiDeltaTime      = (unsigned int) tspecusec(&tspecvar);
         sHdr->tiDeltaTime   = htonl((uint32_t) c->tiDeltaTime);
         sHdr->tiRxDatagrams = htonl((uint32_t) c->tiRxDatagrams);
         sHdr->tiRxBytes     = htonl((uint32_t) c->tiRxBytes);
@@ -651,8 +698,8 @@ int send_statuspdu(int connindex) {
                         var = -1;
                         if (c->rttSample != INITIAL_MIN_DELAY)
                                 var = (int) c->rttSample;
-                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, dvmin, dvavg, c->delayVarMax,
-                                      var, get_rate(connindex, NULL, L3DG_OVERHEAD));
+                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
+                                      c->delayVarMax, var, get_rate(connindex, NULL, L3DG_OVERHEAD));
                         send_proc(monConn, scratch, var);
                 }
         }
@@ -661,6 +708,7 @@ int send_statuspdu(int connindex) {
         //
         c->seqErrLoss = 0;
         c->seqErrOoo  = 0;
+        c->seqErrDup  = 0;
         // Do not clear clock delta minimum
         c->delayVarMin = INITIAL_MIN_DELAY;
         c->delayVarMax = 0;
@@ -794,10 +842,11 @@ int service_statuspdu(int connindex) {
         }
 
         //
-        // Save sequence error loss and out-of-order stats
+        // Save sequence error loss, out-of-order, and duplicate stats
         //
         c->seqErrLoss = (unsigned int) ntohl(sHdr->seqErrLoss);
         c->seqErrOoo  = (unsigned int) ntohl(sHdr->seqErrOoo);
+        c->seqErrDup  = (unsigned int) ntohl(sHdr->seqErrDup);
 
         //
         // Save delay info
@@ -845,8 +894,8 @@ int service_statuspdu(int connindex) {
                         var = -1;
                         if (c->rttSample != INITIAL_MIN_DELAY)
                                 var = (int) c->rttSample;
-                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, dvmin, dvavg, c->delayVarMax,
-                                      var, get_rate(connindex, NULL, L3DG_OVERHEAD));
+                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
+                                      c->delayVarMax, var, get_rate(connindex, NULL, L3DG_OVERHEAD));
                         send_proc(monConn, scratch, var);
                 }
         } else {
@@ -885,8 +934,11 @@ int adjust_sending_rate(int connindex) {
         //
         // Select algorithm parameters
         //
-        seqerr = (int) (c->seqErrLoss + c->seqErrOoo);
-        delay  = c->lowThresh; // Default to 'no change' if data not available
+        seqerr = (int) c->seqErrLoss;
+        if (!c->ignoreOooDup) {
+                seqerr += (int) (c->seqErrOoo + c->seqErrDup);
+        }
+        delay = c->lowThresh; // Default to 'no change' if data not available
         dvmin = dvavg = 0;
         if (c->delayVarCnt > 0) {
                 dvmin = c->delayVarMin;
@@ -944,8 +996,8 @@ int adjust_sending_rate(int connindex) {
                 var = -1;
                 if (c->rttSample != INITIAL_MIN_DELAY)
                         var = (int) c->rttSample;
-                var = sprintf(scratch, SERVER_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, dvmin, dvavg, c->delayVarMax, var,
-                              c->srIndex);
+                var = sprintf(scratch, SERVER_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
+                              c->delayVarMax, var, c->srIndex);
                 send_proc(monConn, scratch, var);
         }
         return 0;
@@ -980,8 +1032,8 @@ int proc_subinterval(int connindex, BOOL initialize) {
         //
         c->subIntSeqNo++; // Indicate updated stats
         tspecminus(&repo.systemClock, &c->subIntClock, &tspecvar);
-        c->sisAct.deltaTime = (uint32_t) tspecmsec(&tspecvar); // Measured sub-interval time
-        c->accumTime += (unsigned int) c->sisAct.deltaTime;
+        c->sisAct.deltaTime = (uint32_t) tspecusec(&tspecvar); // Measured sub-interval time
+        c->accumTime += (unsigned int) tspecmsec(&tspecvar);
         c->sisAct.accumTime = (uint32_t) c->accumTime;
         memcpy(&c->sisSav, &c->sisAct, sizeof(struct subIntStats));
 
@@ -1008,7 +1060,7 @@ int proc_subinterval(int connindex, BOOL initialize) {
 //
 int output_currate(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
+        int i, var;
         unsigned int dvmin, dvavg, rttmin;
         double mbps, delivered = 0;
         char connid[8];
@@ -1017,11 +1069,17 @@ int output_currate(int connindex) {
         //
         // Perform rate calculation and check if max rate so far
         //
+        i = 0; // Initialize to single maximum or first bimodal maximum
+        c->subIntCount++;
+        if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount)
+                i++; // Adjust to save as second bimodal maximum
         mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
         if (mbps > c->rateMaxL3) {
-                memcpy(&c->sisMax, &c->sisSav, sizeof(struct subIntStats));
+                memcpy(&c->sisMax[i], &c->sisSav, sizeof(struct subIntStats));
                 c->rateMaxL3 = mbps;
         }
+        if (conf.bimodalCount > 0 && c->subIntCount == conf.bimodalCount)
+                c->rateMaxL3 = 0.0; // Reset for second bimodal maximum
 
         //
         // Output sampled rate info
@@ -1046,15 +1104,29 @@ int output_currate(int connindex) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
         if (!conf.summaryOnly) {
-                var = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
-                strcpy(scratch2, "%sSub-Interval(sec): %2d, ");
+                i = 1; // Determine required width of accumulated time field
+                if (c->testIntTime > 999)
+                        i = 7;
+                else if (c->testIntTime > 99)
+                        i = 5;
+                else if (c->testIntTime > 9)
+                        i = 3;
+                if (c->subIntCount > 999)
+                        i -= 3;
+                else if (c->subIntCount > 99)
+                        i -= 2;
+                else if (c->subIntCount > 9)
+                        i -= 1;
+                strcpy(scratch2, "%sSub-Interval[%d](sec): %*d, "); // Use variable-width accumulated time for text alignment
                 if (!conf.showLossRatio) {
                         strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
                 } else {
                         strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
                 }
-                var = sprintf(scratch, scratch2, connid, var, delivered, c->sisSav.seqErrLoss, c->sisSav.seqErrOoo, dvmin, dvavg,
-                              c->sisSav.delayVarMax, rttmin, c->sisSav.rttMaximum, mbps);
+                var = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
+                var =
+                    sprintf(scratch, scratch2, connid, c->subIntCount, i, var, delivered, c->sisSav.seqErrLoss, c->sisSav.seqErrOoo,
+                            c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin, c->sisSav.rttMaximum, mbps);
                 send_proc(errConn, scratch, var);
         }
 
@@ -1083,6 +1155,7 @@ int output_currate(int connindex) {
         ts->deliveredSum += delivered;
         ts->seqErrLoss += (unsigned int) c->sisSav.seqErrLoss;
         ts->seqErrOoo += (unsigned int) c->sisSav.seqErrOoo;
+        ts->seqErrDup += (unsigned int) c->sisSav.seqErrDup;
         ts->rateSumL3 += (double) mbps;
         ts->sampleCount++;
 
@@ -1094,8 +1167,8 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8];
-        int var;
+        char *testtype, connid[8], maxtext[24];
+        int i, sibegin, siend, var;
         unsigned int uvar;
         struct testSummary *ts = &c->testSum;
 
@@ -1125,8 +1198,8 @@ int output_maxrate(int connindex) {
         } else {
                 strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
         }
-        var = sprintf(scratch, scratch2, connid, testtype, ts->deliveredSum, ts->seqErrLoss, ts->seqErrOoo, ts->delayVarMin,
-                      ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
+        var = sprintf(scratch, scratch2, connid, testtype, ts->deliveredSum, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
+                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
         send_proc(errConn, scratch, var);
 
         //
@@ -1140,13 +1213,31 @@ int output_maxrate(int connindex) {
         send_proc(errConn, scratch, var);
 
         //
-        // Output rate info
+        // Output rate info for either single maximum or both bimodal maxima
         //
-        strcpy(scratch2, "%s%s Maximum Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-        var = sprintf(scratch, scratch2, connid, testtype, get_rate(connindex, &c->sisMax, L3DG_OVERHEAD),
-                      get_rate(connindex, &c->sisMax, L2DG_OVERHEAD), get_rate(connindex, &c->sisMax, L1DG_OVERHEAD),
-                      get_rate(connindex, &c->sisMax, L0DG_OVERHEAD));
-        send_proc(errConn, scratch, var);
+        sibegin = 1;
+        if (conf.bimodalCount >= c->subIntCount) {
+                siend = c->subIntCount;
+        } else {
+                siend = conf.bimodalCount;
+        }
+        for (i = 0; i < 2; i++) {
+                if (conf.bimodalCount == 0) {
+                        strcpy(maxtext, "Maximum");
+                } else {
+                        sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
+                }
+                strcpy(scratch2, "%s%s %s Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
+                var = sprintf(scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
+                              get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),
+                              get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
+                send_proc(errConn, scratch, var);
+                if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
+                        break; // Either a single maximum or bimodal count exceeds sub-interval count
+
+                sibegin = conf.bimodalCount + 1;
+                siend   = c->subIntCount;
+        }
 
         return 0;
 }
@@ -1175,9 +1266,8 @@ double get_rate(int connindex, struct subIntStats *sis, int overhead) {
                 mbps = (double) dgrams;
                 mbps *= (double) overhead;
                 mbps += (double) bytes;
+                mbps *= 8.0;
                 mbps /= (double) delta;
-                mbps *= 8;
-                mbps /= 1000;
         }
         return mbps;
 }
@@ -1301,6 +1391,7 @@ int send_proc(int connindex, char *sendbuffer, int sendsize) {
 
         //
         // Recycle log file if growth size exceeded
+        //
         // NOTE: If file operations fail there is no device to send error messages to
         //
         if (c->type == T_LOG) {
@@ -1385,6 +1476,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sisnet->deltaTime   = htonl(sishost->deltaTime);
                 sisnet->seqErrLoss  = htonl(sishost->seqErrLoss);
                 sisnet->seqErrOoo   = htonl(sishost->seqErrOoo);
+                sisnet->seqErrDup   = htonl(sishost->seqErrDup);
                 sisnet->delayVarMin = htonl(sishost->delayVarMin);
                 sisnet->delayVarMax = htonl(sishost->delayVarMax);
                 sisnet->delayVarSum = htonl(sishost->delayVarSum);
@@ -1398,6 +1490,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sishost->deltaTime   = ntohl(sisnet->deltaTime);
                 sishost->seqErrLoss  = ntohl(sisnet->seqErrLoss);
                 sishost->seqErrOoo   = ntohl(sisnet->seqErrOoo);
+                sishost->seqErrDup   = ntohl(sisnet->seqErrDup);
                 sishost->delayVarMin = ntohl(sisnet->delayVarMin);
                 sishost->delayVarMax = ntohl(sisnet->delayVarMax);
                 sishost->delayVarSum = ntohl(sisnet->delayVarSum);

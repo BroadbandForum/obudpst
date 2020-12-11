@@ -44,6 +44,7 @@
  * Len Ciavattone          07/02/2020    Added (HMAC-SHA256) authentication
  * Len Ciavattone          08/04/2020    Rearranged source files
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
+ * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
  *
  */
 
@@ -96,13 +97,15 @@ extern char scratch[STRING_SIZE];
 extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
+extern char *boolText[];
 
 //----------------------------------------------------------------------------
 //
 // Global data
 //
-#define SRAUTO_TEXT   "<Auto>"
-#define TESTHDR_LINE1 "%s%s Test Interval(sec): %d, DelayVar Thresholds(ms): %d-%d [%s], Trial Interval(ms): %d,\n"
+#define SRAUTO_TEXT "<Auto>"
+#define TESTHDR_LINE1 \
+        "%s%s Test Interval(sec): %d, DelayVar Thresholds(ms): %d-%d [%s], Trial Interval(ms): %d, Ignore OoO/Dup: %s,\n"
 #define TESTHDR_LINE2 "    SendingRate Index: %s, Congestion Threshold: %d, High-Speed Delta: %d, SeqError Threshold: %d, "
 static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d\n";
 static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d\n";
@@ -520,6 +523,8 @@ int service_setupresp(int connindex) {
         cHdrTA->slowAdjThresh  = htons((uint16_t) c->slowAdjThresh);
         c->seqErrThresh        = conf.seqErrThresh;
         cHdrTA->seqErrThresh   = htons((uint16_t) c->seqErrThresh);
+        c->ignoreOooDup        = (BOOL) conf.ignoreOooDup;
+        cHdrTA->ignoreOooDup   = (uint8_t) c->ignoreOooDup;
 
         //
         // Send test activation request
@@ -705,6 +710,14 @@ int service_actreq(int connindex) {
                 cHdrTA->seqErrThresh = htons((uint16_t) c->seqErrThresh);
         }
         //
+        // Ignore Out-of-Order/Duplicate flag
+        //
+        c->ignoreOooDup = (BOOL) cHdrTA->ignoreOooDup;
+        if (c->ignoreOooDup != TRUE && c->ignoreOooDup != FALSE) { // Enforce C boolean
+                c->ignoreOooDup      = DEF_IGNORE_OOODUP;
+                cHdrTA->ignoreOooDup = (uint8_t) c->ignoreOooDup;
+        }
+        //
         // If upstream test, send back sending rate parameters from first row of table
         //
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
@@ -809,8 +822,9 @@ int service_actreq(int connindex) {
                         strcpy(sritext, SRAUTO_TEXT);
                 else
                         sprintf(sritext, "%d", c->srIndexConf);
-                var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                              c->trialInt, sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+                var =
+                    sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
+                            boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
                 send_proc(errConn, scratch, var);
         }
 
@@ -901,6 +915,7 @@ int service_actresp(int connindex) {
         c->highSpeedDelta = (int) cHdrTA->highSpeedDelta;
         c->slowAdjThresh  = (int) ntohs(cHdrTA->slowAdjThresh);
         c->seqErrThresh   = (int) ntohs(cHdrTA->seqErrThresh);
+        c->ignoreOooDup   = (BOOL) cHdrTA->ignoreOooDup;
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
                 // If upstream test, save sending rate parameters sent by server
                 sr_copy(sr, &cHdrTA->srStruct, FALSE);
@@ -972,8 +987,9 @@ int service_actresp(int connindex) {
                         strcpy(sritext, SRAUTO_TEXT);
                 else
                         sprintf(sritext, "%d", c->srIndexConf);
-                var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                              c->trialInt, sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+                var =
+                    sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
+                            boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
                 send_proc(errConn, scratch, var);
         }
 

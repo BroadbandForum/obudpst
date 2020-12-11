@@ -2,19 +2,24 @@
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to
 demonstrate one approach of doing IP capacity measurements as described by:
 
-- Broadband Forum TR-471 - Maximum IP-Layer Capacity Metric, Related Metrics,
-  and Measurements
+- Broadband Forum TR-471 (07/2020): _Maximum IP-Layer Capacity Metric, Related Metrics, and Measurements_,
+BBF TR-471, https://www.broadband-forum.org/technical/download/TR-471.pdf
 
-- ITU-T Y.1540-2019 - Internet protocol data communication service - IP packet 
-  transfer and availability performance parameters 
+- ITU-T Recommendation Y.1540 (12/2019): _Internet protocol data communication service - IP packet transfer and availability performance parameters_, 
+ITU-T Y.1540, https://www.itu.int/rec/T-REC-Y.1540-201912-I/en 
    
-- ITU-T Y-series - Supplement on Interpreting Y.1540 Maximum IP-Layer Capacity
-  Measurements, SG 12
+- ITU-T Y-series Supplement 60 (2020): _Interpreting ITU-T Y.1540 maximum IP-layer capacity measurements_, 
+ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
 
-- ETSI TC STQ - TS 103 222 Part 2 on High Speed Internet KPIs
+- ETSI Technical Specification 103 222 Part 2 (08/2019): _Reference benchmarking and KPIs for High speed internet_, 
+ETSI TS 103 222-2, V.1.2.1, https://www.etsi.org/deliver/etsi_ts/103200_103299/10322202/01.02.01_60/ts_10322202v010201p.pdf
 
-- IETF IPPM Internet Draft - Metrics and Methods for IP Capacity
-  (work-in-progress)
+- IETF IPPM Internet Draft (work-in-progress): _Metrics and Methods for One-way IP Capacity_, 
+https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-metric-method/
+
+- ETSI Technical Report  103 702 (2020-10): _Speech and multimedia Transmission Quality (STQ); 
+QoS parameters and test scenarios for assessing network capabilities in 5G performance measurements_,
+ETSI TR 103 702, V.0.1.0 https://www.etsi.org/deliver/etsi_tr/103700_103799/103702/01.01.01_60/tr_103702v010101p.pdf
 
 
 ## Overview
@@ -107,6 +112,11 @@ $ udpst -?
 ```
 
 ## Building OB-UDPST
+
+To build OB-UDPST a local installation of CMake is required. Please obtain them
+for your particular build system either using the locally available packages or
+consult with [https://cmake.org] for other download options.
+
 ```
 $ make
 ```

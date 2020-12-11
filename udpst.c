@@ -43,8 +43,12 @@
  * Len Ciavattone          07/02/2020    Added (HMAC-SHA256) authentication
  * Len Ciavattone          08/04/2020    Rearranged source files
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
+ * Len Ciavattone          10/09/2020    Add parameter for bimodal support
+ * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
  *
  */
+
+#include "config.h"
 
 #define UDPST
 #ifdef __linux__
@@ -100,7 +104,7 @@ struct repository repo;                    // Repository of global data
 struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
-static char *boolText[]               = {"Disabled", "Enabled"};
+char *boolText[]                      = {"Disabled", "Enabled"};
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -555,7 +559,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsjDSroa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsjDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
 
         //
         // Clear configuration and global repository data
@@ -608,10 +612,11 @@ int proc_parameters(int argc, char **argv, int fd) {
         //
         // Continue to initialize non-zero configuration data
         //
-        conf.addrFamily  = AF_UNSPEC;
-        conf.errSuppress = TRUE;
-        conf.jumboStatus = DEF_JUMBO_STATUS;
-        conf.useOwDelVar = DEF_USE_OWDELVAR;
+        conf.addrFamily   = AF_UNSPEC;
+        conf.errSuppress  = TRUE;
+        conf.jumboStatus  = DEF_JUMBO_STATUS;
+        conf.useOwDelVar  = DEF_USE_OWDELVAR;
+        conf.ignoreOooDup = DEF_IGNORE_OOODUP;
         if (!repo.isServer) {
                 // Default values
                 conf.ipTosByte   = DEF_IPTOS_BYTE;
@@ -684,6 +689,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 'r':
                         conf.showLossRatio = TRUE;
                         break;
+                case 'i':
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_BIMODAL_COUNT, MAX_BIMODAL_COUNT)) > 0) {
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.bimodalCount = value;
+                        break;
                 case 'o':
                         if (repo.isServer) {
                                 var = sprintf(scratch, "ERROR: One-Way Delay option only set by client\n");
@@ -691,6 +704,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 return -1;
                         }
                         conf.useOwDelVar = !DEF_USE_OWDELVAR; // Not the default
+                        break;
+                case 'R':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Option to ignore Out-of-Order/Duplicates only set by client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.ignoreOooDup = !DEF_IGNORE_OOODUP; // Not the default
                         break;
                 case 'a':
 #ifdef AUTH_KEY_ENABLE
@@ -882,7 +903,9 @@ int proc_parameters(int argc, char **argv, int fd) {
                         var = sprintf(scratch,
                                       "       -S           Show server sending rate table and exit\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
+                                      "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
+                                      "(c)    -R           Ignore Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"
                                       "(m)    -I index     Index for static sending rate (see '-S') [Default <Auto>]\n"
