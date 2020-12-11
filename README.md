@@ -19,7 +19,7 @@ https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-metric-method/
 
 - ETSI Technical Report  103 702 (2020-10): _Speech and multimedia Transmission Quality (STQ); 
 QoS parameters and test scenarios for assessing network capabilities in 5G performance measurements_,
-ETSI TR 103 702, V.0.1.0 (URL available shortly).
+ETSI TR 103 702, V.0.1.0 https://www.etsi.org/deliver/etsi_tr/103700_103799/103702/01.01.01_60/tr_103702v010101p.pdf
 
 
 ## Overview
