@@ -35,6 +35,9 @@
  *
  */
 
+#ifndef UDPST_CONTROL_H
+#define UDPST_CONTROL_H
+
 extern void init_conn(int, BOOL);
 extern int null_action(int);
 extern int send_setupreq(int);
@@ -42,3 +45,5 @@ extern int service_setupreq(int);
 extern int service_setupresp(int);
 extern int sock_mgmt(int, char *, int, char *, int);
 extern int new_conn(int, char *, int, int, int (*)(int), int (*)(int));
+
+#endif /* UDPST_CONTROL_H */

@@ -35,5 +35,10 @@
  *
  */
 
+#ifndef UDPST_SRATES_H
+#define UDPST_SRATES_H
+
 extern int def_sending_rates(void);
 extern void show_sending_rates(int);
+
+#endif /* UDPST_SRATES_H */

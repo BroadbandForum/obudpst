@@ -35,6 +35,9 @@
  *
  */
 
+#ifndef UDPST_COMMON_H
+#define UDPST_COMMON_H
+
 //----------------------------------------------------------------------------
 //
 // Common
@@ -113,3 +116,5 @@ typedef int BOOL;
 #define tspecisset(tsp) ((tsp)->tv_sec || (tsp)->tv_nsec)
 #define tspecclear(tsp) ((tsp)->tv_sec = (tsp)->tv_nsec = 0)
 //----------------------------------------------------------------------------
+
+#endif /* UDPST_COMMON_H */
