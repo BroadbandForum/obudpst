@@ -131,6 +131,78 @@ static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 // Function definitions
 //----------------------------------------------------------------------------
 //
+// Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
+//
+static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        static struct mmsghdr mmsg[MAX_BURST_SIZE]; // Static array
+        static struct iovec iov[MAX_BURST_SIZE];    // Static array
+        struct connection *c = &conn[connindex];
+        unsigned int uvar;
+        char *nextsndbuf;
+        int i, var;
+
+        memset(mmsg, 0, totalburst * sizeof(struct mmsghdr));
+        nextsndbuf = repo.sndBuffer;
+        for (i = 0; i < totalburst; i++) {
+                struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
+                if (i == 0) {
+                        lHdr->loadId     = htons(LOAD_ID);
+                        lHdr->testAction = (uint8_t) c->testAction;
+                        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
+                        // lpduSeqNo set below
+                        // udpPayload set below
+                        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
+                        //
+                        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
+                        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
+                        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
+                        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
+                } else {
+                        //
+                        // Replicate static fields of first datagram
+                        //
+                        memcpy((void *) lHdr, repo.sndBuffer, sizeof(struct loadHdr));
+                }
+                lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
+                if (i < burstsize)
+                        uvar = payload;
+                else
+                        uvar = addon;
+                lHdr->udpPayload = htons((uint16_t) uvar);
+
+                //
+                // Setup corresponding message structure
+                //
+                iov[i].iov_base            = (void *) lHdr;
+                iov[i].iov_len             = (size_t) uvar;
+                mmsg[i].msg_hdr.msg_iov    = &iov[i];
+                mmsg[i].msg_hdr.msg_iovlen = 1;
+                nextsndbuf += payload;
+        }
+
+        //
+        // Send complete burst with single system call
+        //
+        // NOTE: Certain error conditions are expected when overloading an interface
+        //
+        var = sendmmsg(c->fd, mmsg, totalburst, 0);
+        if (!conf.errSuppress) {
+                if (var < 0) {
+                        //
+                        // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
+                        //
+                        if ((var = socket_error(connindex, errno, "SENDMMSG")) > 0)
+                                send_proc(errConn, scratch, var);
+                } else if (var < totalburst) {
+                        //
+                        // Not all messages sent indicates the send buffer is full
+                        //
+                        var = sprintf(scratch, "[%d]SENDMMSG INCOMPLETE: Only %d out of %d sent\n", connindex, var, totalburst);
+                        send_proc(errConn, scratch, var);
+                }
+        }
+}
+
 // Send load PDUs via periodic timers for transmitters 1 & 2
 //
 int send1_loadpdu(int connindex) {
@@ -141,14 +213,10 @@ int send2_loadpdu(int connindex) {
 }
 int send_loadpdu(int connindex, int transmitter) {
         register struct connection *c = &conn[connindex];
-        int i, var, burstsize, totalburst, txintpri, txintalt;
-        char *nextsndbuf;
-        unsigned int uvar, payload, addon;
+        int burstsize, totalburst, txintpri, txintalt;
+        unsigned int payload, addon;
         struct timespec tspecvar, *tspecpri, *tspecalt;
-        struct loadHdr *lHdr;
         struct sendingRate *sr;
-        static struct mmsghdr mmsg[MAX_BURST_SIZE]; // Static array
-        static struct iovec iov[MAX_BURST_SIZE];    // Static array
 
         //
         // Select sending rate source
@@ -186,7 +254,7 @@ int send_loadpdu(int connindex, int transmitter) {
                 burstsize = 1; // Reduce load w/min burst size
                 if (repo.isServer) {
                         if (monConn >= 0 && c->testAction == TEST_ACT_STOP1) {
-                                var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
+                                int var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
                                 send_proc(monConn, scratch, var);
                         }
                         c->testAction = TEST_ACT_STOP2; // Second phase of test stop
@@ -265,66 +333,8 @@ int send_loadpdu(int connindex, int transmitter) {
         totalburst = burstsize;
         if (addon > 0)
                 totalburst++;
-        memset(mmsg, 0, totalburst * sizeof(struct mmsghdr));
-        nextsndbuf = repo.sndBuffer;
-        for (i = 0; i < totalburst; i++) {
-                lHdr = (struct loadHdr *) nextsndbuf;
-                if (i == 0) {
-                        lHdr->loadId     = htons(LOAD_ID);
-                        lHdr->testAction = (uint8_t) c->testAction;
-                        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
-                        // lpduSeqNo set below
-                        // udpPayload set below
-                        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
-                        //
-                        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
-                        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
-                        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
-                        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
-                } else {
-                        //
-                        // Replicate static fields of first datagram
-                        //
-                        memcpy((void *) lHdr, repo.sndBuffer, sizeof(struct loadHdr));
-                }
-                lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
-                if (i < burstsize)
-                        uvar = payload;
-                else
-                        uvar = addon;
-                lHdr->udpPayload = htons((uint16_t) uvar);
 
-                //
-                // Setup corresponding message structure
-                //
-                iov[i].iov_base            = (void *) lHdr;
-                iov[i].iov_len             = (size_t) uvar;
-                mmsg[i].msg_hdr.msg_iov    = &iov[i];
-                mmsg[i].msg_hdr.msg_iovlen = 1;
-                nextsndbuf += payload;
-        }
-
-        //
-        // Send complete burst with single system call
-        //
-        // NOTE: Certain error conditions are expected when overloading an interface
-        //
-        var = sendmmsg(c->fd, mmsg, totalburst, 0);
-        if (!conf.errSuppress) {
-                if (var < 0) {
-                        //
-                        // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
-                        //
-                        if ((var = socket_error(connindex, errno, "SENDMMSG")) > 0)
-                                send_proc(errConn, scratch, var);
-                } else if (var < totalburst) {
-                        //
-                        // Not all messages sent indicates the send buffer is full
-                        //
-                        var = sprintf(scratch, "[%d]SENDMMSG INCOMPLETE: Only %d out of %d sent\n", connindex, var, totalburst);
-                        send_proc(errConn, scratch, var);
-                }
-        }
+        _sendmmsg_burst(connindex, totalburst, burstsize, payload, addon);
         return 0;
 }
 //----------------------------------------------------------------------------
