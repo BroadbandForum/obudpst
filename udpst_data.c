@@ -51,6 +51,7 @@
  * Len Ciavattone          10/09/2020    Add support for bimodal maxima (and
  *                                       include sub-interval count in output)
  * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
+ * Daniel Egger            02/22/2021    Add sendmsg support
  *
  */
 
@@ -199,6 +200,67 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                         //
                         var = sprintf(scratch, "[%d]SENDMMSG INCOMPLETE: Only %d out of %d sent\n", connindex, var, totalburst);
                         send_proc(errConn, scratch, var);
+                }
+        }
+}
+
+//
+// Send a burst of messages using the slower but more widely available sendmsg syscall
+//
+static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        static struct msghdr msg; // Static array
+        static struct iovec iov;    // Static array
+        struct connection *c = &conn[connindex];
+        unsigned int uvar;
+        char *nextsndbuf;
+        int i, var;
+
+        memset((void *)&msg, 0, sizeof(struct msghdr));
+        nextsndbuf = repo.sndBuffer;
+        for (i = 0; i < totalburst; i++) {
+                struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
+                if (i == 0) {
+                        lHdr->loadId     = htons(LOAD_ID);
+                        lHdr->testAction = (uint8_t) c->testAction;
+                        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
+                        // lpduSeqNo set below
+                        // udpPayload set below
+                        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
+                        //
+                        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
+                        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
+                        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
+                        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
+                }
+                lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
+                if (i < burstsize)
+                        uvar = payload;
+                else
+                        uvar = addon;
+                lHdr->udpPayload = htons((uint16_t) uvar);
+
+                //
+                // Setup corresponding message structure
+                //
+                iov.iov_base            = (void *) lHdr;
+                iov.iov_len             = (size_t) uvar;
+                msg.msg_iov    = &iov;
+                msg.msg_iovlen = 1;
+
+                //
+                // Send a single message of our burst with a system call
+                //
+                // NOTE: Certain error conditions are expected when overloading an interface
+                //
+                var = sendmsg(c->fd, &msg, 0);
+                if (!conf.errSuppress) {
+                        if (var < 0) {
+                                //
+                                // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
+                                //
+                                if ((var = socket_error(connindex, errno, "SENDMMSG")) > 0)
+                                        send_proc(errConn, scratch, var);
+                        }
                 }
         }
 }
