@@ -185,9 +185,14 @@ int main(int argc, char **argv) {
         else
                 var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
 #ifdef AUTH_KEY_ENABLE
-        var += sprintf(&scratch[var], ", Authentication: Available\n");
+        var += sprintf(&scratch[var], ", Authentication: Available");
 #else
-        var += sprintf(&scratch[var], ", Authentication: Unavailable\n");
+        var += sprintf(&scratch[var], ", Authentication: Unavailable");
+#endif
+#ifdef HAVE_SENDMMSG
+        var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
+#else
+        var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
 #endif
         var = write(outputfd, scratch, var);
 

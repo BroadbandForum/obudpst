@@ -55,6 +55,8 @@
  *
  */
 
+#include "config.h"
+
 #define UDPST_DATA
 #ifdef __linux__
 #define _GNU_SOURCE
@@ -131,6 +133,7 @@ static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 //----------------------------------------------------------------------------
 // Function definitions
 //----------------------------------------------------------------------------
+#if defined (HAVE_SENDMMSG)
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
 //
@@ -203,6 +206,7 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 }
         }
 }
+#endif /* HAVE_SENDMMSG */
 
 //
 // Send a burst of messages using the slower but more widely available sendmsg syscall
@@ -396,7 +400,12 @@ int send_loadpdu(int connindex, int transmitter) {
         if (addon > 0)
                 totalburst++;
 
+#if defined (HAVE_SENDMMSG)
         _sendmmsg_burst(connindex, totalburst, burstsize, payload, addon);
+#else
+        _sendmsg_burst(connindex, totalburst, burstsize, payload, addon);
+#endif /* HAVE_SENDMMSG */
+
         return 0;
 }
 //----------------------------------------------------------------------------
