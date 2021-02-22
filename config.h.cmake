@@ -13,5 +13,6 @@
 #cmakedefine HAVE_SYSINFO_H
 #cmakedefine HAVE_TIMEGM
 #cmakedefine HAVE_WORKING_FORK
+#cmakedefine HAVE_SENDMMSG
 
 #endif /* CONFIG_H */
