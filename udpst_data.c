@@ -133,6 +133,24 @@ static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 //----------------------------------------------------------------------------
 // Function definitions
 //----------------------------------------------------------------------------
+//
+// Populate the static part of the our message header
+//
+static void _populate_header (struct loadHdr *lHdr, struct connection *c)
+{
+        lHdr->loadId     = htons(LOAD_ID);
+        lHdr->testAction = (uint8_t) c->testAction;
+        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
+        // lpduSeqNo populated by the send function
+        // udpPayload populated by the send function
+        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
+        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
+        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
+        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
+        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
+}
+
+
 #if defined (HAVE_SENDMMSG)
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
@@ -149,24 +167,7 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
         nextsndbuf = repo.sndBuffer;
         for (i = 0; i < totalburst; i++) {
                 struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
-                if (i == 0) {
-                        lHdr->loadId     = htons(LOAD_ID);
-                        lHdr->testAction = (uint8_t) c->testAction;
-                        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
-                        // lpduSeqNo set below
-                        // udpPayload set below
-                        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
-                        //
-                        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
-                        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
-                        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
-                        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
-                } else {
-                        //
-                        // Replicate static fields of first datagram
-                        //
-                        memcpy((void *) lHdr, repo.sndBuffer, sizeof(struct loadHdr));
-                }
+                _populate_header(lHdr, c);
                 lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
                 if (i < burstsize)
                         uvar = payload;
@@ -212,30 +213,18 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
 // Send a burst of messages using the slower but more widely available sendmsg syscall
 //
 static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
-        static struct msghdr msg; // Static array
-        static struct iovec iov;    // Static array
+        struct msghdr msg;
+        struct iovec iov;
         struct connection *c = &conn[connindex];
         unsigned int uvar;
-        char *nextsndbuf;
-        int i, var;
+        int i;
+        struct loadHdr *lHdr = (struct loadHdr *) repo.sndBuffer;
 
         memset((void *)&msg, 0, sizeof(struct msghdr));
-        nextsndbuf = repo.sndBuffer;
+        _populate_header(lHdr, c);
+
         for (i = 0; i < totalburst; i++) {
-                struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
-                if (i == 0) {
-                        lHdr->loadId     = htons(LOAD_ID);
-                        lHdr->testAction = (uint8_t) c->testAction;
-                        lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
-                        // lpduSeqNo set below
-                        // udpPayload set below
-                        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
-                        //
-                        lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
-                        lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
-                        lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
-                        lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
-                }
+                int var;
                 lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
                 if (i < burstsize)
                         uvar = payload;
