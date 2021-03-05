@@ -220,6 +220,10 @@ action of STOP as confirmation to the server. When the server receives this
 confirmation in the load or status PDU, it schedules an immediate end time for
 the connection which closes the socket and deallocates it.
 
+**More Info**
+
+For much more detail on the test protocol, see the ./protocol.md file.
+
 ## Linux Socket Buffer Optimization
 For very high speeds (typically above 1 Gbps), the socket buffer maximums of
 the Linux kernel can be increased to reduce possible datagram loss. As an

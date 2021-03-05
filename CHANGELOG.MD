@@ -1,7 +1,15 @@
-# CHANGELOG.MD for udpst 7.0.0 Release
+# CHANGELOG.MD for udpst 7.1.0 Release
 
 *The udpst utility conforms to TR-471. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
+
+## 2021-03-05: [UDPST 7.1.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.1.0)
+
+This release addressed the following issues and new features: 
+* Add guards to avoid errors in inclusion files
+* The test protocol is described in detail in file ./protocol.md
+
+# CHANGELOG.MD for udpst 7.0.0 Release
 
 ## 2020-12-11: [UDPST 7.0.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.0.0)
 
