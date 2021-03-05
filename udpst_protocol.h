@@ -36,6 +36,9 @@
  *
  */
 
+#ifndef UDPST_PROTOCOL_H
+#define UDPST_PROTOCOL_H
+
 //----------------------------------------------------------------------------
 //
 // Protocol version
@@ -205,3 +208,5 @@ struct statusHdr {
         uint32_t spduTime_nsec; // Send time of this status PDU
 };
 //----------------------------------------------------------------------------
+
+#endif /* UDPST_PROTOCOL_H */

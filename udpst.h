@@ -36,6 +36,11 @@
  *
  */
 
+#ifndef UDPST_H
+#define UDPST_H
+
+#include "udpst_common.h"
+
 //----------------------------------------------------------------------------
 //
 // General
@@ -330,3 +335,5 @@ struct connection {
         void *ptrAltUse;         // Alternate use pointer
 };
 //----------------------------------------------------------------------------
+
+#endif /* UDPST_H */

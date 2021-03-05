@@ -35,6 +35,9 @@
  *
  */
 
+#ifndef UDPST_DATA_H
+#define UDPST_DATA_H
+
 extern int send1_loadpdu(int);
 extern int send2_loadpdu(int);
 extern int service_loadpdu(int);
@@ -44,3 +47,5 @@ extern int stop_test(int);
 extern int recv_proc(int);
 extern int send_proc(int, char *, int);
 extern void sr_copy(struct sendingRate *, struct sendingRate *, BOOL);
+
+#endif /* UDPST_DATA_H */
