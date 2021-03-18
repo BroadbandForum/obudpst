@@ -34,8 +34,6 @@ make %{?_smp_mflags}
 
 %install
 make install DESTDIR=%{buildroot}
-
-%install server
 mkdir -p           $RPM_BUILD_ROOT/%{_unitdir}/
 cp %{name}.service $RPM_BUILD_ROOT/%{_unitdir}/
 
