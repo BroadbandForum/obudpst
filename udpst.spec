@@ -21,7 +21,7 @@ Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to 
 %setup -q
 
 %build
-cmake3 -DCMAKE_INSTALL_PREFIX=/usr
+cmake3 -DCMAKE_INSTALL_PREFIX=/usr .
 make %{?_smp_mflags}
 
 %install
