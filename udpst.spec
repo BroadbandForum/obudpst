@@ -16,7 +16,7 @@ Requires:       systemd
 Requires:       firewalld
 
 %package server
-Requires:       %{name}
+Requires:       %{name} %{version}
 Summary:        Open Broadband-UDP Speed Test Server
 
 %description
