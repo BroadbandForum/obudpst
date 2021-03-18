@@ -1,7 +1,7 @@
 Name:           udpst
 Version:        7.1.0
 Release:        2%{?dist}
-Summary:        Open Broadband-UDP Speed Test (OB-UDPST)
+Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
 URL:            https://github.com/BroadbandForum/obudpst
@@ -17,6 +17,7 @@ Requires:       firewalld
 
 %package server
 Requires:       %{name}
+Summary:        Open Broadband-UDP Speed Test Server
 
 %description
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to demonstrate one approach of doing IP capacity measurements
