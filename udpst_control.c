@@ -807,25 +807,29 @@ int service_actreq(int connindex) {
         // Display test settings and general info if needed
         //
         *connid = '\0';
-        if (conf.verbose)
-                sprintf(connid, "[%d]", connindex);
-        if (!repo.isServer || conf.verbose) {
-                if (c->ipProtocol == IPPROTO_IPV6)
-                        testhdr = testHdrV6;
-                else
-                        testhdr = testHdrV4;
-                if (c->useOwDelVar)
-                        strcpy(delusage, "OWD");
-                else
-                        strcpy(delusage, "RTT");
-                if (c->srIndexConf == DEF_SRINDEX_CONF)
-                        strcpy(sritext, SRAUTO_TEXT);
-                else
-                        sprintf(sritext, "%d", c->srIndexConf);
-                var =
-                    sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
-                            boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
-                send_proc(errConn, scratch, var);
+        if (!conf.JSONsummary) {
+                if (conf.verbose)
+                        sprintf(connid, "[%d]", connindex);
+                if (!repo.isServer || conf.verbose) {
+                        if (c->ipProtocol == IPPROTO_IPV6)
+                                testhdr = testHdrV6;
+                        else
+                                testhdr = testHdrV4;
+                        if (c->useOwDelVar)
+                                strcpy(delusage, "OWD");
+                        else
+                                strcpy(delusage, "RTT");
+                        if (c->srIndexConf == DEF_SRINDEX_CONF)
+                                strcpy(sritext, SRAUTO_TEXT);
+                        else
+                                sprintf(sritext, "%d", c->srIndexConf);
+                        var =
+                        sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
+                                boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+                        send_proc(errConn, scratch, var);
+                }
+        } else {
+                // RODT - Think about adding test config to JSON object 
         }
 
         //

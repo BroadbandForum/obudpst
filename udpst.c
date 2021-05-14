@@ -177,24 +177,27 @@ int main(int argc, char **argv) {
         //
         // Print banner
         //
-        var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
-                      SOFTWARE_VER, PROTOCOL_VER);
-        var = write(outputfd, scratch, var);
-        if (repo.isServer)
-                var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
-        else
-                var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
-#ifdef AUTH_KEY_ENABLE
-        var += sprintf(&scratch[var], ", Authentication: Available");
-#else
-        var += sprintf(&scratch[var], ", Authentication: Unavailable");
-#endif
-#ifdef HAVE_SENDMMSG
-        var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
-#else
-        var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
-#endif
-        var = write(outputfd, scratch, var);
+        if (!conf.JSONsummary) {
+
+                var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
+                        SOFTWARE_VER, PROTOCOL_VER);
+                var = write(outputfd, scratch, var);
+                if (repo.isServer)
+                        var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+                else
+                        var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+        #ifdef AUTH_KEY_ENABLE
+                var += sprintf(&scratch[var], ", Authentication: Available");
+        #else
+                var += sprintf(&scratch[var], ", Authentication: Unavailable");
+        #endif
+        #ifdef HAVE_SENDMMSG
+                var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
+        #else
+                var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
+        #endif
+                var = write(outputfd, scratch, var);
+        }
 
         //
         // Allocate and initialize buffers
@@ -682,6 +685,9 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 's':
                         conf.summaryOnly = TRUE;
                         break;
+                case 'J':
+                        conf.JSONsummary = TRUE;
+                        break;
                 case 'j':
                         conf.jumboStatus = !DEF_JUMBO_STATUS; // Not the default
                         break;
@@ -901,6 +907,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
                                       "       -v           Enable verbose output messaging\n"
                                       "       -s           Summary output only (no sub-interval output)\n"
+                                      "       -J           JSON Summary format output only (no sub-interval output)\n"        
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);
