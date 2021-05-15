@@ -567,7 +567,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsJjDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsf:jDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
 
         //
         // Clear configuration and global repository data
@@ -685,8 +685,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 's':
                         conf.summaryOnly = TRUE;
                         break;
-                case 'J':
-                        conf.JSONsummary = TRUE;
+                case 'f':
+                        if (strcmp(optarg, "json") == 0) {
+                                conf.JSONsummary = TRUE;
+                        } else {
+                                var = sprintf(scratch, "ERROR: '%s' is not a valid output format\n", optarg);
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
                         break;
                 case 'j':
                         conf.jumboStatus = !DEF_JUMBO_STATUS; // Not the default
@@ -907,7 +913,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
                                       "       -v           Enable verbose output messaging\n"
                                       "       -s           Summary output only (no sub-interval output)\n"
-                                      "       -J           JSON Summary format output only (no sub-interval output)\n"        
+                                      "       -f           Summary format option (valid options 'json')\n"        
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);

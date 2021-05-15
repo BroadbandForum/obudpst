@@ -1175,7 +1175,7 @@ int output_currate(int connindex) {
         if (c->sisSav.rttMinimum != INITIAL_MIN_DELAY) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
-        if (!conf.summaryOnly) {
+        if ((!conf.summaryOnly) && (!conf.JSONsummary)) {
                 i = 1; // Determine required width of accumulated time field
                 if (c->testIntTime > 999)
                         i = 7;
