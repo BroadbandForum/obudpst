@@ -567,7 +567,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsjDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsJjDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
 
         //
         // Clear configuration and global repository data
