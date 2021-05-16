@@ -1369,7 +1369,7 @@ int output_maxrate(int connindex) {
                         cJSON_AddItemToObject(json_mbps, "L2DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),2) ));
                         cJSON_AddItemToObject(json_mbps, "L1DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),2) ));
                         cJSON_AddItemToObject(json_mbps, "L0DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD),2) ));
-                        cJSON_AddItemToObject(json_results, "max_MBPS", json_mbps);
+                        cJSON_AddItemToObject(json_results, "maximum", json_mbps);
                 }
 
                 if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
