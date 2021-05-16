@@ -152,6 +152,19 @@ static void _populate_header (struct loadHdr *lHdr, struct connection *c)
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
 }
 
+double f_round(double dval, int n)
+{
+    char l_fmtp[32], l_buf[64];
+    char *p_str;
+    sprintf (l_fmtp, "%%.%df", n);
+    if (dval>=0)
+            sprintf (l_buf, l_fmtp, dval);
+    else
+            sprintf (l_buf, l_fmtp, dval);
+    return ((double)strtod(l_buf, &p_str));
+
+}
+
 
 #if defined (HAVE_SENDMMSG)
 //
@@ -1288,7 +1301,12 @@ int output_maxrate(int connindex) {
                 cJSON *json_summary = cJSON_CreateObject();
 
                 // Populate the summary object
-                cJSON_AddItemToObject(json_summary, "avgDeliveredPct", cJSON_CreateNumber( ROUNDF(ts->deliveredSum, 100) ));
+                if (!conf.showLossRatio) {
+                        cJSON_AddItemToObject(json_summary, "avgDeliveredPct", cJSON_CreateNumber(f_round(ts->deliveredSum, 2)));
+                } else {
+                        cJSON_AddItemToObject(json_summary, "avgLossRatio", cJSON_CreateNumber( f_round(ts->deliveredSum, 2) ));
+                }
+                
                 cJSON_AddItemToObject(json_summary, "seqErrLoss",   cJSON_CreateNumber( ts->seqErrLoss   ));
                 cJSON_AddItemToObject(json_summary, "seqErrOoo",    cJSON_CreateNumber( ts->seqErrOoo    ));
                 cJSON_AddItemToObject(json_summary, "seqErrDup",    cJSON_CreateNumber( ts->seqErrDup    ));
@@ -1297,7 +1315,8 @@ int output_maxrate(int connindex) {
                 cJSON_AddItemToObject(json_summary, "owdVarMax",  cJSON_CreateNumber( ts->delayVarMax  ));
                 cJSON_AddItemToObject(json_summary, "rttVarMin",  cJSON_CreateNumber( ts->rttMinimum  ));
                 cJSON_AddItemToObject(json_summary, "rttVarMax",   cJSON_CreateNumber( ts->rttMaximum   ));
-                cJSON_AddItemToObject(json_summary, "avgL3Mbps",    cJSON_CreateNumber( ROUNDF(ts->rateSumL3, 100) ));
+                cJSON_AddItemToObject(json_summary, "avgL3Mbps",    cJSON_CreateNumber( f_round(ts->rateSumL3, 2) ));
+
 
                 // Add the summary to the results object
                 cJSON_AddItemToObject(json_results, "summary", json_summary);
@@ -1346,10 +1365,10 @@ int output_maxrate(int connindex) {
                 } else {
                         // Build JSON Object for Delay
                         cJSON *json_mbps = cJSON_CreateObject();
-                        cJSON_AddItemToObject(json_mbps, "L3DG", cJSON_CreateNumber( get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD) ));
-                        cJSON_AddItemToObject(json_mbps, "L2DG", cJSON_CreateNumber( get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD) ));
-                        cJSON_AddItemToObject(json_mbps, "L1DG", cJSON_CreateNumber( get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD) ));
-                        cJSON_AddItemToObject(json_mbps, "L0DG", cJSON_CreateNumber( get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD) ));
+                        cJSON_AddItemToObject(json_mbps, "L3DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L2DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L1DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L0DG", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD),2) ));
                         cJSON_AddItemToObject(json_results, "max_MBPS", json_mbps);
                 }
 
