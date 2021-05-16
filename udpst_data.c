@@ -1260,7 +1260,6 @@ int output_maxrate(int connindex) {
         if (conf.JSONsummary) {
                 // Create the JSON Results Object
                 json_results = cJSON_CreateObject();
-                //test_type = cJSON_CreateString(testtype);
                 cJSON_AddItemToObject(json_results, "test_type", cJSON_CreateString(testtype));
         }
 
@@ -1283,21 +1282,22 @@ int output_maxrate(int connindex) {
                         ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
                 send_proc(errConn, scratch, var);
         } else {
+                //Downstream Summary Delivered(%):  97.95, Loss/OoO/Dup: 2062/0/0, OWDVar(ms): 0/51/134, RTTVar(ms): 0-124, Mbps(L3/IP): 46.07
 
                 // Build JSON Object for summary
                 cJSON *json_summary = cJSON_CreateObject();
 
                 // Populate the summary object
-                cJSON_AddItemToObject(json_summary, "deliveredSum", cJSON_CreateNumber( ROUNDF(ts->deliveredSum, 100) ));
+                cJSON_AddItemToObject(json_summary, "avgDeliveredPct", cJSON_CreateNumber( ROUNDF(ts->deliveredSum, 100) ));
                 cJSON_AddItemToObject(json_summary, "seqErrLoss",   cJSON_CreateNumber( ts->seqErrLoss   ));
                 cJSON_AddItemToObject(json_summary, "seqErrOoo",    cJSON_CreateNumber( ts->seqErrOoo    ));
                 cJSON_AddItemToObject(json_summary, "seqErrDup",    cJSON_CreateNumber( ts->seqErrDup    ));
-                cJSON_AddItemToObject(json_summary, "delayVarMin",  cJSON_CreateNumber( ts->delayVarMin  ));
-                cJSON_AddItemToObject(json_summary, "delayVarSum",  cJSON_CreateNumber( ts->delayVarSum  ));
-                cJSON_AddItemToObject(json_summary, "delayVarMax",  cJSON_CreateNumber( ts->delayVarMax  ));
-                cJSON_AddItemToObject(json_summary, "rttMinimum",   cJSON_CreateNumber( ts->rttMinimum   ));
-                cJSON_AddItemToObject(json_summary, "rttMaximum",   cJSON_CreateNumber( ts->rttMaximum   ));
-                cJSON_AddItemToObject(json_summary, "rateSumL3",    cJSON_CreateNumber( ROUNDF(ts->rateSumL3, 100) ));
+                cJSON_AddItemToObject(json_summary, "owdVarMin",  cJSON_CreateNumber( ts->delayVarMin  ));
+                cJSON_AddItemToObject(json_summary, "owdVarAvg",  cJSON_CreateNumber( ts->delayVarSum  ));
+                cJSON_AddItemToObject(json_summary, "owdVarMax",  cJSON_CreateNumber( ts->delayVarMax  ));
+                cJSON_AddItemToObject(json_summary, "rttVarMin",  cJSON_CreateNumber( ts->rttMinimum  ));
+                cJSON_AddItemToObject(json_summary, "rttVarMax",   cJSON_CreateNumber( ts->rttMaximum   ));
+                cJSON_AddItemToObject(json_summary, "avgL3Mbps",    cJSON_CreateNumber( ROUNDF(ts->rateSumL3, 100) ));
 
                 // Add the summary to the results object
                 cJSON_AddItemToObject(json_results, "summary", json_summary);
@@ -1316,9 +1316,9 @@ int output_maxrate(int connindex) {
        } else {
                 // Build JSON Object for Delay
                 cJSON *json_delay = cJSON_CreateObject();
-                cJSON_AddItemToObject(json_delay, "clockDeltaMin", cJSON_CreateNumber( c->clockDeltaMin ));
-                cJSON_AddItemToObject(json_delay, "rttMinimum", cJSON_CreateNumber( c->rttMinimum ));
-                cJSON_AddItemToObject(json_results, "min_owd", json_delay);
+                cJSON_AddItemToObject(json_delay, "owd", cJSON_CreateNumber( c->clockDeltaMin ));
+                cJSON_AddItemToObject(json_delay, "rtt", cJSON_CreateNumber( c->rttMinimum ));
+                cJSON_AddItemToObject(json_results, "minimum", json_delay);
         }
 
         //
