@@ -1380,9 +1380,9 @@ int output_maxrate(int connindex) {
         }
         if (conf.JSONsummary) {
                 // Convert JSON Object to string and output
-                json_string = cJSON_Print(json_results);
+                json_string = cJSON_PrintUnformatted(json_results);
                 cJSON_Delete(json_results);
-                var = sprintf(scratch, json_string);
+                var = sprintf(scratch, "%s\n", json_string);
                 send_proc(errConn, scratch, var);
         }
 
