@@ -64,6 +64,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <fcntl.h>
 #include <time.h>
