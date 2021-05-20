@@ -61,6 +61,7 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/file.h>
+#include <time.h>
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
 #include <openssl/x509.h>
@@ -376,11 +377,24 @@ int service_setupreq(int connindex) {
                 var = sprintf(scratch, "[%d]Setup request received from %s:%s\n", connindex, addrstr, portstr);
                 send_proc(monConn, scratch, var);
         }
+        // These environement variables can be set when executing server in a docker container,
+        // keeping the epemeral ports between min and max values 
+        srand(time(0));
+        int randport = 0;
+        const char* min_tp_str = getenv("MIN_TESTPORT");
+        const char* max_tp_str = getenv("MAX_TESTPORT");
 
+        if (min_tp_str && max_tp_str) {
+                char *ptr;
+                long min_tp_l = strtol(min_tp_str, &ptr, 10);
+                long max_tp_l = strtol(max_tp_str, &ptr, 10);
+                int numport = (int)max_tp_l - (int)min_tp_l + 1;
+                randport = rand() % numport + (int)min_tp_l;
+        } 
         //
         // Obtain new test connection for this client
         //
-        if ((i = new_conn(-1, repo.serverIp, 0, T_UDP, &recv_proc, &service_actreq)) < 0)
+        if ((i = new_conn(-1, repo.serverIp, randport, T_UDP, &recv_proc, &service_actreq)) < 0)
                 return 0;
         if (monConn >= 0) {
                 var = sprintf(scratch, "[%d]Connection %d allocated and assigned %s:%d\n", connindex, i, conn[i].locAddr,

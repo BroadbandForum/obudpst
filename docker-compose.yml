@@ -1,0 +1,10 @@
+version: "3.3"  # optional since v1.27.0
+services:
+  udpst-server:
+    build: .
+    environment: 
+      - MIN_TESTPORT=${MIN_TESTPORT}
+      - MAX_TESTPORT=${MAX_TESTPORT}
+    ports:
+      - "25000:25000/udp"
+      - "${MIN_TESTPORT}-${MAX_TESTPORT}:${MIN_TESTPORT}-${MAX_TESTPORT}/udp"
