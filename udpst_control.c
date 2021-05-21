@@ -828,9 +828,7 @@ int service_actreq(int connindex) {
                                 boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
                         send_proc(errConn, scratch, var);
                 }
-        } else {
-                // RODT - Think about adding test config to JSON object 
-        }
+        } 
 
         //
         // Update end time (used as watchdog) in case client goes quiet
@@ -997,10 +995,7 @@ int service_actresp(int connindex) {
                                 boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
                         send_proc(errConn, scratch, var);
                 }
-        } else {
-                // RODT - Write the config to JSON object?
-        }
-
+        } 
         //
         // Clear timeout timer
         //
