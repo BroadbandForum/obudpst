@@ -80,6 +80,7 @@
 #include "udpst_control.h"
 #include "udpst_data.h"
 #include "udpst_srates.h"
+#include "cJSON.h"
 #ifndef __linux__
 #include "../udpst_alt2.h"
 #endif
@@ -105,6 +106,9 @@ struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
 char *boolText[]                      = {"Disabled", "Enabled"};
+cJSON *json_output = NULL; // Container for the JSON output
+//cJSON *json_output = cJSON_CreateObject();
+
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -121,6 +125,7 @@ int main(int argc, char **argv) {
         struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
         struct stat statbuf;
 
+        json_output = cJSON_CreateObject();
         //
         // Verify and process parameters, initialize configuration and repository
         //
@@ -197,6 +202,9 @@ int main(int argc, char **argv) {
                 var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
         #endif
                 var = write(outputfd, scratch, var);
+        } else {
+                cJSON_AddItemToObject(json_output, "version", cJSON_CreateString(SOFTWARE_VER));
+                cJSON_AddItemToObject(json_output, "protocol", cJSON_CreateNumber(PROTOCOL_VER));
         }
 
         //

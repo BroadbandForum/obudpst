@@ -69,6 +69,7 @@
 #include "../udpst_control_alt1.h"
 #endif
 //
+#include "cJSON.h"
 #include "udpst_common.h"
 #include "udpst_protocol.h"
 #include "udpst.h"
@@ -98,6 +99,8 @@ extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
 extern char *boolText[];
+extern cJSON *json_output;
+
 
 //----------------------------------------------------------------------------
 //
@@ -974,28 +977,48 @@ int service_actresp(int connindex) {
         // Display test settings and general info if needed
         //
         *connid = '\0';
-        if (!conf.JSONsummary) {
-                if (conf.verbose)
-                        sprintf(connid, "[%d]", connindex);
-                if (!repo.isServer || conf.verbose) {
-                        if (c->ipProtocol == IPPROTO_IPV6)
-                                testhdr = testHdrV6;
-                        else
-                                testhdr = testHdrV4;
-                        if (c->useOwDelVar)
-                                strcpy(delusage, "OWD");
-                        else
-                                strcpy(delusage, "RTT");
-                        if (c->srIndexConf == DEF_SRINDEX_CONF)
-                                strcpy(sritext, SRAUTO_TEXT);
-                        else
-                                sprintf(sritext, "%d", c->srIndexConf);
-                        var =
-                        sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
-                                boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+        if (conf.verbose)
+                sprintf(connid, "[%d]", connindex);
+        if (!repo.isServer || conf.verbose) {
+                if (c->ipProtocol == IPPROTO_IPV6)
+                        testhdr = testHdrV6;
+                else
+                        testhdr = testHdrV4;
+                if (c->useOwDelVar)
+                        strcpy(delusage, "OWD");
+                else
+                        strcpy(delusage, "RTT");
+                if (c->srIndexConf == DEF_SRINDEX_CONF)
+                        strcpy(sritext, SRAUTO_TEXT);
+                else
+                        sprintf(sritext, "%d", c->srIndexConf);
+
+                if (conf.JSONsummary) {
+                        // Create config json object
+                        cJSON *json_config = cJSON_CreateObject();
+
+                        // Add Variable to the config object
+                        cJSON_AddItemToObject(json_config, "type",              cJSON_CreateString(testtype));
+                        cJSON_AddItemToObject(json_config, "duration",          cJSON_CreateNumber(c->testIntTime));
+                        cJSON_AddItemToObject(json_config, "delvat_lower",      cJSON_CreateNumber(c->lowThresh));
+                        cJSON_AddItemToObject(json_config, "delvar_upper",      cJSON_CreateNumber(c->upperThresh));
+                        cJSON_AddItemToObject(json_config, "delay_usage",       cJSON_CreateString(delusage));
+                        cJSON_AddItemToObject(json_config, "interval",          cJSON_CreateString(c->trialInt));
+                        cJSON_AddItemToObject(json_config, "ignore_ooodup",     cJSON_CreateBool(c->ignoreOooDup));
+                        cJSON_AddItemToObject(json_config, "sending_rate",      cJSON_CreateString(sritext));
+                        cJSON_AddItemToObject(json_config, "congest_th",        cJSON_CreateNumber(c->slowAdjThresh));
+                        cJSON_AddItemToObject(json_config, "hs_delta",          cJSON_CreateNumber(c->highSpeedDelta));
+                        cJSON_AddItemToObject(json_config, "seqerr_th",         cJSON_CreateNumber(c->seqErrThresh));
+                        cJSON_AddItemToObject(json_config, "iptos_byte",        cJSON_CreateNumber(c->ipTosByte));
+
+                        // Add the config object to the output object
+                        cJSON_AddItemToObject(json_output, "config", json_config);
+                } else {
+                        var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
+                                      boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
                         send_proc(errConn, scratch, var);
                 }
-        } 
+        }
         //
         // Clear timeout timer
         //

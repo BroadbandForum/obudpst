@@ -114,6 +114,7 @@ extern char scratch[STRING_SIZE];
 extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
+extern cJSON *json_output;
 
 //----------------------------------------------------------------------------
 //
@@ -1270,7 +1271,7 @@ int output_maxrate(int connindex) {
         if (conf.JSONsummary) {
                 // Create the JSON Results Object
                 json_results = cJSON_CreateObject();
-                cJSON_AddItemToObject(json_results, "test_type", cJSON_CreateString(testtype));
+                //cJSON_AddItemToObject(json_results, "test_type", cJSON_CreateString(testtype));
         }
 
         //
@@ -1372,8 +1373,9 @@ int output_maxrate(int connindex) {
         }
         if (conf.JSONsummary) {
                 // Convert JSON Object to string and output
-                json_string = cJSON_PrintUnformatted(json_results);
-                cJSON_Delete(json_results);
+                cJSON_AddItemToObject(json_output, "results", json_results);
+                json_string = cJSON_PrintUnformatted(json_output);
+                cJSON_Delete(json_output);
                 var = sprintf(scratch, "%s\n", json_string);
                 send_proc(errConn, scratch, var);
         }
