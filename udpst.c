@@ -45,6 +45,8 @@
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
  * Len Ciavattone          10/09/2020    Add parameter for bimodal support
  * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
+ * Len Ciavattone          06/08/2021    Add DISABLE_INT_TIMER conditional
+ *                                       to support older client devices
  *
  */
 
@@ -230,21 +232,30 @@ int main(int argc, char **argv) {
         //
         // Check for needed clock resolution
         //
+#ifndef DISABLE_INT_TIMER
         if (clock_getres(CLOCK_REALTIME, &repo.systemClock) == -1) {
                 var = sprintf(scratch, "CLOCK_GETRES ERROR: %s\n", strerror(errno));
                 var = write(outputfd, scratch, var);
                 return -1;
         }
         if (repo.systemClock.tv_nsec > 1) {
-                var = sprintf(scratch, "ERROR: Clock resolution (%ld ns) out of range\n", repo.systemClock.tv_nsec);
+                var =
+                    sprintf(scratch, "ERROR: Clock resolution (%ld ns) out of range [see compile-time option DISABLE_INT_TIMER]\n",
+                            repo.systemClock.tv_nsec);
                 var = write(outputfd, scratch, var);
                 return -1;
         }
+#endif
 
         //
-        // Initialize local copy of system time clock and set alarm signal handler
+        // Initialize local copy of system time clock
         //
         clock_gettime(CLOCK_REALTIME, &repo.systemClock);
+
+        //
+        // Set alarm signal handler
+        //
+#ifndef DISABLE_INT_TIMER
         saction.sa_handler = signal_alrm;
         sigemptyset(&saction.sa_mask);
         saction.sa_flags = SA_RESTART;
@@ -253,10 +264,12 @@ int main(int argc, char **argv) {
                 var = write(outputfd, scratch, var);
                 return -1;
         }
+#endif
 
         //
         // Create system interval timer used to drive all local timers
         //
+#ifndef DISABLE_INT_TIMER
         itime.it_interval.tv_sec = itime.it_value.tv_sec = 0;
         itime.it_interval.tv_usec = itime.it_value.tv_usec = MIN_INTERVAL_USEC;
         if (setitimer(ITIMER_REAL, &itime, NULL) != 0) {
@@ -264,6 +277,7 @@ int main(int argc, char **argv) {
                 var = write(outputfd, scratch, var);
                 return -1;
         }
+#endif
 
         //
         // Set exit signal handler
@@ -372,6 +386,9 @@ int main(int argc, char **argv) {
         // Primary control loop
         //
         while (!sig_exit) {
+#ifdef DISABLE_INT_TIMER
+                sig_alrm = 1; // Simulate expiry of system interval timer
+#endif
                 //
                 // Await ready FD(s) OR an alarm signal interrupt
                 //
