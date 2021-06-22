@@ -113,8 +113,8 @@ $ udpst -?
 
 ## Building OB-UDPST
 
-To build OB-UDPST a local installation of CMake is required. Please obtain them
-for your particular build system either using the locally available packages or
+To build OB-UDPST a local installation of CMake version 3.0 or higher is required. Please obtain them
+for your particular build system either using the locally available packages (`apt-get install cmake` or `yum install cmake3`) or
 consult with [https://cmake.org] for other download options.
 
 ```

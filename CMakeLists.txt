@@ -83,6 +83,7 @@ set(libraries udpst_core ${libraries})
 
 add_executable(udpst udpst.c)
 target_link_libraries(udpst ${libraries})
+install(TARGETS udpst RUNTIME)
 
 # For some reason Ninja sometimes faces a stupid error which is fixed by
 # the following
