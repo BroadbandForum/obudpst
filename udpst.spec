@@ -1,6 +1,6 @@
 Name:           udpst
 Version:        7.1.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
@@ -10,6 +10,7 @@ Source0:        udpst-7.1.0.tar.gz
 BuildRequires:  cmake3
 BuildRequires:  make
 BuildRequires:  gcc
+BuildRequires:  gcc-c++
 BuildRequires:  glibc-headers
 BuildRequires:  openssl-devel
 Requires:       systemd
