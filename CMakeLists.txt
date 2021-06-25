@@ -71,6 +71,8 @@ CHECK_FUNCTION_EXISTS (mkfifo HAVE_MKFIFO)
 CHECK_FUNCTION_EXISTS (getifaddrs HAVE_GETIFADDRS)
 CHECK_FUNCTION_EXISTS (fork HAVE_WORKING_FORK)
 
+OPTION(DISABLE_INT_TIMER "Disable the timer for systems which don't provide the required timer resolution. Increases CPU utilization." OFF)
+
 add_definitions(-DSYSCONFDIR=\"${CMAKE_INSTALL_PREFIX}/etc\")
 add_definitions(-DLOCALSTATEDIR=\"${CMAKE_INSTALL_PREFIX}/var/lib\")
 add_definitions(-DLOGDIR=\"${CMAKE_INSTALL_PREFIX}/var/log\")

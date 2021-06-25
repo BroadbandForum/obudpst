@@ -39,6 +39,7 @@
 #ifndef UDPST_H
 #define UDPST_H
 
+#include "config.h"
 #include "udpst_common.h"
 
 //----------------------------------------------------------------------------
@@ -59,13 +60,11 @@
 #define WARNING_MSG_LIMIT 50   // Warning message limit
 #define WARNING_NOTRAFFIC 1    // Receive traffic stopped warning threshold (sec)
 #define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 4)
-//
-// Uncomment to disable the interval timer when compiling for older client devices
-// that are unable to support the required clock resolution. Because this results
-// in high CPU utilization, it is not recommended for standard server operation.
-//
-//#define DISABLE_INT_TIMER
-//
+
+// DISABLE_INT_TIMER disables the interval timer when compiling for client
+// devices that are unable to support the required clock resolution. Because
+// this results in high CPU utilization, it is not recommended for standard
+// server operation.
 #ifndef DISABLE_INT_TIMER
 #define SEND_TIMER_ADJ 75 // Data send timer adjustment (us)
 #else
