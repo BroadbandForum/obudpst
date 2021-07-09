@@ -241,3 +241,20 @@ $ sudo sysctl -w net.core.wmem_max=16777216
 increased socket buffering available. However, the command-line option `-b` can
 be used if even higher buffer levels should be explicitly requested for each
 socket.*
+
+## Considerations for Older Hardware and Low-End Devices
+Systems that are unable to support the required clock resolution will cause an
+error message at runtime (e.g., “ERROR: Clock resolution (xxxxxxx ns) out of
+range”) and udpst will exit. This is because without the needed interval timer
+frequency, sending rates would be skewed and the rate-adaption algorithm would
+not function properly.
+
+As a workaround for older devices, a compile-time option (DISABLE_INT_TIMER) is
+available that does not rely on an underlying system interval timer. However,
+the trade-off for this mode of operation is that it results in high CPU
+utilization, but clients running on older or low-capability hosts may be able
+to execute tests where they otherwise would not.  In any case, it is not
+recommended for standard server operation.
+```
+$ cmake -D DISABLE_INT_TIMER=ON .
+```

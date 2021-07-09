@@ -49,7 +49,6 @@
 #define USTEST_TEXT       "Upstream"
 #define DSTEST_TEXT       "Downstream"
 #define TIME_FORMAT       "%Y-%m-%d %H:%M:%S"
-#define SEND_TIMER_ADJ    75   // Data send timer adjustment (us)
 #define STRING_SIZE       1024 // String buffer size
 #define AUTH_KEY_SIZE     32   // Authentication key size
 #define HS_DELTA_BACKUP   3    // High-speed delta backup multiplier
@@ -60,6 +59,18 @@
 #define WARNING_MSG_LIMIT 50   // Warning message limit
 #define WARNING_NOTRAFFIC 1    // Receive traffic stopped warning threshold (sec)
 #define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 4)
+//
+// Uncomment to disable the interval timer when compiling for older client devices
+// that are unable to support the required clock resolution. Because this results
+// in high CPU utilization, it is not recommended for standard server operation.
+//
+//#define DISABLE_INT_TIMER
+//
+#ifndef DISABLE_INT_TIMER
+#define SEND_TIMER_ADJ 75 // Data send timer adjustment (us)
+#else
+#define SEND_TIMER_ADJ 0 // Set to zero when interval timer is disabled
+#endif
 
 //----------------------------------------------------------------------------
 //
