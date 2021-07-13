@@ -1003,7 +1003,7 @@ int service_actresp(int connindex) {
                         cJSON_AddItemToObject(json_config, "delvat_lower",      cJSON_CreateNumber(c->lowThresh));
                         cJSON_AddItemToObject(json_config, "delvar_upper",      cJSON_CreateNumber(c->upperThresh));
                         cJSON_AddItemToObject(json_config, "delay_usage",       cJSON_CreateString(delusage));
-                        cJSON_AddItemToObject(json_config, "interval",          cJSON_CreateString(c->trialInt));
+                        cJSON_AddItemToObject(json_config, "interval",          cJSON_CreateNumber(c->trialInt));
                         cJSON_AddItemToObject(json_config, "ignore_ooodup",     cJSON_CreateBool(c->ignoreOooDup));
                         cJSON_AddItemToObject(json_config, "sending_rate",      cJSON_CreateString(sritext));
                         cJSON_AddItemToObject(json_config, "congest_th",        cJSON_CreateNumber(c->slowAdjThresh));
