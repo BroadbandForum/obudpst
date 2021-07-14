@@ -64,9 +64,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <fcntl.h>
 #include <time.h>
+#include <math.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #ifdef AUTH_KEY_ENABLE
@@ -77,6 +79,7 @@
 #include "../udpst_data_alt1.h"
 #endif
 //
+#include "cJSON.h"
 #include "udpst_common.h"
 #include "udpst_protocol.h"
 #include "udpst.h"
@@ -111,6 +114,7 @@ extern char scratch[STRING_SIZE];
 extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
+extern cJSON *json_output;
 
 //----------------------------------------------------------------------------
 //
@@ -149,7 +153,16 @@ static void _populate_header (struct loadHdr *lHdr, struct connection *c)
         lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
 }
-
+//
+// Helper function to truncate float values to n decimal places
+//
+double f_round(double dval, int n) {
+        char l_fmtp[32], l_buf[64];
+        char *p_str;
+        sprintf (l_fmtp, "%%.%df", n);
+        sprintf (l_buf, l_fmtp, dval);
+        return ((double)strtod(l_buf, &p_str));
+}
 
 #if defined (HAVE_SENDMMSG)
 //
@@ -1173,7 +1186,7 @@ int output_currate(int connindex) {
         if (c->sisSav.rttMinimum != INITIAL_MIN_DELAY) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
-        if (!conf.summaryOnly) {
+        if ((!conf.summaryOnly) && (!conf.JSONsummary)) {
                 i = 1; // Determine required width of accumulated time field
                 if (c->testIntTime > 999)
                         i = 7;
@@ -1241,6 +1254,8 @@ int output_maxrate(int connindex) {
         int i, sibegin, siend, var;
         unsigned int uvar;
         struct testSummary *ts = &c->testSum;
+        char *json_string = NULL;
+        cJSON *json_results = NULL;
 
         //
         // Setup header fields
@@ -1253,6 +1268,11 @@ int output_maxrate(int connindex) {
         } else {
                 testtype = DSTEST_TEXT;
         }
+        if (conf.JSONsummary) {
+                // Create the JSON Results Object
+                json_results = cJSON_CreateObject();
+                //cJSON_AddItemToObject(json_results, "test_type", cJSON_CreateString(testtype));
+        }
 
         //
         // Output summary info
@@ -1262,25 +1282,57 @@ int output_maxrate(int connindex) {
                 ts->delayVarSum = (((ts->delayVarSum * 10) / ts->sampleCount) + 5) / 10;
                 ts->rateSumL3 /= (double) ts->sampleCount;
         }
-        strcpy(scratch2, "%s%s Summary ");
-        if (!conf.showLossRatio) {
-                strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+        if (!conf.JSONsummary) {
+                strcpy(scratch2, "%s%s Summary ");
+                if (!conf.showLossRatio) {
+                        strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+                } else {
+                        strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                }
+                var = sprintf(scratch, scratch2, connid, testtype, ts->deliveredSum, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
+                        ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
+                send_proc(errConn, scratch, var);
         } else {
-                strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                // Build JSON Object for summary
+                cJSON *json_summary = cJSON_CreateObject();
+
+                // Populate the summary object
+                if (!conf.showLossRatio) {
+                        cJSON_AddItemToObject(json_summary, "avgDeliveredPct", cJSON_CreateNumber(f_round(ts->deliveredSum, 2)));
+                } else {
+                        cJSON_AddItemToObject(json_summary, "avgLossRatio", cJSON_CreateNumber( f_round(ts->deliveredSum, 2) ));
+                }
+                cJSON_AddItemToObject(json_summary, "seqErrLoss",   cJSON_CreateNumber( ts->seqErrLoss   ));
+                cJSON_AddItemToObject(json_summary, "seqErrOoo",    cJSON_CreateNumber( ts->seqErrOoo    ));
+                cJSON_AddItemToObject(json_summary, "seqErrDup",    cJSON_CreateNumber( ts->seqErrDup    ));
+                cJSON_AddItemToObject(json_summary, "owdVarMin",  cJSON_CreateNumber( ts->delayVarMin  ));
+                cJSON_AddItemToObject(json_summary, "owdVarAvg",  cJSON_CreateNumber( ts->delayVarSum  ));
+                cJSON_AddItemToObject(json_summary, "owdVarMax",  cJSON_CreateNumber( ts->delayVarMax  ));
+                cJSON_AddItemToObject(json_summary, "rttVarMin",  cJSON_CreateNumber( ts->rttMinimum  ));
+                cJSON_AddItemToObject(json_summary, "rttVarMax",   cJSON_CreateNumber( ts->rttMaximum   ));
+                cJSON_AddItemToObject(json_summary, "avgL3Mbps",    cJSON_CreateNumber( f_round(ts->rateSumL3, 2) ));
+
+                // Add the summary to the results object
+                cJSON_AddItemToObject(json_results, "summary", json_summary);
         }
-        var = sprintf(scratch, scratch2, connid, testtype, ts->deliveredSum, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
-                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
-        send_proc(errConn, scratch, var);
 
         //
         // Output delay info
         //
         uvar = 0;
-        strcpy(scratch2, "%s%s Minimum " MINIMUM_TEXT);
         if (c->rttMinimum != INITIAL_MIN_DELAY)
                 uvar = c->rttMinimum;
-        var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, uvar);
-        send_proc(errConn, scratch, var);
+        if (!conf.JSONsummary) {
+                strcpy(scratch2, "%s%s Minimum " MINIMUM_TEXT);
+                var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, uvar);
+                send_proc(errConn, scratch, var);
+       } else {
+                // Build JSON Object for Delay
+                cJSON *json_delay = cJSON_CreateObject();
+                cJSON_AddItemToObject(json_delay, "owd", cJSON_CreateNumber( c->clockDeltaMin ));
+                cJSON_AddItemToObject(json_delay, "rtt", cJSON_CreateNumber( c->rttMinimum ));
+                cJSON_AddItemToObject(json_results, "minimum", json_delay);
+        }
 
         //
         // Output rate info for either single maximum or both bimodal maxima
@@ -1292,21 +1344,40 @@ int output_maxrate(int connindex) {
                 siend = conf.bimodalCount;
         }
         for (i = 0; i < 2; i++) {
-                if (conf.bimodalCount == 0) {
-                        strcpy(maxtext, "Maximum");
+                if (!conf.JSONsummary) {
+                        if (conf.bimodalCount == 0) {
+                                strcpy(maxtext, "Maximum");
+                        } else {
+                                sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
+                        }
+                        strcpy(scratch2, "%s%s %s Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
+                        var = sprintf(scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
+                                get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),
+                                get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
+                        send_proc(errConn, scratch, var);
                 } else {
-                        sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
+                        // Build JSON Object for Delay
+                        cJSON *json_mbps = cJSON_CreateObject();
+                        cJSON_AddItemToObject(json_mbps, "L3Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L2Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L1Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_mbps, "L0Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD),2) ));
+                        cJSON_AddItemToObject(json_results, "maximum", json_mbps);
                 }
-                strcpy(scratch2, "%s%s %s Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-                var = sprintf(scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
-                              get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),
-                              get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
-                send_proc(errConn, scratch, var);
+
                 if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
                         break; // Either a single maximum or bimodal count exceeds sub-interval count
 
                 sibegin = conf.bimodalCount + 1;
                 siend   = c->subIntCount;
+        }
+        if (conf.JSONsummary) {
+                // Convert JSON Object to string and output
+                cJSON_AddItemToObject(json_output, "results", json_results);
+                json_string = cJSON_PrintUnformatted(json_output);
+                cJSON_Delete(json_output);
+                var = sprintf(scratch, "%s\n", json_string);
+                send_proc(errConn, scratch, var);
         }
 
         return 0;

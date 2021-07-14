@@ -175,6 +175,7 @@ struct configuration {
         BOOL errSuppress;                // Suppress send/receive errors
         BOOL verbose;                    // Enable verbose messaging
         BOOL summaryOnly;                // Do not show sub-interval stats
+        BOOL JSONsummary;                // JSON Output Summary
         BOOL jumboStatus;                // Enable/disable jumbo datagram sizes
         BOOL debug;                      // Enable debug messaging
         BOOL showSendingRates;           // Display sending rate table parameters

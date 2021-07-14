@@ -82,6 +82,7 @@
 #include "udpst_control.h"
 #include "udpst_data.h"
 #include "udpst_srates.h"
+#include "cJSON.h"
 #ifndef __linux__
 #include "../udpst_alt2.h"
 #endif
@@ -107,6 +108,9 @@ struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
 char *boolText[]                      = {"Disabled", "Enabled"};
+cJSON *json_output = NULL; // Container for the JSON output
+//cJSON *json_output = cJSON_CreateObject();
+
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -123,6 +127,7 @@ int main(int argc, char **argv) {
         struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
         struct stat statbuf;
 
+        json_output = cJSON_CreateObject();
         //
         // Verify and process parameters, initialize configuration and repository
         //
@@ -179,24 +184,30 @@ int main(int argc, char **argv) {
         //
         // Print banner
         //
-        var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
-                      SOFTWARE_VER, PROTOCOL_VER);
-        var = write(outputfd, scratch, var);
-        if (repo.isServer)
-                var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
-        else
-                var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
-#ifdef AUTH_KEY_ENABLE
-        var += sprintf(&scratch[var], ", Authentication: Available");
-#else
-        var += sprintf(&scratch[var], ", Authentication: Unavailable");
-#endif
-#ifdef HAVE_SENDMMSG
-        var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
-#else
-        var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
-#endif
-        var = write(outputfd, scratch, var);
+        if (!conf.JSONsummary) {
+
+                var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
+                        SOFTWARE_VER, PROTOCOL_VER);
+                var = write(outputfd, scratch, var);
+                if (repo.isServer)
+                        var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+                else
+                        var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+        #ifdef AUTH_KEY_ENABLE
+                var += sprintf(&scratch[var], ", Authentication: Available");
+        #else
+                var += sprintf(&scratch[var], ", Authentication: Unavailable");
+        #endif
+        #ifdef HAVE_SENDMMSG
+                var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
+        #else
+                var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
+        #endif
+                var = write(outputfd, scratch, var);
+        } else {
+                cJSON_AddItemToObject(json_output, "version", cJSON_CreateString(SOFTWARE_VER));
+                cJSON_AddItemToObject(json_output, "protocol", cJSON_CreateNumber(PROTOCOL_VER));
+        }
 
         //
         // Allocate and initialize buffers
@@ -581,7 +592,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsjDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsf:jDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
 
         //
         // Clear configuration and global repository data
@@ -698,6 +709,15 @@ int proc_parameters(int argc, char **argv, int fd) {
                         break;
                 case 's':
                         conf.summaryOnly = TRUE;
+                        break;
+                case 'f':
+                        if (strcmp(optarg, "json") == 0) {
+                                conf.JSONsummary = TRUE;
+                        } else {
+                                var = sprintf(scratch, "ERROR: '%s' is not a valid output format\n", optarg);
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
                         break;
                 case 'j':
                         conf.jumboStatus = !DEF_JUMBO_STATUS; // Not the default
@@ -918,6 +938,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
                                       "       -v           Enable verbose output messaging\n"
                                       "       -s           Summary output only (no sub-interval output)\n"
+                                      "       -f           Summary format option (valid options 'json')\n"        
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);
