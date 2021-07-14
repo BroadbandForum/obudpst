@@ -89,6 +89,8 @@ $ udpst -s -u <server>
     Do upstream test and only show the test summary at the end
 $ udpst -r -d <server>
     Do downstream test and show loss ratio instead of delivered percentage
+$ udpst -f json -d <server>
+    Do downstream test and use JSON format for test results 
 ```
 *Note: The client can operate behind a firewall (w/NAT) without any port
 forwarding or DMZ designation because all connections with the server are
