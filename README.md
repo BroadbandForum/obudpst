@@ -14,7 +14,7 @@ ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
 - ETSI Technical Specification 103 222 Part 2 (08/2019): _Reference benchmarking and KPIs for High speed internet_, 
 ETSI TS 103 222-2, V.1.2.1, https://www.etsi.org/deliver/etsi_ts/103200_103299/10322202/01.02.01_60/ts_10322202v010201p.pdf
 
-- IETF IPPM Internet Draft (work-in-progress): _Metrics and Methods for One-way IP Capacity_, 
+- IETF IPPM Internet Draft (Approved version 12): _Metrics and Methods for One-way IP Capacity_, 
 https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-metric-method/
 
 - ETSI Technical Report  103 702 (2020-10): _Speech and multimedia Transmission Quality (STQ); 
