@@ -14,7 +14,7 @@ ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
 - ETSI Technical Specification 103 222 Part 2 (08/2019): _Reference benchmarking and KPIs for High speed internet_, 
 ETSI TS 103 222-2, V.1.2.1, https://www.etsi.org/deliver/etsi_ts/103200_103299/10322202/01.02.01_60/ts_10322202v010201p.pdf
 
-- IETF IPPM Internet Draft (work-in-progress): _Metrics and Methods for One-way IP Capacity_, 
+- IETF IPPM Internet Draft (Approved version 12): _Metrics and Methods for One-way IP Capacity_, 
 https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-metric-method/
 
 - ETSI Technical Report  103 702 (2020-10): _Speech and multimedia Transmission Quality (STQ); 
@@ -255,8 +255,61 @@ As a workaround for older devices, a compile-time option (DISABLE_INT_TIMER) is
 available that does not rely on an underlying system interval timer. However,
 the trade-off for this mode of operation is that it results in high CPU
 utilization, but clients running on older or low-capability hosts may be able
-to execute tests where they otherwise would not.  In any case, it is not
-recommended for standard server operation.
+to execute tests where they otherwise would not.
 ```
 $ cmake -D DISABLE_INT_TIMER=ON .
+```
+*Note: Because of the increased CPU utilization, this option is not recommended
+for standard server operation.*
+
+## JSON Output
+The following code block shows an example of the (formatted) JSON output when
+using the `-f json` option for a downstream test on a 1 Gbps PON connection
+(the actual/raw JSON output contains no formatting for readability).
+
+*Note: Any warning or error messages will be passed to stdout prior to
+the structured JSON output.*
+```
+{
+	"version": "7.2.0",
+	"protocol": 8,
+	"config": {
+		"type": "Downstream",
+		"duration": 10,
+		"delvat_lower": 30,
+		"delvar_upper": 90,
+		"delay_usage": "RTT",
+		"interval": 50,
+		"ignore_ooodup": false,
+		"sending_rate": "<Auto>",
+		"congest_th": 2,
+		"hs_delta": 10,
+		"seqerr_th": 0,
+		"iptos_byte": 0
+	},
+	"results": {
+		"summary": {
+			"avgDeliveredPct": 99.88,
+			"seqErrLoss": 1147,
+			"seqErrOoo": 0,
+			"seqErrDup": 0,
+			"owdVarMin": 0,
+			"owdVarAvg": 1,
+			"owdVarMax": 7,
+			"rttVarMin": 0,
+			"rttVarMax": 10,
+			"avgL3Mbps": 729.73
+		},
+		"minimum": {
+			"owd": 5,
+			"rtt": 7
+		},
+		"maximum": {
+			"L3Mbps": 966.91,
+			"L2Mbps": 980.91,
+			"L1Mbps": 996.46,
+			"L0Mbps": 999.57
+		}
+	}
+}
 ```
