@@ -255,19 +255,20 @@ As a workaround for older devices, a compile-time option (DISABLE_INT_TIMER) is
 available that does not rely on an underlying system interval timer. However,
 the trade-off for this mode of operation is that it results in high CPU
 utilization, but clients running on older or low-capability hosts may be able
-to execute tests where they otherwise would not.  In any case, it is not
-recommended for standard server operation.
+to execute tests where they otherwise would not.
 ```
 $ cmake -D DISABLE_INT_TIMER=ON .
 ```
-   
+*Note: Because of the increased CPU utilization, this option is not recommended
+for standard server operation.*
+
 ## JSON Output
 The following code block shows an example of the (formatted) JSON output when
 using the `-f json` option for a downstream test on a 1 Gbps PON connection
 (the actual/raw JSON output contains no formatting for readability).
 
-Note: Any warning or error messages will be passed to stdout prior to
-the structured JSON output.
+*Note: Any warning or error messages will be passed to stdout prior to
+the structured JSON output.*
 ```
 {
 	"version": "7.2.0",
