@@ -260,11 +260,14 @@ recommended for standard server operation.
 ```
 $ cmake -D DISABLE_INT_TIMER=ON .
 ```
-
+   
 ## JSON Output
 The following code block shows an example of the (formatted) JSON output when
-using the `-f json` option for a downstream test on a 1 Gbps PON connection.
-Note, the actual (raw) JSON output contains no formatting for readability.
+using the `-f json` option for a downstream test on a 1 Gbps PON connection
+(the actual/raw JSON output contains no formatting for readability).
+
+Note: Any warning or error messages will be passed to stdout prior to
+the structured JSON output.
 ```
 {
 	"version": "7.2.0",
