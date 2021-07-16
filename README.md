@@ -260,3 +260,52 @@ recommended for standard server operation.
 ```
 $ cmake -D DISABLE_INT_TIMER=ON .
 ```
+
+## JSON Output
+The following code block shows an example of the (formatted) JSON output when
+using the `-f json` option for a downstream test on a 1 Gbps PON connection.
+Note, the actual (raw) JSON output contains no formatting for readability.
+```
+{
+	"version": "7.2.0",
+	"protocol": 8,
+	"config": {
+		"type": "Downstream",
+		"duration": 10,
+		"delvat_lower": 30,
+		"delvar_upper": 90,
+		"delay_usage": "RTT",
+		"interval": 50,
+		"ignore_ooodup": false,
+		"sending_rate": "<Auto>",
+		"congest_th": 2,
+		"hs_delta": 10,
+		"seqerr_th": 0,
+		"iptos_byte": 0
+	},
+	"results": {
+		"summary": {
+			"avgDeliveredPct": 99.88,
+			"seqErrLoss": 1147,
+			"seqErrOoo": 0,
+			"seqErrDup": 0,
+			"owdVarMin": 0,
+			"owdVarAvg": 1,
+			"owdVarMax": 7,
+			"rttVarMin": 0,
+			"rttVarMax": 10,
+			"avgL3Mbps": 729.73
+		},
+		"minimum": {
+			"owd": 5,
+			"rtt": 7
+		},
+		"maximum": {
+			"L3Mbps": 966.91,
+			"L2Mbps": 980.91,
+			"L1Mbps": 996.46,
+			"L0Mbps": 999.57
+		}
+	}
+}
+```
