@@ -127,17 +127,17 @@ related packet losses are present).
 
 For example, the option to send a fixed rate testing after conducting a search
 for the Maximum IP-Layer Capacity will provide a stable measurement of loss,
-delay variatiation, etc., using -I index:
+delay variation, etc., using -I index:
 ```
 $ udpst -d <server> -I 967
     Do downstream test to client from server (as hostname or IP address) at
     a fixed rate of 967 Mbps
 ```
 
-There are circumstances when changes to the defaults are warrented, such as
+There are circumstances when changes to the defaults are warranted, such as
 extremely long paths with unknown cross traffic, high levels of competing traffic,
-testing over radio linkswith highly variable loss and delay, and test 
-paths that exhibit bi-modal rate behavior in a repeated tests. In these 
+testing over radio links with highly variable loss and delay, and test 
+paths that exhibit bi-modal rate behavior in repeated tests. In these 
 circumstances, the following client-side command-line parameters have been useful:
 ```
 $ udpst -?
