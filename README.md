@@ -32,7 +32,7 @@ direction.
 
 For upstream tests, the feedback messages from the server instruct the client
 on how it should adjust its transmission rate based on the presence or absence
-of any sequence errors or delay variation changes observed by the server.
+of sufficient sequence errors or delay variation changes observed by the server.
 For downstream tests, the feedback messages simply communicate any sequence
 errors or delay variation changes observed by the client. In either case,
 the server is the host executing the algorithm that determines the rate
@@ -41,7 +41,8 @@ adjustment algorithm to be more easily enhanced and customized to accommodate
 diverse network services and protocols. To that end, and to encourage
 additional testing and experimentation, the software has been structured so
 that virtually all of the settings and thresholds used by the algorithm are
-currently available as client-side command-line parameters.
+currently available as client-side command-line parameters (allowing modification
+beyond the current set of default values updated in Release 7.2.1).
 
 By default, both IPv4 and IPv6 tests can be serviced simultaneously when acting
 as a server. When acting as a client, testing is performed in one address
@@ -112,6 +113,47 @@ all jumbo sizes) shows the table adjusted for those specific scenarios.*
 ```
 $ udpst -?
 ```
+
+**Default values:**
+Note that default values have been provided for all essential settings and
+thresholds, and these values are recommended for use at the beginning of any
+test campaign. The set of default values are subject to re-consideration
+with further testing, and may be revised (as were two of the values in 
+Release 7.2.1: the sequence error threshold was increased to 10 and the 
+consecutive feedback interval to 3; this is equivalent to using -q10 and -c3
+in earlier releases, and helps to maintain fast ramp-up when non-congestion
+related packet losses are present).
+
+For example, the option to send a fixed rate testing after conducting a search
+for the Maximum IP-Layer Capacity will provide a stable measurement of loss,
+delay variatiation, etc., using -I index:
+```
+$ udpst -d <server> -I 967
+    Do downstream test to client from server (as hostname or IP address) at
+    a fixed rate of 967 Mbps
+```
+
+There are circumstances when changes to the defaults are warrented, such as
+extremely long paths with unknown cross traffic, high levels of competing traffic,
+testing over radio linkswith highly variable loss and delay. In these 
+circumstances, the following client-side command-line parameters have been useful:
+```
+$ udpst -?
+  ...
+        -i count     Display bimodal maxima (specify initial sub-intervals)
+ (c)    -R           Ignore Out-of-Order/Duplicate datagrams
+ (m)    -t time      Test interval time in seconds [Default 10, Max 3600]
+ (c)    -U delvar    Upper delay variation threshold in ms [Default 90]
+ (c)    -c thresh    Congestion slow adjustment threshold [Default 3]
+ (c)    -h delta     High-speed (row adjustment) delta [Default 10]
+ (c)    -q seqerr    Sequence error threshold [Default 10] 
+```
+See the following publication (which is updated frequently) for more details
+on testing in the circumstances described above:
+
+- ITU-T Y-series Supplement 60 (2020): _Interpreting ITU-T Y.1540 maximum IP-layer capacity measurements_, 
+ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
+
 
 ## Building OB-UDPST
 
