@@ -136,7 +136,8 @@ $ udpst -d <server> -I 967
 
 There are circumstances when changes to the defaults are warrented, such as
 extremely long paths with unknown cross traffic, high levels of competing traffic,
-testing over radio linkswith highly variable loss and delay. In these 
+testing over radio linkswith highly variable loss and delay, and test 
+paths that exhibit bi-modal rate behavior in a repeated tests. In these 
 circumstances, the following client-side command-line parameters have been useful:
 ```
 $ udpst -?
