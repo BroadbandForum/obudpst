@@ -115,6 +115,7 @@ $ udpst -?
 ```
 
 **Default values:**
+
 Note that default values have been provided for all essential settings and
 thresholds, and these values are recommended for use at the beginning of any
 test campaign. The set of default values are subject to re-consideration
