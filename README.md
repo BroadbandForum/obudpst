@@ -122,16 +122,17 @@ test campaign. The set of default values are subject to re-consideration
 with further testing, and may be revised (as were two of the values in 
 Release 7.2.1: the sequence error threshold was increased to 10 and the 
 consecutive feedback interval to 3; this is equivalent to using -q10 and -c3
-in earlier releases, and helps to maintain fast ramp-up when non-congestion
-related packet losses are present).
+in earlier releases, and these changes to the default values help to 
+maintain fast ramp-up when non-congestion related packet losses are present).
 
 For example, the option to send a fixed rate testing after conducting a search
 for the Maximum IP-Layer Capacity will provide a stable measurement of loss,
 delay variation, etc., using -I index:
 ```
-$ udpst -d <server> -I 967
-    Do downstream test to client from server (as hostname or IP address) at
-    a fixed rate of 967 Mbps
+$ udpst -d <server> -I 958
+    Do downstream test from server (as hostname or IP address) to client at
+    a fixed rate of 958 Mbps (0.99 times the Maximum IP-layer Capacity for 
+    udpst on a 1Gbps access link using one VLAN tag). 
 ```
 
 There are circumstances when changes to the defaults are warranted, such as
