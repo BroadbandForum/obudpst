@@ -108,13 +108,13 @@
 #define DEF_TRIAL_INT     50         // Status feedback/trial interval (ms)
 #define MIN_TRIAL_INT     5          //
 #define MAX_TRIAL_INT     250        //
-#define DEF_SLOW_ADJ_TH   2          // Slow adjustment threshold
+#define DEF_SLOW_ADJ_TH   3          // Slow adjustment threshold
 #define MIN_SLOW_ADJ_TH   1          //
 #define MAX_SLOW_ADJ_TH   UINT16_MAX //
 #define DEF_HS_DELTA      10         // High-speed delta (rows)
 #define MIN_HS_DELTA      1          //
 #define MAX_HS_DELTA      UINT8_MAX  //
-#define DEF_SEQ_ERR_TH    0          // Sequence error threshold
+#define DEF_SEQ_ERR_TH    10         // Sequence error threshold
 #define MIN_SEQ_ERR_TH    0          //
 #define MAX_SEQ_ERR_TH    UINT16_MAX //
 #define DEF_LOGFILE_MAX   1000       // Log file max size (KBytes)
