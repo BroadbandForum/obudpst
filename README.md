@@ -308,53 +308,39 @@ $ cmake -D DISABLE_INT_TIMER=ON .
 for standard server operation.*
 
 ## JSON Output
-The following code block shows an example of the (formatted) JSON output when
-using the `-f json` option for a downstream test on a 1 Gbps PON connection
-(the actual/raw JSON output contains no formatting for readability).
+For examples of the JSON output fields see the included sample files named
+"udpst-*.json". Available JSON output options include `-f json` (unformatted),
+`-f jsonb` (brief & unformatted), and `-f jsonf` (formatted). To significantly
+reduce the size of the JSON output, option `-s` (omit sub-interval results)
+can be combined with `-f jsonb` (omit static input fields). 
 
-*Note: Any warning or error messages will be passed to stdout prior to
-the structured JSON output.*
-```
-{
-	"version": "7.2.0",
-	"protocol": 8,
-	"config": {
-		"type": "Downstream",
-		"duration": 10,
-		"delvat_lower": 30,
-		"delvar_upper": 90,
-		"delay_usage": "RTT",
-		"interval": 50,
-		"ignore_ooodup": false,
-		"sending_rate": "<Auto>",
-		"congest_th": 2,
-		"hs_delta": 10,
-		"seqerr_th": 0,
-		"iptos_byte": 0
-	},
-	"results": {
-		"summary": {
-			"avgDeliveredPct": 99.88,
-			"seqErrLoss": 1147,
-			"seqErrOoo": 0,
-			"seqErrDup": 0,
-			"owdVarMin": 0,
-			"owdVarAvg": 1,
-			"owdVarMax": 7,
-			"rttVarMin": 0,
-			"rttVarMax": 10,
-			"avgL3Mbps": 729.73
-		},
-		"minimum": {
-			"owd": 5,
-			"rtt": 7
-		},
-		"maximum": {
-			"L3Mbps": 966.91,
-			"L2Mbps": 980.91,
-			"L1Mbps": 996.46,
-			"L0Mbps": 999.57
-		}
-	}
-}
-```
+Included in the output is a numeric ErrorStatus field (which corresponds with
+the software exit status) as well as a text ErrorMessage field. If a test
+completes normally without incident the error status will be 0 (zero) and the
+error message will be empty. If a test starts but a soft error or warning
+occurs, the error status will be 1 (one) and the most recent warning message
+will be included. If a hard error or failure occurs the error status will be
+-1 (negative one) and an error message will be included.
+
+*Note: When stdout is not redirected to a file, JSON may appear clipped due to
+non-blocking console writes.*
+
+## Local Interface Traffic Rate
+Where applicable, it is possible to also output the local interface traffic
+rate (in Mbps) via the `-E <intf>` option. This can be informative when trying
+to account for external traffic that may be consuming a non-trivial amount of
+the interface bandwidth and competing with the measurement traffic. The rate is
+obtained by querying the specific interface byte counters that correspond with
+the direction of the test (i.e., tx_bytes for upstream tests and rx_bytes for
+downstream tests). These values are obtained from the sysfs path
+/sys/class/net/<intf>/statistics. An additional associated option `-M` is also
+available to override normal behavior and use the interface rate instead of
+the measurement traffic to determine a maximum.
+
+When the `-E <intf>` option is utilized, the console output will show the
+interface name in square brackets in the header info and the Ethernet rate of
+the interface in square brackets after the L3/IP measured rate. When JSON
+output is also enabled, the interface name appears in "Interface" and the
+interface rate is in "InterfaceEthMbps". When this option is not utilized,
+these JSON fields will contain an empty string and zero respectively.
+
