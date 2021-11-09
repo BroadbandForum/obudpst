@@ -331,11 +331,11 @@ rate (in Mbps) via the `-E <intf>` option. This can be informative when trying
 to account for external traffic that may be consuming a non-trivial amount of
 the interface bandwidth and competing with the measurement traffic. The rate is
 obtained by querying the specific interface byte counters that correspond with
-the direction of the test (i.e., tx_bytes for upstream tests and rx_bytes for
-downstream tests). These values are obtained from the sysfs path
-/sys/class/net/<intf>/statistics. An additional associated option `-M` is also
-available to override normal behavior and use the interface rate instead of
-the measurement traffic to determine a maximum.
+the direction of the test (i.e., `tx_bytes` for upstream tests and `rx_bytes`
+for downstream tests). These values are obtained from the sysfs path
+`/sys/class/net/<intf>/statistics`. An additional associated option `-M` is
+also available to override normal behavior and use the interface rate instead
+of the measurement traffic to determine a maximum.
 
 When the `-E <intf>` option is utilized, the console output will show the
 interface name in square brackets in the header info and the Ethernet rate of
