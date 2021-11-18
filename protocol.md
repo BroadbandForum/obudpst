@@ -1,5 +1,9 @@
 # Test Protocol Description ( version 8 )
 
+(An Internet-Draft, 
+https://datatracker.ietf.org/doc/html/draft-morton-ippm-capacity-metric-protocol-02
+describes Protocol Version 8 in even more detail.)
+
 ## Introduction 
 The udpst utility uses a unique Control protocol and test packet format. 
 All control message PDUs and test PDUs use UDP transport, with limited reliability
