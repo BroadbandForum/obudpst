@@ -1,6 +1,6 @@
 # CHANGELOG.MD for udpst 7.x.0 Releases
 
-*The udpst utility conforms to TR-471 ans TR-471 Issue 2. The latest TR-471 specification can be found at
+*The udpst utility conforms to TR-471 and TR-471 Issue 2. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
 
 # 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.3.0)
@@ -8,7 +8,7 @@ https://www.broadband-forum.org/technical/download/TR-471.pdf *
 This release has a greatly expanded (optional) JSON-formatted version of the command-line output.
 
 Further, this release implements virtually all the TR-471 Issue 2 and TR-181 IPLayerCapacity{} data model elements.
-The File "ob-udpst output mapping to (current) JSON and TR-471 info model-v33-20211118_071424.pdf" provides the mapping
+The File "ob-udpst_output_mapping_to_current_JSON and_TR-471_info model-v33-20211118_071424.pdf" provides the mapping
 where names differ in small ways, or where additional names are provided in the JSON format or STDOUT.
 
 We also include measurement of Ethernet Interface traffic during a test, to help identify when customer traffic was 
