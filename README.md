@@ -14,8 +14,8 @@ ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
 - ETSI Technical Specification 103 222 Part 2 (08/2019): _Reference benchmarking and KPIs for High speed internet_, 
 ETSI TS 103 222-2, V.1.2.1, https://www.etsi.org/deliver/etsi_ts/103200_103299/10322202/01.02.01_60/ts_10322202v010201p.pdf
 
-- IETF IPPM Internet Draft (Approved version 12): _Metrics and Methods for One-way IP Capacity_, 
-https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-metric-method/
+- IETF RFC 9097: _Metrics and Methods for One-way IP Capacity_, 
+https://datatracker.ietf.org/doc/html/rfc9097
 
 - ETSI Technical Report  103 702 (2020-10): _Speech and multimedia Transmission Quality (STQ); 
 QoS parameters and test scenarios for assessing network capabilities in 5G performance measurements_,
@@ -270,6 +270,9 @@ the connection which closes the socket and deallocates it.
 **More Info**
 
 For much more detail on the test protocol, see the ./protocol.md file.
+Also, an Internet-Draft, 
+https://datatracker.ietf.org/doc/html/draft-morton-ippm-capacity-metric-protocol-02
+describes Protocol Version 8 in even more detail.
 
 ## Linux Socket Buffer Optimization
 For very high speeds (typically above 1 Gbps), the socket buffer maximums of
@@ -321,6 +324,9 @@ error message will be empty. If a test starts but a soft error or warning
 occurs, the error status will be 1 (one) and the most recent warning message
 will be included. If a hard error or failure occurs the error status will be
 -1 (negative one) and an error message will be included.
+
+The file "ob-udpst_output_mapping...pdf" provides a mapping between JSON key names,
+TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various results.
 
 *Note: When stdout is not redirected to a file, JSON may appear clipped due to
 non-blocking console writes.*
