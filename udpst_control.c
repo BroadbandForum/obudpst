@@ -45,7 +45,9 @@
  * Len Ciavattone          08/04/2020    Rearranged source files
  * Len Ciavattone          09/03/2020    Added __linux__ conditionals
  * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
- *
+ * Len Ciavattone          10/13/2021    Refresh with clang-format
+ *                                       Add TR-181 fields in JSON
+ *                                       Add interface traffic rate support
  */
 
 #define UDPST_CONTROL
@@ -58,6 +60,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <net/if.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/file.h>
@@ -99,8 +102,8 @@ extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
 extern char *boolText[];
-extern cJSON *json_output;
-
+//
+extern cJSON *json_top, *json_output;
 
 //----------------------------------------------------------------------------
 //
@@ -110,8 +113,8 @@ extern cJSON *json_output;
 #define TESTHDR_LINE1 \
         "%s%s Test Interval(sec): %d, DelayVar Thresholds(ms): %d-%d [%s], Trial Interval(ms): %d, Ignore OoO/Dup: %s,\n"
 #define TESTHDR_LINE2 "    SendingRate Index: %s, Congestion Threshold: %d, High-Speed Delta: %d, SeqError Threshold: %d, "
-static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d\n";
-static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d\n";
+static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d%s\n";
+static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d%s\n";
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -142,6 +145,8 @@ void init_conn(int connindex, BOOL cleanup) {
 #endif
                         close(c->fd);
                 }
+                if (c->intfFD >= 0)
+                        close(c->intfFD);
         }
 
         //
@@ -158,6 +163,7 @@ void init_conn(int connindex, BOOL cleanup) {
         c->timer1Action = &null_action;
         c->timer2Action = &null_action;
         c->timer3Action = &null_action;
+        c->intfFD       = -1;
 
         return;
 }
@@ -180,11 +186,26 @@ int send_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
         struct timespec tspecvar;
-        char addrstr[INET6_ADDRSTRLEN], portstr[8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8], intfpath[IFNAMSIZ + 64];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
 #ifdef AUTH_KEY_ENABLE
         unsigned int uvar;
 #endif
+        //
+        // Open local sysfs interface statistics
+        //
+        if (*conf.intfName) {
+                var = sprintf(intfpath, "/sys/class/net/%s/statistics/", conf.intfName);
+                if (conf.usTesting)
+                        strcat(&intfpath[var], "tx_bytes");
+                else
+                        strcat(&intfpath[var], "rx_bytes");
+                if ((c->intfFD = open(intfpath, O_RDONLY)) < 0) {
+                        var = sprintf(scratch, "OPEN ERROR: %s (%s)\n", strerror(errno), intfpath);
+                        send_proc(errConn, scratch, var);
+                        return -1;
+                }
+        }
 
         //
         // Build setup request PDU
@@ -222,7 +243,7 @@ int send_setupreq(int connindex) {
         if (send_proc(connindex, (char *) cHdrSR, var) != var)
                 return -1;
         if (monConn >= 0) {
-                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                             NI_NUMERICHOST | NI_NUMERICSERV);
                 var = sprintf(scratch, "[%d]Setup request sent from %s:%d to %s:%s\n", connindex, c->locAddr, c->locPort, addrstr,
                               portstr);
@@ -272,7 +293,7 @@ int service_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int i, var;
         struct timespec tspecvar;
-        char addrstr[INET6_ADDRSTRLEN], portstr[8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
 #ifdef AUTH_KEY_ENABLE
         unsigned int uvar;
@@ -296,7 +317,7 @@ int service_setupreq(int connindex) {
         //
         var = 0;
         if (monConn >= 0) {
-                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                             NI_NUMERICHOST | NI_NUMERICSERV);
         }
         if ((i = (int) ntohs(cHdrSR->protocolVer)) != PROTOCOL_VER) {
@@ -407,7 +428,7 @@ int service_setupreq(int connindex) {
         if (send_proc(connindex, (char *) cHdrSR, var) != var)
                 return 0;
         if (monConn >= 0) {
-                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+                getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                             NI_NUMERICHOST | NI_NUMERICSERV);
                 var = sprintf(scratch, "[%d]Setup response sent from %s:%d to %s:%s\n", connindex, c->locAddr, c->locPort, addrstr,
                               portstr);
@@ -424,7 +445,7 @@ int service_setupreq(int connindex) {
 int service_setupresp(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char addrstr[INET6_ADDRSTRLEN], portstr[8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
 
@@ -468,7 +489,7 @@ int service_setupresp(int connindex) {
         //
         // Obtain IP address and port number of sender
         //
-        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
         if (monConn >= 0) {
                 var = sprintf(scratch, "[%d]Setup response received from %s:%s\n", connindex, addrstr, portstr);
@@ -541,6 +562,7 @@ int service_setupresp(int connindex) {
                               c->remAddr, c->remPort);
                 send_proc(monConn, scratch, var);
         }
+
         return 0;
 }
 //----------------------------------------------------------------------------
@@ -553,7 +575,7 @@ int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
         char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
-        char addrstr[INET6_ADDRSTRLEN], portstr[8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8], intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -575,7 +597,7 @@ int service_actreq(int connindex) {
         //
         // Obtain IP address and port number of sender
         //
-        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
         if (monConn >= 0) {
                 var = sprintf(scratch, "[%d]Test activation request received from %s:%s\n", connindex, addrstr, portstr);
@@ -810,7 +832,7 @@ int service_actreq(int connindex) {
         // Display test settings and general info if needed
         //
         *connid = '\0';
-        if (!conf.JSONsummary) {
+        if (!conf.jsonOutput) {
                 if (conf.verbose)
                         sprintf(connid, "[%d]", connindex);
                 if (!repo.isServer || conf.verbose) {
@@ -826,12 +848,16 @@ int service_actreq(int connindex) {
                                 strcpy(sritext, SRAUTO_TEXT);
                         else
                                 sprintf(sritext, "%d", c->srIndexConf);
-                        var =
-                        sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
-                                boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+                        *intflabel = '\0';
+                        if (c->intfFD >= 0) { // Append interface label
+                                snprintf(intflabel, sizeof(intflabel), ", [%s]", conf.intfName);
+                        }
+                        var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
+                                      c->trialInt, boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta,
+                                      c->seqErrThresh, c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
                 }
-        } 
+        }
 
         //
         // Update end time (used as watchdog) in case client goes quiet
@@ -860,6 +886,7 @@ int service_actresp(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
         char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
+        char intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = &c->srStruct; // Set to connection structure
         struct timespec tspecvar;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -992,33 +1019,105 @@ int service_actresp(int connindex) {
                         strcpy(sritext, SRAUTO_TEXT);
                 else
                         sprintf(sritext, "%d", c->srIndexConf);
-
-                if (conf.JSONsummary) {
-                        // Create config json object
-                        cJSON *json_config = cJSON_CreateObject();
-
-                        // Add Variable to the config object
-                        cJSON_AddItemToObject(json_config, "type",              cJSON_CreateString(testtype));
-                        cJSON_AddItemToObject(json_config, "duration",          cJSON_CreateNumber(c->testIntTime));
-                        cJSON_AddItemToObject(json_config, "delvat_lower",      cJSON_CreateNumber(c->lowThresh));
-                        cJSON_AddItemToObject(json_config, "delvar_upper",      cJSON_CreateNumber(c->upperThresh));
-                        cJSON_AddItemToObject(json_config, "delay_usage",       cJSON_CreateString(delusage));
-                        cJSON_AddItemToObject(json_config, "interval",          cJSON_CreateNumber(c->trialInt));
-                        cJSON_AddItemToObject(json_config, "ignore_ooodup",     cJSON_CreateBool(c->ignoreOooDup));
-                        cJSON_AddItemToObject(json_config, "sending_rate",      cJSON_CreateString(sritext));
-                        cJSON_AddItemToObject(json_config, "congest_th",        cJSON_CreateNumber(c->slowAdjThresh));
-                        cJSON_AddItemToObject(json_config, "hs_delta",          cJSON_CreateNumber(c->highSpeedDelta));
-                        cJSON_AddItemToObject(json_config, "seqerr_th",         cJSON_CreateNumber(c->seqErrThresh));
-                        cJSON_AddItemToObject(json_config, "iptos_byte",        cJSON_CreateNumber(c->ipTosByte));
-
-                        // Add the config object to the output object
-                        cJSON_AddItemToObject(json_output, "config", json_config);
-                } else {
-                        var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage, c->trialInt,
-                                      boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, c->ipTosByte);
+                *intflabel = '\0';
+                if (c->intfFD >= 0) { // Append interface label
+                        snprintf(intflabel, sizeof(intflabel), ", [%s]", conf.intfName);
+                }
+                if (!conf.jsonOutput) {
+                        var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
+                                      c->trialInt, boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta,
+                                      c->seqErrThresh, c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
+                } else {
+                        if (!conf.jsonBrief) {
+                                //
+                                // Create JSON input object
+                                //
+                                cJSON *json_input = cJSON_CreateObject();
+                                //
+                                // Add items to input object
+                                //
+                                cJSON_AddStringToObject(json_input, "Interface", conf.intfName);
+                                if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
+                                        cJSON_AddStringToObject(json_input, "Role", "Sender");
+                                } else {
+                                        cJSON_AddStringToObject(json_input, "Role", "Receiver");
+                                }
+                                cJSON_AddStringToObject(json_input, "Host", repo.serverName);
+                                cJSON_AddNumberToObject(json_input, "Port", c->remPort);
+                                cJSON_AddStringToObject(json_input, "HostIPAddress", c->remAddr);
+                                cJSON_AddStringToObject(json_input, "ClientIPAddress", c->locAddr);
+                                cJSON_AddNumberToObject(json_input, "ClientPort", c->locPort);
+                                cJSON_AddNumberToObject(json_input, "JumboFramesPermitted", conf.jumboStatus);
+                                cJSON_AddNumberToObject(json_input, "NumberOfConnections", 1);
+                                cJSON_AddNumberToObject(json_input, "DSCP", c->ipTosByte >> 2);
+                                if (conf.ipv4Only) {
+                                        cJSON_AddStringToObject(json_input, "ProtocolVersion", "IPv4");
+                                } else if (conf.ipv6Only) {
+                                        cJSON_AddStringToObject(json_input, "ProtocolVersion", "IPv6");
+                                } else {
+                                        cJSON_AddStringToObject(json_input, "ProtocolVersion", "Any");
+                                }
+                                cJSON_AddNumberToObject(json_input, "UDPPayloadMin", MIN_PAYLOAD_SIZE);
+                                if (conf.jumboStatus) {
+                                        cJSON_AddNumberToObject(json_input, "UDPPayloadMax", MAX_JPAYLOAD_SIZE);
+                                } else {
+                                        cJSON_AddNumberToObject(json_input, "UDPPayloadMax", MAX_PAYLOAD_SIZE);
+                                }
+                                cJSON_AddStringToObject(json_input, "UDPPayloadContent", "zeroes");
+                                if (c->srIndexConf == DEF_SRINDEX_CONF) {
+                                        cJSON_AddStringToObject(json_input, "TestType", "Search");
+                                } else {
+                                        cJSON_AddStringToObject(json_input, "TestType", "Fixed");
+                                }
+                                cJSON_AddNumberToObject(json_input, "IPDVEnable", c->useOwDelVar);
+                                cJSON_AddNumberToObject(json_input, "IPRREnable", 1);
+                                cJSON_AddNumberToObject(json_input, "RIPREnable", 1);
+                                cJSON_AddNumberToObject(json_input, "PreambleDuration", 0);
+                                // Using "SendingRateIndex" instead of "StartSendingRate" for this implementation
+                                if (c->srIndexConf == DEF_SRINDEX_CONF) {
+                                        cJSON_AddNumberToObject(json_input, "SendingRateIndex", -1);
+                                } else {
+                                        cJSON_AddNumberToObject(json_input, "SendingRateIndex", c->srIndexConf);
+                                }
+                                cJSON_AddNumberToObject(json_input, "NumberTestSubIntervals", c->testIntTime / c->subIntPeriod);
+                                cJSON_AddNumberToObject(json_input, "NumberFirstModeTestSubIntervals", conf.bimodalCount);
+                                cJSON_AddNumberToObject(json_input, "TestSubInterval", c->subIntPeriod * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "StatusFeedbackInterval", c->trialInt);
+                                cJSON_AddNumberToObject(json_input, "TimeoutNoTestTraffic", WARNING_NOTRAFFIC * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "TimeoutNoStatusMessage", WARNING_NOTRAFFIC * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "Tmax", WARNING_NOTRAFFIC * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "TmaxRTT", TIMEOUT_NOTRAFFIC * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "TimestampResolution", 1);
+                                cJSON_AddNumberToObject(json_input, "SeqErrThresh", c->seqErrThresh);
+                                cJSON_AddNumberToObject(json_input, "ReordDupIgnoreEnable", c->ignoreOooDup);
+                                cJSON_AddNumberToObject(json_input, "LowerThresh", c->lowThresh);
+                                cJSON_AddNumberToObject(json_input, "UpperThresh", c->upperThresh);
+                                cJSON_AddNumberToObject(json_input, "HighSpeedDelta", c->highSpeedDelta);
+                                cJSON_AddNumberToObject(json_input, "SlowAdjThresh", c->slowAdjThresh);
+                                cJSON_AddNumberToObject(json_input, "HSpeedThresh", repo.hSpeedThresh * 1000000);
+                                //
+                                // Add input object to top-level object
+                                //
+                                cJSON_AddItemToObject(json_top, "Input", json_input);
+                        }
+
+                        //
+                        // Create output object and add initial items
+                        //
+                        if (json_output == NULL) {
+                                json_output = cJSON_CreateObject();
+                        }
+                        create_timestamp(&repo.systemClock);
+                        cJSON_AddStringToObject(json_output, "BOMTime", scratch);
+                        //
+                        cJSON_AddNumberToObject(json_output, "TmaxUsed", WARNING_NOTRAFFIC * MSECINSEC);
+                        cJSON_AddNumberToObject(json_output, "TestInterval", c->testIntTime);
+                        cJSON_AddNumberToObject(json_output, "TmaxRTTUsed", TIMEOUT_NOTRAFFIC * MSECINSEC);
+                        cJSON_AddNumberToObject(json_output, "TimestampResolutionUsed", 1);
                 }
         }
+
         //
         // Clear timeout timer
         //
@@ -1044,7 +1143,7 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
         register struct connection *c = &conn[connindex];
         int i, var, fd;
         BOOL hostisaddr = FALSE;
-        char addrstr[INET6_ADDRSTRLEN], portstr[8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct addrinfo hints, *res = NULL, *ai;
         struct sockaddr_storage sas;
 
@@ -1097,7 +1196,7 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
                 } else if (monConn >= 0) {
                         var = sprintf(scratch, "%s =", host);
                         for (ai = res; ai != NULL; ai = ai->ai_next) {
-                                getnameinfo(ai->ai_addr, ai->ai_addrlen, addrstr, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+                                getnameinfo(ai->ai_addr, ai->ai_addrlen, addrstr, INET6_ADDR_STRLEN, NULL, 0, NI_NUMERICHOST);
                                 var += sprintf(&scratch[var], " %s", addrstr);
                         }
                         var += sprintf(&scratch[var], "\n");
@@ -1121,7 +1220,8 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
                         //
                         // Save IP address to designated location
                         //
-                        getnameinfo((struct sockaddr *) ai->ai_addr, ai->ai_addrlen, ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+                        getnameinfo((struct sockaddr *) ai->ai_addr, ai->ai_addrlen, ip, INET6_ADDR_STRLEN, NULL, 0,
+                                    NI_NUMERICHOST);
                         var = 0;
                         break;
                 } else if (action == SMA_BIND) {
@@ -1326,7 +1426,7 @@ int new_conn(int activefd, char *host, int port, int type, int (*priaction)(int)
                 init_conn(i, TRUE);
                 return -1;
         }
-        getnameinfo((struct sockaddr *) &sas, var, conn[i].locAddr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+        getnameinfo((struct sockaddr *) &sas, var, conn[i].locAddr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
         conn[i].locPort = atoi(portstr);
 
@@ -1390,7 +1490,7 @@ int connected(int connindex) {
                 send_proc(errConn, scratch, var);
                 return -1;
         }
-        getnameinfo((struct sockaddr *) &sas, var, c->locAddr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+        getnameinfo((struct sockaddr *) &sas, var, c->locAddr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
         c->locPort = atoi(portstr);
 
@@ -1403,7 +1503,7 @@ int connected(int connindex) {
                 send_proc(errConn, scratch, var);
                 return -1;
         }
-        getnameinfo((struct sockaddr *) &sas, var, c->remAddr, INET6_ADDRSTRLEN, portstr, sizeof(portstr),
+        getnameinfo((struct sockaddr *) &sas, var, c->remAddr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
         c->remPort = atoi(portstr);
 

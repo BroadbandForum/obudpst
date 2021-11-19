@@ -47,7 +47,10 @@
  * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
  * Len Ciavattone          06/08/2021    Add DISABLE_INT_TIMER conditional
  *                                       to support older client devices
- *
+ * Len Ciavattone          10/13/2021    Refresh with clang-format
+ *                                       Limit format options to client
+ *                                       Add TR-181 fields in JSON
+ *                                       Add JSON error status and message
  */
 
 #include "config.h"
@@ -64,6 +67,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
@@ -76,13 +80,13 @@
 #include "../udpst_alt1.h"
 #endif
 //
+#include "cJSON.h"
 #include "udpst_common.h"
 #include "udpst_protocol.h"
 #include "udpst.h"
 #include "udpst_control.h"
 #include "udpst_data.h"
 #include "udpst_srates.h"
-#include "cJSON.h"
 #ifndef __linux__
 #include "../udpst_alt2.h"
 #endif
@@ -95,6 +99,7 @@ void signal_alrm(int);
 void signal_exit(int);
 int proc_parameters(int, char **, int);
 int param_error(int, int, int);
+int json_finish(int);
 
 //----------------------------------------------------------------------------
 //
@@ -108,9 +113,9 @@ struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
 char *boolText[]                      = {"Disabled", "Enabled"};
-cJSON *json_output = NULL; // Container for the JSON output
-//cJSON *json_output = cJSON_CreateObject();
-
+//
+cJSON *json_top = NULL, *json_output = NULL;
+char json_errbuf[STRING_SIZE];
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -127,13 +132,20 @@ int main(int argc, char **argv) {
         struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
         struct stat statbuf;
 
-        json_output = cJSON_CreateObject();
         //
         // Verify and process parameters, initialize configuration and repository
         //
         if (proc_parameters(argc, argv, outputfd) != 0) {
                 return -1;
         }
+
+        //
+        // Create top-level JSON output object if needed
+        //
+        if (conf.jsonOutput) {
+                json_top = cJSON_CreateObject();
+        }
+        *json_errbuf = '\0'; // Initialize to no error
 
         //
         // Execute as daemon if requested
@@ -182,31 +194,45 @@ int main(int argc, char **argv) {
         }
 
         //
-        // Print banner
+        // Initialize local copy of system time clock
         //
-        if (!conf.JSONsummary) {
+        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
 
+        //
+        // Print banner or initialize JSON output object
+        //
+        if (!conf.jsonOutput) {
                 var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
-                        SOFTWARE_VER, PROTOCOL_VER);
+                              SOFTWARE_VER, PROTOCOL_VER);
                 var = write(outputfd, scratch, var);
                 if (repo.isServer)
                         var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
                 else
                         var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
-        #ifdef AUTH_KEY_ENABLE
+#ifdef AUTH_KEY_ENABLE
                 var += sprintf(&scratch[var], ", Authentication: Available");
-        #else
+#else
                 var += sprintf(&scratch[var], ", Authentication: Unavailable");
-        #endif
-        #ifdef HAVE_SENDMMSG
-                var += sprintf(&scratch[var], ", sendmmsg syscall: Available\n");
-        #else
-                var += sprintf(&scratch[var], ", sendmmsg syscall: Unavailable\n");
-        #endif
+#endif
+#ifdef HAVE_SENDMMSG
+                var += sprintf(&scratch[var], ", System Call sendmmsg(): Available\n");
+#else
+                var += sprintf(&scratch[var], ", System Call sendmmsg(): Unavailable\n");
+#endif
                 var = write(outputfd, scratch, var);
         } else {
-                cJSON_AddItemToObject(json_output, "version", cJSON_CreateString(SOFTWARE_VER));
-                cJSON_AddItemToObject(json_output, "protocol", cJSON_CreateNumber(PROTOCOL_VER));
+                //
+                // Add initial items to top-level object
+                //
+                if (!conf.jsonBrief) {
+                        cJSON_AddNumberToObject(json_top, "IPLayerMaxConnections", 1);
+                        cJSON_AddNumberToObject(json_top, "IPLayerMaxIncrementalResult", MAX_TESTINT_TIME / MIN_SUBINT_PERIOD);
+                        cJSON *json_supported = cJSON_CreateObject();
+                        cJSON_AddStringToObject(json_supported, "SoftwareVersion", SOFTWARE_VER);
+                        cJSON_AddNumberToObject(json_supported, "ControlProtocolVersion", PROTOCOL_VER);
+                        cJSON_AddStringToObject(json_supported, "Metrics", "IPLR,Sampled_RTT,IPDV,IPRR,RIPR");
+                        cJSON_AddItemToObject(json_top, "IPLayerCapSupported", json_supported);
+                }
         }
 
         //
@@ -256,12 +282,8 @@ int main(int argc, char **argv) {
                 var = write(outputfd, scratch, var);
                 return -1;
         }
+        clock_gettime(CLOCK_REALTIME, &repo.systemClock); // Reinitialize local copy of system time clock
 #endif
-
-        //
-        // Initialize local copy of system time clock
-        //
-        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
 
         //
         // Set alarm signal handler
@@ -364,7 +386,11 @@ int main(int argc, char **argv) {
                 if ((var = sock_mgmt(-1, repo.serverName, 0, repo.serverIp, SMA_LOOKUP)) != 0) {
                         send_proc(errConn, scratch, var);
                         appstatus = -1;
-                        sig_exit  = 1;
+                        if (!repo.isServer && conf.jsonOutput) {
+                                tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                        } else {
+                                sig_exit = 1;
+                        }
                 }
         }
 
@@ -372,11 +398,15 @@ int main(int argc, char **argv) {
         // If server, create a connection for control port to process inbound setup requests,
         // else create a connection for client testing and send setup request to server
         //
-        if (!sig_exit) {
+        if (appstatus == 0) {
                 if (repo.isServer) {
                         if ((i = new_conn(-1, repo.serverIp, conf.controlPort, T_UDP, &recv_proc, &service_setupreq)) < 0) {
                                 appstatus = -1;
-                                sig_exit  = 1;
+                                if (!repo.isServer && conf.jsonOutput) {
+                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                                } else {
+                                        sig_exit = 1;
+                                }
                         } else if (monConn >= 0) {
                                 var =
                                     sprintf(scratch, "[%d]Awaiting setup requests on %s:%d\n", i, conn[i].locAddr, conn[i].locPort);
@@ -385,10 +415,18 @@ int main(int argc, char **argv) {
                 } else {
                         if ((i = new_conn(-1, NULL, 0, T_UDP, &recv_proc, &service_setupresp)) < 0) {
                                 appstatus = -1;
-                                sig_exit  = 1;
+                                if (!repo.isServer && conf.jsonOutput) {
+                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                                } else {
+                                        sig_exit = 1;
+                                }
                         } else if (send_setupreq(i) < 0) {
                                 appstatus = -1;
-                                sig_exit  = 1;
+                                if (!repo.isServer && conf.jsonOutput) {
+                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                                } else {
+                                        sig_exit = 1;
+                                }
                         }
                 }
         }
@@ -490,11 +528,15 @@ int main(int argc, char **argv) {
                                                         var = sprintf(scratch, "[%d]End time reached\n", i);
                                                         send_proc(monConn, scratch, var);
                                                 }
-                                                init_conn(i, TRUE);
                                                 if (!repo.isServer) {
-                                                        appstatus = repo.endTimeStatus;
-                                                        sig_exit  = 1;
+                                                        if (conf.jsonOutput) {
+                                                                appstatus = json_finish(i);
+                                                        } else {
+                                                                appstatus = repo.endTimeStatus;
+                                                        }
+                                                        sig_exit = 1;
                                                 }
+                                                init_conn(i, TRUE);
                                                 continue;
                                         }
                                 }
@@ -592,7 +634,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsf:jDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:l:k:?";
+        char *optstring = "ud46xevsf:jDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -675,9 +717,9 @@ int proc_parameters(int argc, char **argv, int fd) {
         //
         // Continue to initialize non-zero repository data
         //
-        repo.epollFD       = -1; // No file descriptor
-        repo.maxConnIndex  = -1; // No connections allocated
-        repo.endTimeStatus = -1; // Default to errored exit
+        repo.epollFD       = -1;           // No file descriptor
+        repo.maxConnIndex  = -1;           // No connections allocated
+        repo.endTimeStatus = STATUS_ERROR; // Default to hard error, require explicit success
 
         //
         // Parse remaining parameters
@@ -688,6 +730,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                 switch (i) {
                 case '4':
                         conf.addrFamily = AF_INET;
+                        conf.ipv4Only   = TRUE;
                         break;
                 case '6':
                         conf.addrFamily = AF_INET6;
@@ -711,8 +754,19 @@ int proc_parameters(int argc, char **argv, int fd) {
                         conf.summaryOnly = TRUE;
                         break;
                 case 'f':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Ouput format options only available to client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
                         if (strcmp(optarg, "json") == 0) {
-                                conf.JSONsummary = TRUE;
+                                conf.jsonOutput = TRUE;
+                        } else if (strcmp(optarg, "jsonb") == 0) {
+                                conf.jsonOutput = TRUE;
+                                conf.jsonBrief  = TRUE;
+                        } else if (strcmp(optarg, "jsonf") == 0) {
+                                conf.jsonOutput    = TRUE;
+                                conf.jsonFormatted = TRUE;
                         } else {
                                 var = sprintf(scratch, "ERROR: '%s' is not a valid output format\n", optarg);
                                 var = write(fd, scratch, var);
@@ -904,6 +958,23 @@ int proc_parameters(int argc, char **argv, int fd) {
                         }
                         conf.seqErrThresh = value;
                         break;
+                case 'E':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Local interface option only available to client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        strncpy(conf.intfName, optarg, IFNAMSIZ + 1);
+                        conf.intfName[IFNAMSIZ] = '\0';
+                        break;
+                case 'M':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Maximum from local interface only available to client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.intfForMax = TRUE;
+                        break;
                 case 'l':
                         if (!repo.isServer) {
                                 var = sprintf(scratch, "ERROR: Log file only valid when server\n");
@@ -937,8 +1008,8 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(s)    -x           Execute server as background (daemon) process\n"
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
                                       "       -v           Enable verbose output messaging\n"
-                                      "       -s           Summary output only (no sub-interval output)\n"
-                                      "       -f           Summary format option (valid options 'json')\n"        
+                                      "       -s           Summary/Max output only (no sub-interval output)\n"
+                                      "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);
@@ -966,6 +1037,8 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -c thresh    Congestion slow adjustment threshold [Default %d]\n"
                                       "(c)    -h delta     High-speed (row adjustment) delta [Default %d]\n"
                                       "(c)    -q seqerr    Sequence error threshold [Default %d]\n"
+                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n"
+                                      "(c)    -M           Use local interface rate to determine maximum\n"
                                       "(s)    -l logfile   Log file name when executing as daemon\n"
                                       "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n",
                                       DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
@@ -1004,6 +1077,11 @@ int proc_parameters(int argc, char **argv, int fd) {
                 var = write(fd, scratch, var);
                 return -1;
         }
+        if (conf.verbose && conf.jsonOutput) {
+                var = sprintf(scratch, "ERROR: Verbose not available with JSON output format option\n");
+                var = write(fd, scratch, var);
+                return -1;
+        }
         if (conf.subIntPeriod > conf.testIntTime) {
                 var = sprintf(scratch, "ERROR: Sub-interval period is greater than test interval time\n");
                 var = write(fd, scratch, var);
@@ -1011,6 +1089,16 @@ int proc_parameters(int argc, char **argv, int fd) {
         }
         if (conf.lowThresh > conf.upperThresh) {
                 var = sprintf(scratch, "ERROR: Low delay variation threshold > upper delay variation threshold\n");
+                var = write(fd, scratch, var);
+                return -1;
+        }
+        if (conf.bimodalCount >= conf.testIntTime / conf.subIntPeriod) {
+                var = sprintf(scratch, "ERROR: Bimodal count must be less than total sub-intervals\n");
+                var = write(fd, scratch, var);
+                return -1;
+        }
+        if (conf.intfForMax && *conf.intfName == '\0') {
+                var = sprintf(scratch, "ERROR: Maximum from local interface requires local interface option\n");
                 var = write(fd, scratch, var);
                 return -1;
         }
@@ -1029,5 +1117,56 @@ int param_error(int param, int min, int max) {
                 var = sprintf(scratch, "ERROR: Parameter <%d> out-of-range (%d-%d)\n", param, min, max);
         }
         return var;
+}
+//----------------------------------------------------------------------------
+//
+// Finish JSON processing and output
+//
+int json_finish(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        char *json_string = NULL;
+
+        //
+        // Add final items to output object and add it to top-level object
+        //
+        // Override a successful test completion if there were any warnings or soft errors
+        //
+        if (repo.endTimeStatus == STATUS_SUCCESS && *json_errbuf != '\0')
+                repo.endTimeStatus = STATUS_WARNING;
+        if (json_output) {
+                create_timestamp(&repo.systemClock);
+                cJSON_AddStringToObject(json_output, "EOMTime", scratch);
+                //
+                if (repo.endTimeStatus == STATUS_SUCCESS) {
+                        cJSON_AddStringToObject(json_output, "Status", "Complete");
+                } else {
+                        cJSON_AddStringToObject(json_output, "Status", "Error_Other");
+                }
+                cJSON_AddItemToObject(json_top, "Output", json_output);
+        }
+
+        //
+        // Add error information to top-level object
+        //
+        cJSON_AddNumberToObject(json_top, "ErrorStatus", repo.endTimeStatus);
+        cJSON_AddStringToObject(json_top, "ErrorMessage", json_errbuf);
+
+        //
+        // Convert JSON Object to string and output
+        //
+        // NOTE: When stdout is not redirected to a file, JSON may appear clipped due to non-blocking console writes
+        //
+        json_string     = cJSON_PrintBuffered(json_top, 16384, conf.jsonFormatted); // Size covers likely default test options
+        var             = strlen(json_string);
+        conf.jsonOutput = FALSE; // IMPORTANT: Disable JSON formatting prior to final send_proc() call
+        send_proc(errConn, json_string, var);
+        send_proc(errConn, "\n", 1);
+        //
+        free(json_string);
+        cJSON_Delete(json_top);
+        c->json_siArray = NULL;
+
+        return repo.endTimeStatus;
 }
 //----------------------------------------------------------------------------

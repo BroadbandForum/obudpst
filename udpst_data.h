@@ -47,7 +47,6 @@ extern int stop_test(int);
 extern int recv_proc(int);
 extern int send_proc(int, char *, int);
 extern void sr_copy(struct sendingRate *, struct sendingRate *, BOOL);
-
-#define ROUNDF(f, c) (((float)((int)((f) * (c))) / (c)))
+extern int create_timestamp(struct timespec *);
 
 #endif /* UDPST_DATA_H */
