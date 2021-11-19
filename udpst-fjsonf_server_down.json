@@ -1,0 +1,11 @@
+{
+	"IPLayerMaxConnections":	1,
+	"IPLayerMaxIncrementalResult":	3600,
+	"IPLayerCapSupported":	{
+		"SoftwareVersion":	"7.3.0",
+		"ControlProtocolVersion":	8,
+		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
+	},
+	"ErrorStatus":	-1,
+	"ErrorMessage":	"Timeout awaiting server response, exiting!"
+}

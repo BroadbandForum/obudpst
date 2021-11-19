@@ -59,7 +59,12 @@
 #define AUTH_ENFORCE_TIME TRUE // Enforce authentication time window
 #define WARNING_MSG_LIMIT 50   // Warning message limit
 #define WARNING_NOTRAFFIC 1    // Receive traffic stopped warning threshold (sec)
-#define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 4)
+#define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 2)
+#define STATUS_SUCCESS    0  // Success (test completed without incident)
+#define STATUS_WARNING    1  // Warning or soft error (test runs but with anomaly)
+#define STATUS_ERROR      -1 // Failure or hard error (test designated as failure)
+// Alternative for INET6_ADDRSTRLEN (allows for '%' and textual Zone ID)
+#define INET6_ADDR_STRLEN (INET6_ADDRSTRLEN + 1 + IFNAMSIZ)
 
 // DISABLE_INT_TIMER disables the interval timer when compiling for client
 // devices that are unable to support the required clock resolution. Because
@@ -131,10 +136,11 @@
 #define MAX_L3_PACKET     1250                   // Max desired L3 packet size
 #define MAX_JL3_PACKET    9000                   // Max desired jumbo L3 packet (MTU)
 #define L3DG_OVERHEAD     (8 + 20)               // UDP + IPv4
-#define L2DG_OVERHEAD     (8 + 20 + 18)          // UDP + IPv4 + Eth
-#define L1DG_OVERHEAD     (8 + 20 + 18 + 20)     // UDP + IPv4 + Eth + Preamble/IFG
-#define L0DG_OVERHEAD     (8 + 20 + 18 + 20 + 4) // UDP + IPv4 + Eth + Preamble/IFG + VLAN
+#define L2DG_OVERHEAD     (8 + 20 + 14)          // UDP + IPv4 + Eth(NoFCS)
+#define L1DG_OVERHEAD     (8 + 20 + 18 + 20)     // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG
+#define L0DG_OVERHEAD     (8 + 20 + 18 + 20 + 4) // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG + VLAN
 #define IPV6_ADDSIZE      20                     // IPv6 additional size (over IPv4)
+#define MIN_PAYLOAD_SIZE  (63 - L3DG_OVERHEAD)
 #define MAX_PAYLOAD_SIZE  (MAX_L3_PACKET - L3DG_OVERHEAD)
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
 //
@@ -170,12 +176,15 @@ struct configuration {
         BOOL usTesting;                  // Upstream testing requested
         BOOL dsTesting;                  // Downstream testing requested
         int addrFamily;                  // Address family
+        BOOL ipv4Only;                   // Only allow IPv4 testing
         BOOL ipv6Only;                   // Only allow IPv6 testing
         BOOL isDaemon;                   // Execute as daemon
         BOOL errSuppress;                // Suppress send/receive errors
         BOOL verbose;                    // Enable verbose messaging
         BOOL summaryOnly;                // Do not show sub-interval stats
-        BOOL JSONsummary;                // JSON Output Summary
+        BOOL jsonOutput;                 // JSON Output format
+        BOOL jsonBrief;                  // JSON Output should be minimized
+        BOOL jsonFormatted;              // JSON Output should be formatted
         BOOL jumboStatus;                // Enable/disable jumbo datagram sizes
         BOOL debug;                      // Enable debug messaging
         BOOL showSendingRates;           // Display sending rate table parameters
@@ -197,6 +206,8 @@ struct configuration {
         int slowAdjThresh;               // Slow rate adjustment threshold
         int highSpeedDelta;              // High-speed row adjustment delta
         int seqErrThresh;                // Sequence error threshold
+        BOOL intfForMax;                 // Local interface used for maximum
+        char intfName[IFNAMSIZ + 1];     // Local interface for supplemental stats
         int logFileMax;                  // Maximum log file size
         char *logFile;                   // Name of log file
 };
@@ -216,7 +227,7 @@ struct repository {
         struct sockaddr_storage remSas;   // Remote IP sockaddr storage
         socklen_t remSasLen;              // Remote IP sockaddr storage length
         BOOL isServer;                    // Execute as server
-        char serverIp[INET6_ADDRSTRLEN];  // Server IP address
+        char serverIp[INET6_ADDR_STRLEN]; // Server IP address
         char *serverName;                 // Server hostname or IP address
         int hSpeedThresh;                 // Index of high-speed threshold
         int logFileSize;                  // Current log file size
@@ -227,7 +238,7 @@ struct repository {
 // Test totals and overall test statistics
 //
 struct testSummary {
-        double deliveredSum;      // Delivered sum
+        unsigned int rxDatagrams; // Total rx datagrams
         unsigned int seqErrLoss;  // Loss sum
         unsigned int seqErrOoo;   // Out-of-Order sum
         unsigned int seqErrDup;   // Duplicate sum
@@ -237,6 +248,7 @@ struct testSummary {
         unsigned int rttMinimum;  // Minimum round-trip time
         unsigned int rttMaximum;  // Maximum round-trip time
         double rateSumL3;         // Rate sum at L3
+        double rateSumIntf;       // Rate sum of local interface
         unsigned int sampleCount; // Sample count
 };
 //----------------------------------------------------------------------------
@@ -265,14 +277,14 @@ struct connection {
 #define TEST_TYPE_UNK 0
 #define TEST_TYPE_US  1
 #define TEST_TYPE_DS  2
-        int testType;                   // Test type being executed
-        int testAction;                 // Test action (see load header)
-        int ipProtocol;                 // IPPROTO_IP or IPPROTO_IPV6
-        int ipTosByte;                  // IP ToS byte for testing
-        char locAddr[INET6_ADDRSTRLEN]; // Local IP address as string
-        int locPort;                    // Local port
-        char remAddr[INET6_ADDRSTRLEN]; // Remote IP address as string
-        int remPort;                    // Remote port
+        int testType;                    // Test type being executed
+        int testAction;                  // Test action (see load header)
+        int ipProtocol;                  // IPPROTO_IP or IPPROTO_IPV6
+        int ipTosByte;                   // IP ToS byte for testing
+        char locAddr[INET6_ADDR_STRLEN]; // Local IP address as string
+        int locPort;                     // Local port
+        char remAddr[INET6_ADDR_STRLEN]; // Remote IP address as string
+        int remPort;                     // Remote port
         //
         int srIndex;                 // Sending rate index
         struct sendingRate srStruct; // Sending rate structure
@@ -306,7 +318,8 @@ struct connection {
         struct subIntStats sisAct;    // Sub-interval active stats
         struct subIntStats sisSav;    // Sub-interval saved stats
         struct subIntStats sisMax[2]; // Sub-interval maximum stats (bimodal)
-        double rateMaxL3;             // Rate maximum at L3
+        double rateMax[2];            // Rate maximums (bimodal)
+        struct timespec timeOfMax[2]; // Time of maximums (bimodal)
         int subIntCount;              // Sub-interval count
         //
 #define LPDU_HISTORY_SIZE 32 // Size must be power of 2
@@ -339,6 +352,12 @@ struct connection {
         struct timespec pduRxTime;  // Receive time of last load or status PDU
         struct timespec spduTime;   // Send time in last received status PDU
         struct testSummary testSum; // Test summary statistics
+        //
+        cJSON *json_siArray;      // JSON sub-interval array
+        int intfFD;               // File descriptor to read interface stats
+        long intfBytes;           // Last byte counter of interface stats
+        struct timespec intfTime; // Sample time of interface stats
+        double intfMax[2];        // Interface maximums (bimodal)
         //
         int intAltUse;           // Alternate use integer
         BOOL boolAltUse;         // Alternate use boolean

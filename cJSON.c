@@ -18,6 +18,10 @@
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
   THE SOFTWARE.
+
+  Len Ciavattone - Oct. 23, 2021
+    Added cJSON_AddNumberPToObject() to allow saving a precision modifier
+    with item (to be used by print_number() for formatting).
 */
 
 /* cJSON */
@@ -564,14 +568,30 @@ static cJSON_bool print_number(const cJSON * const item, printbuffer * const out
     }
     else
     {
-        /* Try 15 decimal places of precision to avoid nonsignificant nonzero digits */
-        length = sprintf((char*)number_buffer, "%1.15g", d);
+        /* Modified by Len Ciavattone - Oct. 23, 2021 */
+        if (item->precision == 0) { /* --- Do previous processing if precision not provided --- */
+            /* Try 15 decimal places of precision to avoid nonsignificant nonzero digits */
+            length = sprintf((char*)number_buffer, "%1.15g", d);
 
-        /* Check whether the original double can be recovered */
-        if ((sscanf((char*)number_buffer, "%lg", &test) != 1) || !compare_double((double)test, d))
-        {
-            /* If not, print with 17 decimal places of precision */
-            length = sprintf((char*)number_buffer, "%1.17g", d);
+            /* Check whether the original double can be recovered */
+            if ((sscanf((char*)number_buffer, "%lg", &test) != 1) || !compare_double((double)test, d))
+            {
+                /* If not, print with 17 decimal places of precision */
+                length = sprintf((char*)number_buffer, "%1.17g", d);
+            }
+        } else {                    /* --- Do custom processing if precision available --- */
+            length = item->precision;
+            if (d == 0.0)
+                length = 1;         /* Force decimal format of 0.0 for zero */
+
+            if (length >= 0) {
+                length = sprintf((char*)number_buffer, "%.*f", length, d);
+            } else {
+                length = sprintf((char*)number_buffer, "%.*g", length * -1, d);
+                if (!strchr((char*)number_buffer, decimal_point)) { /* Force decimal point if needed */
+                    length = sprintf((char*)number_buffer, "%.1f", d);
+                }
+            }
         }
     }
 
@@ -2123,6 +2143,20 @@ CJSON_PUBLIC(cJSON*) cJSON_AddBoolToObject(cJSON * const object, const char * co
 CJSON_PUBLIC(cJSON*) cJSON_AddNumberToObject(cJSON * const object, const char * const name, const double number)
 {
     cJSON *number_item = cJSON_CreateNumber(number);
+    if (add_item_to_object(object, name, number_item, &global_hooks, false))
+    {
+        return number_item;
+    }
+
+    cJSON_Delete(number_item);
+    return NULL;
+}
+
+/* Added by Len Ciavattone - Oct. 23, 2021 */
+CJSON_PUBLIC(cJSON*) cJSON_AddNumberPToObject(cJSON * const object, const char * const name, const double number, const int precision)
+{
+    cJSON *number_item = cJSON_CreateNumber(number);
+    number_item->precision = precision; /* Save precision with number item */
     if (add_item_to_object(object, name, number_item, &global_hooks, false))
     {
         return number_item;

@@ -325,9 +325,8 @@ occurs, the error status will be 1 (one) and the most recent warning message
 will be included. If a hard error or failure occurs the error status will be
 -1 (negative one) and an error message will be included.
 
-The file "ob-udpst output mapping...pdf" provides a mapping between JSON key names,
+The file "ob-udpst_output_mapping...pdf" provides a mapping between JSON key names,
 TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various results.
-
 
 *Note: When stdout is not redirected to a file, JSON may appear clipped due to
 non-blocking console writes.*

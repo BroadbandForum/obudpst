@@ -51,6 +51,7 @@
 #include <limits.h>
 #include <time.h>
 #include <unistd.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
@@ -60,6 +61,7 @@
 #include "../udpst_srates_alt1.h"
 #endif
 //
+#include "cJSON.h"
 #include "udpst_common.h"
 #include "udpst_protocol.h"
 #include "udpst.h"
@@ -107,7 +109,7 @@ int def_sending_rates(void) {
                         }
                         if (k == 0 && i == 0) {
                                 sr->txInterval2 = BASE_SEND_TIMER2;
-                                sr->udpAddon2   = 63 - L3DG_OVERHEAD;
+                                sr->udpAddon2   = MIN_PAYLOAD_SIZE;
                                 if (sr->udpAddon2 < sizeof(struct loadHdr))
                                         sr->udpAddon2 = sizeof(struct loadHdr);
                         } else if (k == 10) {

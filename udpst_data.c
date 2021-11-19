@@ -52,7 +52,11 @@
  *                                       include sub-interval count in output)
  * Len Ciavattone          11/10/2020    Add option to ignore OoO/Dup
  * Daniel Egger            02/22/2021    Add sendmsg support
- *
+ * Len Ciavattone          10/13/2021    Refresh with clang-format
+ *                                       Add TR-181 fields & sub-int. in JSON
+ *                                       Add JSON bimodal output
+ *                                       Add JSON error support to send_proc()
+ *                                       Add interface traffic rate support
  */
 
 #include "config.h"
@@ -70,6 +74,7 @@
 #include <time.h>
 #include <math.h>
 #include <unistd.h>
+#include <net/if.h>
 #include <arpa/inet.h>
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
@@ -104,6 +109,7 @@ int receive_trunc(int, int, int);
 #endif
 void sis_copy(struct subIntStats *, struct subIntStats *, BOOL);
 void output_warning(int, int);
+double upd_intf_stats(int, BOOL);
 
 //----------------------------------------------------------------------------
 //
@@ -114,7 +120,9 @@ extern char scratch[STRING_SIZE];
 extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
-extern cJSON *json_output;
+//
+extern cJSON *json_top, *json_output;
+extern char json_errbuf[STRING_SIZE];
 
 //----------------------------------------------------------------------------
 //
@@ -126,7 +134,7 @@ extern cJSON *json_output;
 #define WARN_REM_STOPPED 3 // Remotely received traffic has stopped
 #define LOSSRATIO_TEXT   "LossRatio: %.2E, "
 #define DELIVERED_TEXT   "Delivered(%%): %6.2f, "
-#define SUMMARY_TEXT     "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f\n"
+#define SUMMARY_TEXT     "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f%s\n"
 #define MINIMUM_TEXT     "One-Way Delay(ms): %d [w/clock difference], Round-Trip Time(ms): %u\n"
 #define DEBUG_STATS      "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
 #define CLIENT_DEBUG     "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
@@ -140,31 +148,20 @@ static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 //
 // Populate the static part of the our message header
 //
-static void _populate_header (struct loadHdr *lHdr, struct connection *c)
-{
+static void _populate_header(struct loadHdr *lHdr, struct connection *c) {
         lHdr->loadId     = htons(LOAD_ID);
         lHdr->testAction = (uint8_t) c->testAction;
         lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
         // lpduSeqNo populated by the send function
         // udpPayload populated by the send function
-        lHdr->spduSeqErr = htons((uint16_t) c->spduSeqErr);
+        lHdr->spduSeqErr    = htons((uint16_t) c->spduSeqErr);
         lHdr->spduTime_sec  = htonl((uint32_t) c->spduTime.tv_sec);
         lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
         lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
 }
-//
-// Helper function to truncate float values to n decimal places
-//
-double f_round(double dval, int n) {
-        char l_fmtp[32], l_buf[64];
-        char *p_str;
-        sprintf (l_fmtp, "%%.%df", n);
-        sprintf (l_buf, l_fmtp, dval);
-        return ((double)strtod(l_buf, &p_str));
-}
 
-#if defined (HAVE_SENDMMSG)
+#if defined(HAVE_SENDMMSG)
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
 //
@@ -211,6 +208,7 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                         //
                         if ((var = socket_error(connindex, errno, "SENDMMSG")) > 0)
                                 send_proc(errConn, scratch, var);
+
                 } else if (var < totalburst) {
                         //
                         // Not all messages sent indicates the send buffer is full
@@ -233,7 +231,7 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
         int i;
         struct loadHdr *lHdr = (struct loadHdr *) repo.sndBuffer;
 
-        memset((void *)&msg, 0, sizeof(struct msghdr));
+        memset((void *) &msg, 0, sizeof(struct msghdr));
         _populate_header(lHdr, c);
 
         for (i = 0; i < totalburst; i++) {
@@ -248,8 +246,8 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                 //
                 // Setup corresponding message structure
                 //
-                iov.iov_base            = (void *) lHdr;
-                iov.iov_len             = (size_t) uvar;
+                iov.iov_base   = (void *) lHdr;
+                iov.iov_len    = (size_t) uvar;
                 msg.msg_iov    = &iov;
                 msg.msg_iovlen = 1;
 
@@ -331,7 +329,8 @@ int send_loadpdu(int connindex, int transmitter) {
                         // The PDU sent in this pass will confirm the test stop back to the server,
                         // schedule an immediate/subsequent test end
                         //
-                        repo.endTimeStatus = 0;
+                        if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
+                                repo.endTimeStatus = STATUS_SUCCESS;
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
         }
@@ -372,6 +371,13 @@ int send_loadpdu(int connindex, int transmitter) {
         }
 
         //
+        // Initialize interface stats on first PDU if sysfs FD is valid
+        //
+        if (c->lpduSeqNo == 0 && c->intfFD >= 0) {
+                upd_intf_stats(connindex, TRUE);
+        }
+
+        //
         // Check for burst size of zero
         //
         if (burstsize == 0 && addon == 0) {
@@ -402,7 +408,7 @@ int send_loadpdu(int connindex, int transmitter) {
         if (addon > 0)
                 totalburst++;
 
-#if defined (HAVE_SENDMMSG)
+#if defined(HAVE_SENDMMSG)
         _sendmmsg_burst(connindex, totalburst, burstsize, payload, addon);
 #else
         _sendmsg_burst(connindex, totalburst, burstsize, payload, addon);
@@ -660,7 +666,8 @@ int send_statuspdu(int connindex) {
                         // The PDU sent in this pass will confirm the test stop back to the server,
                         // schedule an immediate/subsequent test end
                         //
-                        repo.endTimeStatus = 0;
+                        if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
+                                repo.endTimeStatus = STATUS_SUCCESS;
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
         } else {
@@ -703,6 +710,13 @@ int send_statuspdu(int connindex) {
                 } else {
                         c->rxStoppedLoc = FALSE;
                 }
+        }
+
+        //
+        // Initialize interface stats on first PDU if sysfs FD is valid
+        //
+        if (c->spduSeqNo == 0 && c->intfFD >= 0) {
+                upd_intf_stats(connindex, TRUE);
         }
 
         //
@@ -1143,26 +1157,40 @@ int proc_subinterval(int connindex, BOOL initialize) {
 //
 int output_currate(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i, var;
+        int i, var, sec;
         unsigned int dvmin, dvavg, rttmin;
-        double mbps, delivered = 0;
-        char connid[8];
+        double dvar, mbps, sent, delivered = 0.0, intfmbps = 0.0;
+        char connid[8], intfrate[16];
         struct testSummary *ts = &c->testSum;
 
         //
-        // Perform rate calculation and check if max rate so far
+        // Perform rate calculations and check if maximum so far
+        // ------------------------------------------------------------------------
         //
         i = 0; // Initialize to single maximum or first bimodal maximum
         c->subIntCount++;
-        if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount)
+        if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount) {
                 i++; // Adjust to save as second bimodal maximum
-        mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
-        if (mbps > c->rateMaxL3) {
-                memcpy(&c->sisMax[i], &c->sisSav, sizeof(struct subIntStats));
-                c->rateMaxL3 = mbps;
         }
-        if (conf.bimodalCount > 0 && c->subIntCount == conf.bimodalCount)
-                c->rateMaxL3 = 0.0; // Reset for second bimodal maximum
+        var  = 0; // Calculate sub-interval & interface rates and check for max
+        mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
+        if (c->intfFD >= 0) {
+                intfmbps = upd_intf_stats(connindex, FALSE);
+        }
+        if (!conf.intfForMax) {
+                if (mbps > c->rateMax[i])
+                        var = 1;
+        } else {
+                if (intfmbps > c->intfMax[i])
+                        var = 1;
+        }
+        if (var) { // If new max save sub-interval stats, time, and rates
+                memcpy(&c->sisMax[i], &c->sisSav, sizeof(struct subIntStats));
+                tspeccpy(&c->timeOfMax[i], &repo.systemClock);
+                c->rateMax[i] = mbps;
+                c->intfMax[i] = intfmbps;
+        }
+        // ------------------------------------------------------------------------
 
         //
         // Output sampled rate info
@@ -1170,12 +1198,12 @@ int output_currate(int connindex) {
         *connid = '\0';
         if (conf.verbose)
                 sprintf(connid, "[%d]", connindex);
-        if (c->sisSav.rxDatagrams + c->sisSav.seqErrLoss > 0) {
+        sent = (double) c->sisSav.rxDatagrams + (double) c->sisSav.seqErrLoss;
+        if (sent > 0.0) {
                 if (conf.showLossRatio)
-                        delivered = (double) c->sisSav.seqErrLoss;
+                        delivered = (double) c->sisSav.seqErrLoss / sent;
                 else
-                        delivered = (double) c->sisSav.rxDatagrams * 100.0;
-                delivered /= (double) ((double) c->sisSav.rxDatagrams + (double) c->sisSav.seqErrLoss);
+                        delivered = ((double) c->sisSav.rxDatagrams * 100.0) / sent;
         }
         dvmin = dvavg = 0;
         if (c->sisSav.delayVarCnt > 0) {
@@ -1186,31 +1214,99 @@ int output_currate(int connindex) {
         if (c->sisSav.rttMinimum != INITIAL_MIN_DELAY) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
-        if ((!conf.summaryOnly) && (!conf.JSONsummary)) {
-                i = 1; // Determine required width of accumulated time field
-                if (c->testIntTime > 999)
-                        i = 7;
-                else if (c->testIntTime > 99)
-                        i = 5;
-                else if (c->testIntTime > 9)
-                        i = 3;
-                if (c->subIntCount > 999)
-                        i -= 3;
-                else if (c->subIntCount > 99)
-                        i -= 2;
-                else if (c->subIntCount > 9)
-                        i -= 1;
-                strcpy(scratch2, "%sSub-Interval[%d](sec): %*d, "); // Use variable-width accumulated time for text alignment
-                if (!conf.showLossRatio) {
-                        strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+        if (!conf.summaryOnly) {
+                sec = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
+                if (conf.jsonOutput) {
+                        //
+                        // Create JSON sub-interval array if needed
+                        //
+                        if (c->json_siArray == NULL) {
+                                c->json_siArray = cJSON_CreateArray();
+                        }
+                        //
+                        // Create sub-interval object and add items to it
+                        //
+                        cJSON *json_subint = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(json_subint, "Interval", c->subIntCount);
+                        cJSON_AddNumberToObject(json_subint, "Seconds", sec);
+                        //
+                        create_timestamp(&repo.systemClock);
+                        cJSON_AddStringToObject(json_subint, "TimeOfSubInterval", scratch);
+                        //
+                        if (sent > 0.0) {
+                                dvar = ((double) c->sisSav.rxDatagrams * 100.0) / sent;
+                                cJSON_AddNumberPToObject(json_subint, "DeliveredPercent", dvar, 2);
+                                dvar = (double) c->sisSav.seqErrLoss / sent;
+                                cJSON_AddNumberPToObject(json_subint, "LossRatio", dvar, 9);
+                                dvar = (double) c->sisSav.seqErrOoo / sent;
+                                cJSON_AddNumberPToObject(json_subint, "ReorderedRatio", dvar, 9);
+                                dvar = (double) c->sisSav.seqErrDup / sent;
+                                cJSON_AddNumberPToObject(json_subint, "ReplicatedRatio", dvar, 9);
+                        } else {
+                                cJSON_AddNumberPToObject(json_subint, "DeliveredPercent", 0.0, 2);
+                                cJSON_AddNumberPToObject(json_subint, "LossRatio", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_subint, "ReorderedRatio", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_subint, "ReplicatedRatio", 0.0, 9);
+                        }
+                        cJSON_AddNumberToObject(json_subint, "LossCount", c->sisSav.seqErrLoss);
+                        cJSON_AddNumberToObject(json_subint, "ReorderedCount", c->sisSav.seqErrOoo);
+                        cJSON_AddNumberToObject(json_subint, "ReplicatedCount", c->sisSav.seqErrDup);
+                        //
+                        dvar = (double) dvmin / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "PDVMin", dvar, -9);
+                        dvar = (double) dvavg / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "PDVAvg", dvar, -9);
+                        dvar = (double) c->sisSav.delayVarMax / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "PDVMax", dvar, -9);
+                        dvar = (double) (c->sisSav.delayVarMax - dvmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "PDVRange", dvar, -9);
+                        //
+                        dvar = (double) rttmin / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "RTTMin", dvar, -9);
+                        dvar = (double) c->sisSav.rttMaximum / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "RTTMax", dvar, -9);
+                        dvar = (double) (c->sisSav.rttMaximum - rttmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "RTTRange", dvar, -9);
+                        //
+                        cJSON_AddNumberPToObject(json_subint, "IPLayerCapacity", mbps, 2);
+                        cJSON_AddNumberPToObject(json_subint, "InterfaceEthMbps", intfmbps, 2);
+                        //
+                        dvar = ((double) c->clockDeltaMin + (double) dvmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_subint, "MinOnewayDelay", dvar, -9);
+                        //
+                        // Add sub-interval object to sub-interval array
+                        //
+                        cJSON_AddItemToArray(c->json_siArray, json_subint);
                 } else {
-                        strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                        i = 1; // Determine required width of accumulated time field
+                        if (c->testIntTime > 999)
+                                i = 7;
+                        else if (c->testIntTime > 99)
+                                i = 5;
+                        else if (c->testIntTime > 9)
+                                i = 3;
+                        if (c->subIntCount > 999)
+                                i -= 3;
+                        else if (c->subIntCount > 99)
+                                i -= 2;
+                        else if (c->subIntCount > 9)
+                                i -= 1;
+                        strcpy(scratch2,
+                               "%sSub-Interval[%d](sec): %*d, "); // Use variable-width accumulated time for text alignment
+                        if (!conf.showLossRatio) {
+                                strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+                        } else {
+                                strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                        }
+                        *intfrate = '\0';
+                        if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
+                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", intfmbps);
+                        }
+                        var = sprintf(scratch, scratch2, connid, c->subIntCount, i, sec, delivered, c->sisSav.seqErrLoss,
+                                      c->sisSav.seqErrOoo, c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin,
+                                      c->sisSav.rttMaximum, mbps, intfrate);
+                        send_proc(errConn, scratch, var);
                 }
-                var = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
-                var =
-                    sprintf(scratch, scratch2, connid, c->subIntCount, i, var, delivered, c->sisSav.seqErrLoss, c->sisSav.seqErrOoo,
-                            c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin, c->sisSav.rttMaximum, mbps);
-                send_proc(errConn, scratch, var);
         }
 
         //
@@ -1235,11 +1331,12 @@ int output_currate(int connindex) {
                 if (c->sisSav.rttMaximum > (uint32_t) ts->rttMaximum)
                         ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
         }
-        ts->deliveredSum += delivered;
+        ts->rxDatagrams += (unsigned int) c->sisSav.rxDatagrams;
         ts->seqErrLoss += (unsigned int) c->sisSav.seqErrLoss;
         ts->seqErrOoo += (unsigned int) c->sisSav.seqErrOoo;
         ts->seqErrDup += (unsigned int) c->sisSav.seqErrDup;
         ts->rateSumL3 += (double) mbps;
+        ts->rateSumIntf += (double) intfmbps;
         ts->sampleCount++;
 
         return 0;
@@ -1250,12 +1347,13 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8], maxtext[24];
+        char *testtype, connid[8], maxtext[32], intfrate[16];
         int i, sibegin, siend, var;
-        unsigned int uvar;
+        unsigned int dvmin, dvavg, rttmin;
+        double dvar, sent, delivered = 0.0;
         struct testSummary *ts = &c->testSum;
-        char *json_string = NULL;
-        cJSON *json_results = NULL;
+        cJSON *json_summary    = NULL;
+        cJSON *json_modalArray = NULL;
 
         //
         // Setup header fields
@@ -1268,70 +1366,108 @@ int output_maxrate(int connindex) {
         } else {
                 testtype = DSTEST_TEXT;
         }
-        if (conf.JSONsummary) {
-                // Create the JSON Results Object
-                json_results = cJSON_CreateObject();
-                //cJSON_AddItemToObject(json_results, "test_type", cJSON_CreateString(testtype));
+        if (conf.jsonOutput) {
+                //
+                // If it exists add JSON sub-interval array to output object
+                //
+                if (c->json_siArray != NULL) {
+                        cJSON_AddItemToObject(json_output, "IncrementalResult", c->json_siArray);
+                }
         }
 
         //
         // Output summary info
         //
-        if (ts->sampleCount > 0) {
-                ts->deliveredSum /= (double) ts->sampleCount;
+        sent = (double) ts->rxDatagrams + (double) ts->seqErrLoss;
+        if (sent > 0.0 && ts->sampleCount > 0) {
+                if (conf.showLossRatio)
+                        delivered = (double) ts->seqErrLoss / sent;
+                else
+                        delivered = ((double) ts->rxDatagrams * 100.0) / sent;
                 ts->delayVarSum = (((ts->delayVarSum * 10) / ts->sampleCount) + 5) / 10;
                 ts->rateSumL3 /= (double) ts->sampleCount;
+                ts->rateSumIntf /= (double) ts->sampleCount;
         }
-        if (!conf.JSONsummary) {
+        if (!conf.jsonOutput) {
                 strcpy(scratch2, "%s%s Summary ");
                 if (!conf.showLossRatio) {
                         strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
                 } else {
                         strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
                 }
-                var = sprintf(scratch, scratch2, connid, testtype, ts->deliveredSum, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
-                        ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3);
+                *intfrate = '\0';
+                if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
+                        snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
+                }
+                var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
+                              ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttMaximum, ts->rateSumL3,
+                              intfrate);
                 send_proc(errConn, scratch, var);
         } else {
-                // Build JSON Object for summary
-                cJSON *json_summary = cJSON_CreateObject();
-
-                // Populate the summary object
-                if (!conf.showLossRatio) {
-                        cJSON_AddItemToObject(json_summary, "avgDeliveredPct", cJSON_CreateNumber(f_round(ts->deliveredSum, 2)));
+                //
+                // Create JSON summary object and add items to it
+                //
+                json_summary = cJSON_CreateObject();
+                //
+                if (sent > 0.0) {
+                        dvar = ((double) ts->rxDatagrams * 100.0) / sent;
+                        cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", dvar, 2);
+                        dvar = (double) ts->seqErrLoss / sent;
+                        cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", dvar, 9);
+                        dvar = (double) ts->seqErrOoo / sent;
+                        cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", dvar, 9);
+                        dvar = (double) ts->seqErrDup / sent;
+                        cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", dvar, 9);
                 } else {
-                        cJSON_AddItemToObject(json_summary, "avgLossRatio", cJSON_CreateNumber( f_round(ts->deliveredSum, 2) ));
+                        cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", 0.0, 2);
+                        cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", 0.0, 9);
+                        cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", 0.0, 9);
+                        cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", 0.0, 9);
                 }
-                cJSON_AddItemToObject(json_summary, "seqErrLoss",   cJSON_CreateNumber( ts->seqErrLoss   ));
-                cJSON_AddItemToObject(json_summary, "seqErrOoo",    cJSON_CreateNumber( ts->seqErrOoo    ));
-                cJSON_AddItemToObject(json_summary, "seqErrDup",    cJSON_CreateNumber( ts->seqErrDup    ));
-                cJSON_AddItemToObject(json_summary, "owdVarMin",  cJSON_CreateNumber( ts->delayVarMin  ));
-                cJSON_AddItemToObject(json_summary, "owdVarAvg",  cJSON_CreateNumber( ts->delayVarSum  ));
-                cJSON_AddItemToObject(json_summary, "owdVarMax",  cJSON_CreateNumber( ts->delayVarMax  ));
-                cJSON_AddItemToObject(json_summary, "rttVarMin",  cJSON_CreateNumber( ts->rttMinimum  ));
-                cJSON_AddItemToObject(json_summary, "rttVarMax",   cJSON_CreateNumber( ts->rttMaximum   ));
-                cJSON_AddItemToObject(json_summary, "avgL3Mbps",    cJSON_CreateNumber( f_round(ts->rateSumL3, 2) ));
-
-                // Add the summary to the results object
-                cJSON_AddItemToObject(json_results, "summary", json_summary);
+                cJSON_AddNumberToObject(json_summary, "LossCount", ts->seqErrLoss);
+                cJSON_AddNumberToObject(json_summary, "ReorderedCount", ts->seqErrOoo);
+                cJSON_AddNumberToObject(json_summary, "ReplicatedCount", ts->seqErrDup);
+                //
+                dvar = (double) ts->delayVarMin / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "PDVMin", dvar, -9);
+                dvar = (double) ts->delayVarSum / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "PDVAvg", dvar, -9);
+                dvar = (double) ts->delayVarMax / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "PDVMax", dvar, -9);
+                dvar = (double) (ts->delayVarMax - ts->delayVarMin) / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "PDVRangeSummary", dvar, -9);
+                //
+                dvar = (double) ts->rttMinimum / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "RTTMin", dvar, -9);
+                dvar = (double) ts->rttMaximum / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "RTTMax", dvar, -9);
+                dvar = (double) (ts->rttMaximum - ts->rttMinimum) / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "RTTRangeSummary", dvar, -9);
+                //
+                cJSON_AddNumberPToObject(json_summary, "IPLayerCapacitySummary", ts->rateSumL3, 2);
+                cJSON_AddNumberPToObject(json_summary, "InterfaceEthMbps", ts->rateSumIntf, 2);
         }
 
         //
         // Output delay info
         //
-        uvar = 0;
+        rttmin = 0;
         if (c->rttMinimum != INITIAL_MIN_DELAY)
-                uvar = c->rttMinimum;
-        if (!conf.JSONsummary) {
+                rttmin = c->rttMinimum;
+        if (!conf.jsonOutput) {
                 strcpy(scratch2, "%s%s Minimum " MINIMUM_TEXT);
-                var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, uvar);
+                var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, rttmin);
                 send_proc(errConn, scratch, var);
-       } else {
-                // Build JSON Object for Delay
-                cJSON *json_delay = cJSON_CreateObject();
-                cJSON_AddItemToObject(json_delay, "owd", cJSON_CreateNumber( c->clockDeltaMin ));
-                cJSON_AddItemToObject(json_delay, "rtt", cJSON_CreateNumber( c->rttMinimum ));
-                cJSON_AddItemToObject(json_results, "minimum", json_delay);
+        } else {
+                //
+                // Add final items to summary object and add summary object to output object
+                //
+                dvar = (double) c->clockDeltaMin / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "MinOnewayDelaySummary", dvar, -9);
+                dvar = (double) rttmin / 1000.0;
+                cJSON_AddNumberPToObject(json_summary, "MinRTTSummary", dvar, -9);
+                //
+                cJSON_AddItemToObject(json_output, "Summary", json_summary);
         }
 
         //
@@ -1344,40 +1480,120 @@ int output_maxrate(int connindex) {
                 siend = conf.bimodalCount;
         }
         for (i = 0; i < 2; i++) {
-                if (!conf.JSONsummary) {
+                if (!conf.jsonOutput) {
                         if (conf.bimodalCount == 0) {
                                 strcpy(maxtext, "Maximum");
                         } else {
                                 sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
                         }
-                        strcpy(scratch2, "%s%s %s Mbps(L3/IP): %.2f, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-                        var = sprintf(scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
-                                get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),
-                                get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
+                        *intfrate = '\0';
+                        if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
+                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", c->intfMax[i]);
+                        }
+                        strcpy(scratch2,
+                               "%s%s %s Mbps(L3/IP): %.2f%s, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
+                        var = sprintf(
+                            scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
+                            intfrate, get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),
+                            get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
                         send_proc(errConn, scratch, var);
                 } else {
-                        // Build JSON Object for Delay
-                        cJSON *json_mbps = cJSON_CreateObject();
-                        cJSON_AddItemToObject(json_mbps, "L3Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),2) ));
-                        cJSON_AddItemToObject(json_mbps, "L2Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),2) ));
-                        cJSON_AddItemToObject(json_mbps, "L1Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD),2) ));
-                        cJSON_AddItemToObject(json_mbps, "L0Mbps", cJSON_CreateNumber( f_round(get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD),2) ));
-                        cJSON_AddItemToObject(json_results, "maximum", json_mbps);
-                }
+                        if (conf.bimodalCount == 0) {
+                                var = c->subIntCount;
+                        } else {
+                                var = siend - sibegin + 1;
+                        }
+                        //
+                        // Create JSON atmax object and add items to it
+                        //
+                        cJSON *json_atmax = cJSON_CreateObject();
+                        //
+                        cJSON_AddNumberToObject(json_atmax, "Mode", i + 1);
+                        cJSON_AddNumberToObject(json_atmax, "Intervals", var);
+                        //
+                        create_timestamp(&c->timeOfMax[i]);
+                        cJSON_AddStringToObject(json_atmax, "TimeOfMax", scratch);
+                        //
+                        sent = (double) c->sisMax[i].rxDatagrams + (double) c->sisMax[i].seqErrLoss;
+                        if (sent > 0.0) {
+                                dvar = ((double) c->sisMax[i].rxDatagrams * 100.0) / sent;
+                                cJSON_AddNumberPToObject(json_atmax, "DeliveredPercent", dvar, 2);
+                                dvar = (double) c->sisMax[i].seqErrLoss / sent;
+                                cJSON_AddNumberPToObject(json_atmax, "LossRatioAtMax", dvar, 9);
+                                dvar = (double) c->sisMax[i].seqErrOoo / sent;
+                                cJSON_AddNumberPToObject(json_atmax, "ReorderedRatioAtMax", dvar, 9);
+                                dvar = (double) c->sisMax[i].seqErrDup / sent;
+                                cJSON_AddNumberPToObject(json_atmax, "ReplicatedRatioAtMax", dvar, 9);
+                        } else {
+                                cJSON_AddNumberPToObject(json_atmax, "DeliveredPercent", 0.0, 2);
+                                cJSON_AddNumberPToObject(json_atmax, "LossRatioAtMax", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_atmax, "ReorderedRatioAtMax", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_atmax, "ReplicatedRatioAtMax", 0.0, 9);
+                        }
+                        cJSON_AddNumberToObject(json_atmax, "LossCount", c->sisMax[i].seqErrLoss);
+                        cJSON_AddNumberToObject(json_atmax, "ReorderedCount", c->sisMax[i].seqErrOoo);
+                        cJSON_AddNumberToObject(json_atmax, "ReplicatedCount", c->sisMax[i].seqErrDup);
+                        //
+                        dvmin = dvavg = 0;
+                        if (c->sisMax[i].delayVarCnt > 0) {
+                                dvmin = (unsigned int) c->sisMax[i].delayVarMin;
+                                dvavg = (unsigned int) (c->sisMax[i].delayVarSum / c->sisMax[i].delayVarCnt);
+                        }
+                        dvar = (double) dvmin / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "PDVMin", dvar, -9);
+                        dvar = (double) dvavg / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "PDVAvg", dvar, -9);
+                        dvar = (double) c->sisMax[i].delayVarMax / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "PDVMax", dvar, -9);
+                        dvar = (double) (c->sisMax[i].delayVarMax - dvmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "PDVRangeAtMax", dvar, -9);
+                        //
+                        rttmin = 0;
+                        if (c->sisMax[i].rttMinimum != INITIAL_MIN_DELAY) {
+                                rttmin = (unsigned int) c->sisMax[i].rttMinimum;
+                        }
+                        dvar = (double) rttmin / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "RTTMin", dvar, -9);
+                        dvar = (double) c->sisMax[i].rttMaximum / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "RTTMax", dvar, -9);
+                        dvar = (double) (c->sisMax[i].rttMaximum - rttmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "RTTRangeAtMax", dvar, -9);
+                        //
+                        cJSON_AddNumberPToObject(json_atmax, "MaxIPLayerCapacity",
+                                                 get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD), 2);
+                        cJSON_AddNumberPToObject(json_atmax, "InterfaceEthMbps", c->intfMax[i], 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityNoFCS",
+                                                 get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCS",
+                                                 get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD), 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCSVLAN",
+                                                 get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD), 2);
+                        //
+                        dvar = ((double) c->clockDeltaMin + (double) dvmin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_atmax, "MinOnewayDelayAtMax", dvar, -9);
 
+                        //
+                        // On first pass add atmax object to output and create modal array, else add to modal array
+                        //
+                        if (i == 0) {
+                                cJSON_AddItemToObject(json_output, "AtMax", json_atmax);
+                                json_modalArray = cJSON_CreateArray();
+                        } else {
+                                cJSON_AddItemToArray(json_modalArray, json_atmax);
+                        }
+
+                        //
+                        // When complete (modes 1 of 1 <OR> 2 of 2) add modal array to output
+                        //
+                        if (conf.bimodalCount == 0 || i == 1) {
+                                cJSON_AddItemToObject(json_output, "ModalResult", json_modalArray);
+                        }
+                }
                 if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
                         break; // Either a single maximum or bimodal count exceeds sub-interval count
 
                 sibegin = conf.bimodalCount + 1;
                 siend   = c->subIntCount;
-        }
-        if (conf.JSONsummary) {
-                // Convert JSON Object to string and output
-                cJSON_AddItemToObject(json_output, "results", json_results);
-                json_string = cJSON_PrintUnformatted(json_output);
-                cJSON_Delete(json_output);
-                var = sprintf(scratch, "%s\n", json_string);
-                send_proc(errConn, scratch, var);
         }
 
         return 0;
@@ -1389,7 +1605,7 @@ int output_maxrate(int connindex) {
 double get_rate(int connindex, struct subIntStats *sis, int overhead) {
         register struct connection *c = &conn[connindex];
         unsigned int delta, dgrams, bytes;
-        double mbps = 0;
+        double mbps = 0.0;
 
         if (c->ipProtocol == IPPROTO_IPV6)
                 overhead += IPV6_ADDSIZE;
@@ -1489,6 +1705,23 @@ int recv_proc(int connindex) {
 int send_proc(int connindex, char *sendbuffer, int sendsize) {
         register struct connection *c = &conn[connindex];
         int var, actual = 0;
+        char *buf;
+
+        //
+        // If JSON is configured save error message in JSON error buffer
+        //
+        if (conf.jsonOutput && c->type == T_CONSOLE && connindex == errConn) {
+                snprintf(json_errbuf, STRING_SIZE, "%s", sendbuffer);
+                //
+                buf = json_errbuf;
+                while ((buf = strpbrk(buf, "\"\n")) != NULL) {
+                        if (*buf == '\"')
+                                *buf++ = '\''; // Replace double-quote with single-quote
+                        else if (*buf == '\n')
+                                *buf = '\0'; // Replace newline with null
+                }
+                return sendsize;
+        }
 
         //
         // Prefix send buffer with timestamp for log file write
@@ -1673,9 +1906,57 @@ void output_warning(int connindex, int type) {
                         var = sprintf(scratch, "%s%s WARNING: Incoming traffic has completely stopped\n", connid, location);
                         break;
                 }
-                if (var > 0)
+                if (var > 0) {
                         send_proc(errConn, scratch, var);
+                        repo.endTimeStatus = STATUS_WARNING;
+                }
         }
         return;
+}
+//----------------------------------------------------------------------------
+//
+// Create JSON required timestamp with current time
+//
+// Populate scratch buffer and return length
+//
+int create_timestamp(struct timespec *tspecvar) {
+        int var;
+
+        var = strftime(scratch, STRING_SIZE, "%FT%T", gmtime(&tspecvar->tv_sec));
+        var += sprintf(&scratch[var], ".%06ldZ", tspecvar->tv_nsec / NSECINUSEC);
+
+        return var;
+}
+//----------------------------------------------------------------------------
+//
+// Update interface statistics via sysfs
+//
+double upd_intf_stats(int connindex, BOOL initialize) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        long intfbytes; // Use long to support 64-bit byte counters with 64-bit OS
+        double mbps = 0.0;
+        struct timespec tspecvar;
+        char buffer[32];
+
+        if (!initialize) {
+                lseek(c->intfFD, 0, SEEK_SET); // Reset position to read new value
+        }
+        if ((var = (int) read(c->intfFD, buffer, sizeof(buffer))) > 0) {
+                buffer[var] = '\0';
+                if ((intfbytes = atol(buffer)) > 0) {
+                        if (!initialize) {
+                                if (intfbytes >= c->intfBytes && tspecisset(&c->intfTime)) {
+                                        tspecminus(&repo.systemClock, &c->intfTime, &tspecvar);
+                                        mbps = (double) (intfbytes - c->intfBytes);
+                                        mbps *= 8.0;
+                                        mbps /= (double) tspecusec(&tspecvar);
+                                }
+                        }
+                        c->intfBytes = intfbytes;                  // Save current value
+                        tspeccpy(&c->intfTime, &repo.systemClock); // Save current time
+                }
+        }
+        return mbps;
 }
 //----------------------------------------------------------------------------
