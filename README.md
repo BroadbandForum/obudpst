@@ -164,9 +164,18 @@ To build OB-UDPST a local installation of CMake is required. Please obtain them
 for your particular build system either using the locally available packages or
 consult with [https://cmake.org] for other download options.
 
+To build the project, create a `build` directory and configure CMake, then run
+the build itself:
+
 ```
-$ make
+$ mkdir build
+$ cd build
+$ cmake ..
+$ cmake --build .
 ```
+
+This will create the exectuable file `build/udpst`.
+
 *Note: Authentication functionality uses a command-line key along with the
 OpenSSL crypto library to create and validate a HMAC-SHA256 signature (which is
 used in the setup request to the server). Although the makefile will build even
