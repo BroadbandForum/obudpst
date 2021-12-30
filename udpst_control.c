@@ -48,6 +48,11 @@
  * Len Ciavattone          10/13/2021    Refresh with clang-format
  *                                       Add TR-181 fields in JSON
  *                                       Add interface traffic rate support
+ * Len Ciavattone          11/18/2021    Add backward compat. protocol version
+ *                                       Add bandwidth management support
+ * Len Ciavattone          12/08/2021    Add starting sending rate
+ * Len Ciavattone          12/17/2021    Add payload randomization
+ *
  */
 
 #define UDPST_CONTROL
@@ -110,9 +115,13 @@ extern cJSON *json_top, *json_output;
 // Global data
 //
 #define SRAUTO_TEXT "<Auto>"
+#define OWD_TEXT    "OWD"
+#define RTT_TEXT    "RTT"
+#define ZERO_TEXT   "zeroes"
+#define RAND_TEXT   "random"
 #define TESTHDR_LINE1 \
-        "%s%s Test Interval(sec): %d, DelayVar Thresholds(ms): %d-%d [%s], Trial Interval(ms): %d, Ignore OoO/Dup: %s,\n"
-#define TESTHDR_LINE2 "    SendingRate Index: %s, Congestion Threshold: %d, High-Speed Delta: %d, SeqError Threshold: %d, "
+        "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n"
+#define TESTHDR_LINE2 "    SendRate Index: %s, Cong. Thresh: %d, High-Speed Delta: %d, SeqError Thresh: %d, "
 static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d%s\n";
 static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d%s\n";
 
@@ -210,12 +219,25 @@ int send_setupreq(int connindex) {
         //
         // Build setup request PDU
         //
-        memset(cHdrSR, 0, sizeof(struct controlHdrSR));
+        memset(cHdrSR, 0, CHSR_SIZE_CVER);
         cHdrSR->controlId   = htons(CHSR_ID);
-        cHdrSR->protocolVer = htons(PROTOCOL_VER);
+        c->protocolVer      = PROTOCOL_VER; // Client always uses current version
+        cHdrSR->protocolVer = htons((uint16_t) c->protocolVer);
         cHdrSR->cmdRequest  = CHSR_CREQ_SETUPREQ;
         cHdrSR->cmdResponse = CHSR_CRSP_NONE;
-        cHdrSR->jumboStatus = (uint8_t) conf.jumboStatus;
+        if (conf.maxBandwidth > 0) {
+                c->maxBandwidth = conf.maxBandwidth;
+                var             = c->maxBandwidth;
+                if (conf.usTesting)
+                        var |= CHSR_USDIR_BIT; // Set upstream bit of max bandwidth being transmitted
+                cHdrSR->maxBandwidth = htons((uint16_t) var);
+        }
+        if (conf.jumboStatus) {
+                cHdrSR->modifierBitmap |= CHSR_JUMBO_STATUS;
+        }
+        if (conf.traditionalMTU) {
+                cHdrSR->modifierBitmap |= CHSR_TRADITIONAL_MTU;
+        }
         if (*conf.authKey == '\0') {
                 cHdrSR->authMode     = AUTHMODE_NONE;
                 cHdrSR->authUnixTime = 0;
@@ -223,7 +245,7 @@ int send_setupreq(int connindex) {
         } else {
                 cHdrSR->authMode     = AUTHMODE_SHA256;
                 cHdrSR->authUnixTime = htonl((uint32_t) repo.systemClock.tv_sec);
-                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, sizeof(struct controlHdrSR),
+                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER,
                      cHdrSR->authDigest, &uvar);
 #endif
         }
@@ -239,7 +261,7 @@ int send_setupreq(int connindex) {
         //
         // Send setup request PDU (socket not yet connected)
         //
-        var = sizeof(struct controlHdrSR);
+        var = CHSR_SIZE_CVER;
         if (send_proc(connindex, (char *) cHdrSR, var) != var)
                 return -1;
         if (monConn >= 0) {
@@ -291,7 +313,8 @@ int timeout_testinit(int connindex) {
 //
 int service_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i, var;
+        int i, var, pver, mbw = 0, currbw = repo.dsBandwidth;
+        BOOL usbw = FALSE;
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
@@ -302,7 +325,8 @@ int service_setupreq(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct controlHdrSR) || ntohs(cHdrSR->controlId) != CHSR_ID) {
+        if (repo.rcvDataSize < (int) CHSR_SIZE_MVER || repo.rcvDataSize > (int) CHSR_SIZE_CVER ||
+            ntohs(cHdrSR->controlId) != CHSR_ID) {
                 return 0; // Ignore bad PDU
         }
         if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ) {
@@ -320,21 +344,51 @@ int service_setupreq(int connindex) {
                 getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                             NI_NUMERICHOST | NI_NUMERICSERV);
         }
-        if ((i = (int) ntohs(cHdrSR->protocolVer)) != PROTOCOL_VER) {
+        pver = (int) ntohs(cHdrSR->protocolVer);
+        if (pver >= BWMGMT_PVER) {
+                mbw = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
+                if (ntohs(cHdrSR->maxBandwidth) & CHSR_USDIR_BIT) {
+                        usbw   = TRUE; // Max bandwidth is for upstream
+                        currbw = repo.usBandwidth;
+                }
+        }
+        if (pver < PROTOCOL_MIN || pver > PROTOCOL_VER) {
                 if (monConn >= 0) {
-                        var = sprintf(scratch, "[%d]Invalid version (%d) in setup request from %s:%s\n", connindex, i, addrstr,
+                        var = sprintf(scratch, "[%d]Invalid version (%d) in setup request from %s:%s\n", connindex, pver, addrstr,
                                       portstr);
                 }
                 cHdrSR->protocolVer = htons(PROTOCOL_VER); // Send back expected version
                 cHdrSR->cmdResponse = CHSR_CRSP_BADVER;
 
-        } else if ((cHdrSR->jumboStatus != TRUE && cHdrSR->jumboStatus != FALSE) || // Enforce C boolean
-                   cHdrSR->jumboStatus != (uint8_t) conf.jumboStatus) {
+        } else if (((cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && !conf.jumboStatus) ||
+                   !(cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && conf.jumboStatus) {
                 if (monConn >= 0) {
                         var = sprintf(scratch, "[%d]Invalid jumbo datagram option in setup request from %s:%s\n", connindex,
                                       addrstr, portstr);
                 }
                 cHdrSR->cmdResponse = CHSR_CRSP_BADJS;
+
+        } else if (((cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && !conf.traditionalMTU) ||
+                   (!(cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && conf.traditionalMTU)) {
+                if (monConn >= 0) {
+                        var = sprintf(scratch, "[%d]Invalid traditional MTU option in setup request from %s:%s\n", connindex,
+                                      addrstr, portstr);
+                }
+                cHdrSR->cmdResponse = CHSR_CRSP_BADTMTU;
+
+        } else if (pver >= BWMGMT_PVER && conf.maxBandwidth > 0 && mbw == 0) {
+                if (monConn >= 0) {
+                        var = sprintf(scratch, "[%d]Required bandwidth not specified in setup request from %s:%s\n", connindex,
+                                      addrstr, portstr);
+                }
+                cHdrSR->cmdResponse = CHSR_CRSP_NOMAXBW;
+
+        } else if (pver >= BWMGMT_PVER && conf.maxBandwidth > 0 && currbw + mbw > conf.maxBandwidth) {
+                if (monConn >= 0) {
+                        var = sprintf(scratch, "[%d]Capacity exceeded by required bandwidth (%d) in setup request from %s:%s\n",
+                                      connindex, mbw, addrstr, portstr);
+                }
+                cHdrSR->cmdResponse = CHSR_CRSP_CAPEXC;
 
         } else if (cHdrSR->authMode != AUTHMODE_NONE && *conf.authKey == '\0') {
                 if (monConn >= 0) {
@@ -363,8 +417,8 @@ int service_setupreq(int connindex) {
                 //
                 memcpy(digest1, cHdrSR->authDigest, AUTH_DIGEST_LENGTH);
                 memset(cHdrSR->authDigest, 0, AUTH_DIGEST_LENGTH);
-                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, sizeof(struct controlHdrSR),
-                     digest2, &uvar);
+                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER, digest2,
+                     &uvar);
                 if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH)) {
                         if (monConn >= 0) {
                                 var = sprintf(scratch, "[%d]Authentication failure of setup request from %s:%s\n", connindex,
@@ -392,12 +446,13 @@ int service_setupreq(int connindex) {
                 //
                 if (monConn >= 0)
                         send_proc(monConn, scratch, var);
-                var = sizeof(struct controlHdrSR);
+                var = CHSR_SIZE_CVER;
                 send_proc(connindex, (char *) cHdrSR, var);
                 return 0;
         }
         if (monConn >= 0) {
-                var = sprintf(scratch, "[%d]Setup request received from %s:%s\n", connindex, addrstr, portstr);
+                var = sprintf(scratch, "[%d]Setup request (Ver: %d, MaxBW: %d) received from %s:%s\n", connindex, pver, mbw,
+                              addrstr, portstr);
                 send_proc(monConn, scratch, var);
         }
 
@@ -406,9 +461,17 @@ int service_setupreq(int connindex) {
         //
         if ((i = new_conn(-1, repo.serverIp, 0, T_UDP, &recv_proc, &service_actreq)) < 0)
                 return 0;
+        conn[i].protocolVer = pver;
+        if (conf.maxBandwidth > 0) {
+                conn[i].maxBandwidth = mbw; // Save bandwidth for adjustment at end of test
+                if (usbw)
+                        repo.usBandwidth += mbw; // Update current upstream bandwidth
+                else
+                        repo.dsBandwidth += mbw; // Update current downstream bandwidth
+        }
         if (monConn >= 0) {
-                var = sprintf(scratch, "[%d]Connection %d allocated and assigned %s:%d\n", connindex, i, conn[i].locAddr,
-                              conn[i].locPort);
+                var = sprintf(scratch, "[%d]Connection %d allocated and assigned %s:%d (New USBW: %d, DSBW: %d)\n", connindex, i,
+                              conn[i].locAddr, conn[i].locPort, repo.usBandwidth, repo.dsBandwidth);
                 send_proc(monConn, scratch, var);
         }
 
@@ -424,7 +487,7 @@ int service_setupreq(int connindex) {
         //
         cHdrSR->cmdResponse = CHSR_CRSP_ACKOK;
         cHdrSR->testPort    = htons((uint16_t) conn[i].locPort);
-        var                 = sizeof(struct controlHdrSR);
+        var                 = CHSR_SIZE_CVER;
         if (send_proc(connindex, (char *) cHdrSR, var) != var)
                 return 0;
         if (monConn >= 0) {
@@ -452,7 +515,7 @@ int service_setupresp(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct controlHdrSR) || ntohs(cHdrSR->controlId) != CHSR_ID) {
+        if (repo.rcvDataSize < (int) CHSR_SIZE_CVER || ntohs(cHdrSR->controlId) != CHSR_ID) {
                 return 0; // Ignore bad PDU
         }
         if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPRSP) {
@@ -468,6 +531,8 @@ int service_setupresp(int connindex) {
                                       ntohs(cHdrSR->protocolVer));
                 } else if (cHdrSR->cmdResponse == CHSR_CRSP_BADJS) {
                         var = sprintf(scratch, "ERROR: Client jumbo datagram size option does not match server\n");
+                } else if (cHdrSR->cmdResponse == CHSR_CRSP_BADTMTU) {
+                        var = sprintf(scratch, "ERROR: Client traditional MTU option does not match server\n");
                 } else if (cHdrSR->cmdResponse == CHSR_CRSP_AUTHNC) {
                         var = sprintf(scratch, "ERROR: Authentication not configured on server\n");
                 } else if (cHdrSR->cmdResponse == CHSR_CRSP_AUTHREQ) {
@@ -478,6 +543,10 @@ int service_setupresp(int connindex) {
                         var = sprintf(scratch, "ERROR: Authentication verification failed at server\n");
                 } else if (cHdrSR->cmdResponse == CHSR_CRSP_AUTHTIME) {
                         var = sprintf(scratch, "ERROR: Authentication time outside server time window\n");
+                } else if (cHdrSR->cmdResponse == CHSR_CRSP_NOMAXBW) {
+                        var = sprintf(scratch, "ERROR: Max bandwidth option required by server\n");
+                } else if (cHdrSR->cmdResponse == CHSR_CRSP_CAPEXC) {
+                        var = sprintf(scratch, "ERROR: Required max bandwidth exceeds available server capacity\n");
                 } else {
                         var = sprintf(scratch, "ERROR: Unexpected CRSP (%u) in setup response from server\n", cHdrSR->cmdResponse);
                 }
@@ -510,9 +579,9 @@ int service_setupresp(int connindex) {
         //
         // Build test activation PDU
         //
-        memset(cHdrTA, 0, sizeof(struct controlHdrTA));
+        memset(cHdrTA, 0, CHTA_SIZE_CVER);
         cHdrTA->controlId   = htons(CHTA_ID);
-        cHdrTA->protocolVer = htons(PROTOCOL_VER);
+        cHdrTA->protocolVer = htons((uint16_t) c->protocolVer);
         if (conf.usTesting) {
                 c->testType        = TEST_TYPE_US;
                 cHdrTA->cmdRequest = CHTA_CREQ_TESTACTUS;
@@ -549,12 +618,20 @@ int service_setupresp(int connindex) {
         cHdrTA->seqErrThresh   = htons((uint16_t) c->seqErrThresh);
         c->ignoreOooDup        = (BOOL) conf.ignoreOooDup;
         cHdrTA->ignoreOooDup   = (uint8_t) c->ignoreOooDup;
+        if (conf.srIndexIsStart) {
+                c->srIndexIsStart = TRUE; // Designate configured value as starting point
+                cHdrTA->modifierBitmap |= CHTA_SRIDX_ISSTART;
+        }
+        if (conf.randPayload) {
+                c->randPayload = TRUE;
+                cHdrTA->modifierBitmap |= CHTA_RAND_PAYLOAD;
+        }
 
         //
         // Send test activation request
         //
         c->secAction = &service_actresp; // Set service handler for response
-        var          = sizeof(struct controlHdrTA);
+        var          = CHTA_SIZE_CVER;
         if (send_proc(connindex, (char *) cHdrTA, var) != var)
                 return 0;
         if (monConn >= 0) {
@@ -574,7 +651,7 @@ int service_setupresp(int connindex) {
 int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
+        char *testhdr, *testtype, connid[8], delusage[8], sritext[8], payload[8];
         char addrstr[INET6_ADDR_STRLEN], portstr[8], intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
@@ -583,8 +660,9 @@ int service_actreq(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct controlHdrTA) || ntohs(cHdrTA->controlId) != CHTA_ID ||
-            ntohs(cHdrTA->protocolVer) != PROTOCOL_VER) {
+        var = (int) ntohs(cHdrTA->protocolVer);
+        if (repo.rcvDataSize < (int) CHTA_SIZE_MVER || repo.rcvDataSize > (int) CHTA_SIZE_CVER ||
+            ntohs(cHdrTA->controlId) != CHTA_ID || var < PROTOCOL_MIN || var > PROTOCOL_VER) {
                 return 0; // Ignore bad PDU
         }
         if ((cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS) && (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS)) {
@@ -619,6 +697,8 @@ int service_actreq(int connindex) {
         // Accept (but police) most test parameters as is and enforce server configured
         // maximums where applicable. Update modified values for communication back to client.
         // If the request needs to be rejected use command response value CHTA_CRSP_BADPARAM.
+        //
+        cHdrTA->cmdResponse = CHTA_CRSP_ACKOK; // Initialize to request accepted
         //
         // Low and upper delay variation thresholds
         //
@@ -690,7 +770,7 @@ int service_actreq(int connindex) {
                 }
         }
         //
-        // Static sending rate index (special case <Auto>, which is the default but greater than max)
+        // Static or starting sending rate index (special case <Auto>, which is the default but greater than max)
         //
         c->srIndexConf = (int) ntohs(cHdrTA->srIndexConf);
         if (c->srIndexConf != DEF_SRINDEX_CONF) {
@@ -700,6 +780,11 @@ int service_actreq(int connindex) {
                 } else if (c->srIndexConf > conf.srIndexConf) { // Enforce server maximum
                         c->srIndexConf      = conf.srIndexConf;
                         cHdrTA->srIndexConf = htons((uint16_t) c->srIndexConf);
+                }
+                if (cHdrTA->modifierBitmap & CHTA_SRIDX_ISSTART) {
+                        c->srIndexIsStart = TRUE;                               // Designate configured value as starting point
+                        c->srIndex        = c->srIndexConf;                     // Set starting point from configured value
+                        sr                = &repo.sendingRates[c->srIndexConf]; // Select starting SR table row
                 }
         }
         //
@@ -743,6 +828,16 @@ int service_actreq(int connindex) {
                 cHdrTA->ignoreOooDup = (uint8_t) c->ignoreOooDup;
         }
         //
+        // Payload randomization (only allow if also configured on server)
+        //
+        if (cHdrTA->modifierBitmap & CHTA_RAND_PAYLOAD) {
+                if (conf.randPayload) {
+                        c->randPayload = TRUE;
+                } else {
+                        cHdrTA->modifierBitmap &= ~CHTA_RAND_PAYLOAD; // Reset bit for return
+                }
+        }
+        //
         // If upstream test, send back sending rate parameters from first row of table
         //
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
@@ -750,7 +845,6 @@ int service_actreq(int connindex) {
         } else {
                 memset(&cHdrTA->srStruct, 0, sizeof(struct sendingRate));
         }
-        cHdrTA->cmdResponse = CHTA_CRSP_ACKOK; // Indicate request accepted
         //====================================================================================
 
         //
@@ -811,7 +905,7 @@ int service_actreq(int connindex) {
         //
         // Send test activation response to client
         //
-        var = sizeof(struct controlHdrTA);
+        var = CHTA_SIZE_CVER;
         if (send_proc(connindex, (char *) cHdrTA, var) != var)
                 return 0;
         if (monConn >= 0) {
@@ -841,19 +935,26 @@ int service_actreq(int connindex) {
                         else
                                 testhdr = testHdrV4;
                         if (c->useOwDelVar)
-                                strcpy(delusage, "OWD");
+                                strcpy(delusage, OWD_TEXT);
                         else
-                                strcpy(delusage, "RTT");
-                        if (c->srIndexConf == DEF_SRINDEX_CONF)
+                                strcpy(delusage, RTT_TEXT);
+                        if (c->randPayload)
+                                strcpy(payload, RAND_TEXT);
+                        else
+                                strcpy(payload, ZERO_TEXT);
+                        if (c->srIndexConf == DEF_SRINDEX_CONF) {
                                 strcpy(sritext, SRAUTO_TEXT);
-                        else
+                        } else if (c->srIndexIsStart) {
+                                sprintf(sritext, "%c%d", SRIDX_ISSTART_PREFIX, c->srIndexConf);
+                        } else {
                                 sprintf(sritext, "%d", c->srIndexConf);
+                        }
                         *intflabel = '\0';
                         if (c->intfFD >= 0) { // Append interface label
                                 snprintf(intflabel, sizeof(intflabel), ", [%s]", conf.intfName);
                         }
                         var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                                      c->trialInt, boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta,
+                                      c->trialInt, boolText[c->ignoreOooDup], payload, sritext, c->slowAdjThresh, c->highSpeedDelta,
                                       c->seqErrThresh, c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
                 }
@@ -884,8 +985,8 @@ int service_actreq(int connindex) {
 //
 int service_actresp(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
+        int var, ipv6add;
+        char *testhdr, *testtype, connid[8], delusage[8], sritext[8], payload[8];
         char intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = &c->srStruct; // Set to connection structure
         struct timespec tspecvar;
@@ -894,8 +995,7 @@ int service_actresp(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct controlHdrTA) || ntohs(cHdrTA->controlId) != CHTA_ID ||
-            ntohs(cHdrTA->protocolVer) != PROTOCOL_VER) {
+        if (repo.rcvDataSize < (int) CHTA_SIZE_CVER || ntohs(cHdrTA->controlId) != CHTA_ID) {
                 return 0; // Ignore bad PDU
         }
         if ((cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS) && (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS)) {
@@ -951,6 +1051,9 @@ int service_actresp(int connindex) {
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
                 // If upstream test, save sending rate parameters sent by server
                 sr_copy(sr, &cHdrTA->srStruct, FALSE);
+        }
+        if (!(cHdrTA->modifierBitmap & CHTA_RAND_PAYLOAD)) {
+                c->randPayload = FALSE; // Payload randomization rejected by server
         }
 
         //
@@ -1012,20 +1115,27 @@ int service_actresp(int connindex) {
                 else
                         testhdr = testHdrV4;
                 if (c->useOwDelVar)
-                        strcpy(delusage, "OWD");
+                        strcpy(delusage, OWD_TEXT);
                 else
-                        strcpy(delusage, "RTT");
-                if (c->srIndexConf == DEF_SRINDEX_CONF)
+                        strcpy(delusage, RTT_TEXT);
+                if (c->randPayload)
+                        strcpy(payload, RAND_TEXT);
+                else
+                        strcpy(payload, ZERO_TEXT);
+                if (c->srIndexConf == DEF_SRINDEX_CONF) {
                         strcpy(sritext, SRAUTO_TEXT);
-                else
+                } else if (c->srIndexIsStart) {
+                        sprintf(sritext, "%c%d", SRIDX_ISSTART_PREFIX, c->srIndexConf);
+                } else {
                         sprintf(sritext, "%d", c->srIndexConf);
+                }
                 *intflabel = '\0';
                 if (c->intfFD >= 0) { // Append interface label
                         snprintf(intflabel, sizeof(intflabel), ", [%s]", conf.intfName);
                 }
                 if (!conf.jsonOutput) {
                         var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                                      c->trialInt, boolText[c->ignoreOooDup], sritext, c->slowAdjThresh, c->highSpeedDelta,
+                                      c->trialInt, boolText[c->ignoreOooDup], payload, sritext, c->slowAdjThresh, c->highSpeedDelta,
                                       c->seqErrThresh, c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
                 } else {
@@ -1058,14 +1168,28 @@ int service_actresp(int connindex) {
                                 } else {
                                         cJSON_AddStringToObject(json_input, "ProtocolVersion", "Any");
                                 }
-                                cJSON_AddNumberToObject(json_input, "UDPPayloadMin", MIN_PAYLOAD_SIZE);
-                                if (conf.jumboStatus) {
-                                        cJSON_AddNumberToObject(json_input, "UDPPayloadMax", MAX_JPAYLOAD_SIZE);
+                                ipv6add = 0;
+                                if (c->ipProtocol == IPPROTO_IPV6)
+                                        ipv6add = IPV6_ADDSIZE;
+                                cJSON_AddNumberToObject(json_input, "UDPPayloadMin", MIN_PAYLOAD_SIZE - ipv6add);
+                                if (conf.jumboStatus)
+                                        var = MAX_JPAYLOAD_SIZE;
+                                else if (conf.traditionalMTU)
+                                        var = MAX_TPAYLOAD_SIZE;
+                                else
+                                        var = MAX_PAYLOAD_SIZE;
+                                cJSON_AddNumberToObject(json_input, "UDPPayloadMax", var - ipv6add);
+                                if (conf.traditionalMTU)
+                                        var = MAX_TPAYLOAD_SIZE;
+                                else
+                                        var = MAX_PAYLOAD_SIZE;
+                                cJSON_AddNumberToObject(json_input, "UDPPayloadDefault", var - ipv6add);
+                                if (c->randPayload) {
+                                        cJSON_AddStringToObject(json_input, "UDPPayloadContent", RAND_TEXT);
                                 } else {
-                                        cJSON_AddNumberToObject(json_input, "UDPPayloadMax", MAX_PAYLOAD_SIZE);
+                                        cJSON_AddStringToObject(json_input, "UDPPayloadContent", ZERO_TEXT);
                                 }
-                                cJSON_AddStringToObject(json_input, "UDPPayloadContent", "zeroes");
-                                if (c->srIndexConf == DEF_SRINDEX_CONF) {
+                                if (c->srIndexConf == DEF_SRINDEX_CONF || c->srIndexIsStart) {
                                         cJSON_AddStringToObject(json_input, "TestType", "Search");
                                 } else {
                                         cJSON_AddStringToObject(json_input, "TestType", "Fixed");
@@ -1074,10 +1198,15 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "IPRREnable", 1);
                                 cJSON_AddNumberToObject(json_input, "RIPREnable", 1);
                                 cJSON_AddNumberToObject(json_input, "PreambleDuration", 0);
-                                // Using "SendingRateIndex" instead of "StartSendingRate" for this implementation
-                                if (c->srIndexConf == DEF_SRINDEX_CONF) {
+                                // Using "[Start]SendingRateIndex" instead of "StartSendingRate" for this implementation
+                                if (c->srIndexConf == DEF_SRINDEX_CONF || c->srIndexIsStart) {
+                                        var = 0;
+                                        if (c->srIndexIsStart)
+                                                var = c->srIndexConf;
+                                        cJSON_AddNumberToObject(json_input, "StartSendingRateIndex", var);
                                         cJSON_AddNumberToObject(json_input, "SendingRateIndex", -1);
                                 } else {
+                                        cJSON_AddNumberToObject(json_input, "StartSendingRateIndex", c->srIndexConf);
                                         cJSON_AddNumberToObject(json_input, "SendingRateIndex", c->srIndexConf);
                                 }
                                 cJSON_AddNumberToObject(json_input, "NumberTestSubIntervals", c->testIntTime / c->subIntPeriod);

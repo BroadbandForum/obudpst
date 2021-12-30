@@ -51,6 +51,12 @@
  *                                       Limit format options to client
  *                                       Add TR-181 fields in JSON
  *                                       Add JSON error status and message
+ * Len Ciavattone          11/18/2021    Add backward compat. protocol version
+ *                                       Add bandwidth management support
+ * Len Ciavattone          12/08/2021    Add starting sending rate
+ * Len Ciavattone          12/17/2021    Add payload randomization
+ * Len Ciavattone          12/21/2021    Add traditional (1500 byte) MTU
+ *
  */
 
 #include "config.h"
@@ -194,30 +200,47 @@ int main(int argc, char **argv) {
         }
 
         //
-        // Initialize local copy of system time clock
+        // Initialize local copy of system time clock and seed RNG
         //
         clock_gettime(CLOCK_REALTIME, &repo.systemClock);
+        srandom((unsigned int) repo.systemClock.tv_nsec);
 
         //
         // Print banner or initialize JSON output object
         //
         if (!conf.jsonOutput) {
-                var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s, Protocol Ver: %d, Built: " __DATE__ " " __TIME__ "\n",
-                              SOFTWARE_VER, PROTOCOL_VER);
-                var = write(outputfd, scratch, var);
+                var = sprintf(scratch, SOFTWARE_TITLE "\nSoftware Ver: %s", SOFTWARE_VER);
                 if (repo.isServer)
-                        var = sprintf(scratch, "Mode: Server, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+                        var += sprintf(&scratch[var], ", Protocol Ver: %d-%d", PROTOCOL_MIN, PROTOCOL_VER);
                 else
-                        var = sprintf(scratch, "Mode: Client, Jumbo Datagrams: %s", boolText[conf.jumboStatus]);
+                        var += sprintf(&scratch[var], ", Protocol Ver: %d", PROTOCOL_VER); // Client is always the latest
+                var += sprintf(&scratch[var], ", Built: " __DATE__ " " __TIME__ "\n");
+                var = write(outputfd, scratch, var);
+                //
+                var = 0;
+                if (conf.ipv6Only)
+                        var = IPV6_ADDSIZE;
+                if (conf.traditionalMTU)
+                        i = MAX_TPAYLOAD_SIZE - var;
+                else
+                        i = MAX_PAYLOAD_SIZE - var;
+                if (conf.jumboStatus)
+                        j = MAX_JPAYLOAD_SIZE - var;
+                else
+                        j = i;
+                if (repo.isServer)
+                        var = sprintf(scratch, "Mode: Server, Payload Default[Max]: %d[%d]", i, j);
+                else
+                        var = sprintf(scratch, "Mode: Client, Payload Default[Max]: %d[%d]", i, j);
 #ifdef AUTH_KEY_ENABLE
                 var += sprintf(&scratch[var], ", Authentication: Available");
 #else
                 var += sprintf(&scratch[var], ", Authentication: Unavailable");
 #endif
 #ifdef HAVE_SENDMMSG
-                var += sprintf(&scratch[var], ", System Call sendmmsg(): Available\n");
+                var += sprintf(&scratch[var], ", SendMMsg(): Available\n");
 #else
-                var += sprintf(&scratch[var], ", System Call sendmmsg(): Unavailable\n");
+                var += sprintf(&scratch[var], ", SendMMsg(): Unavailable\n");
 #endif
                 var = write(outputfd, scratch, var);
         } else {
@@ -241,14 +264,19 @@ int main(int argc, char **argv) {
         repo.sendingRates = calloc(1, MAX_SENDING_RATES * sizeof(struct sendingRate));
         repo.sndBuffer    = calloc(1, SND_BUFFER_SIZE);
         repo.defBuffer    = calloc(1, DEF_BUFFER_SIZE);
+        repo.randData     = malloc(MAX_JPAYLOAD_SIZE);
+        repo.sndBufRand   = malloc(SND_BUFFER_SIZE);
         conn              = malloc(MAX_CONNECTIONS * sizeof(struct connection));
-        if (repo.sendingRates == NULL || repo.sndBuffer == NULL || repo.defBuffer == NULL || conn == NULL) {
+        if (repo.sendingRates == NULL || repo.sndBuffer == NULL || repo.defBuffer == NULL || repo.randData == NULL ||
+            repo.sndBufRand == NULL || conn == NULL) {
                 var = sprintf(scratch, "ERROR: Memory allocation(s) failed\n");
                 var = write(outputfd, scratch, var);
                 return -1;
         }
         for (i = 0; i < MAX_CONNECTIONS; i++)
                 init_conn(i, FALSE);
+        for (i = 0; i < MAX_JPAYLOAD_SIZE / sizeof(int); i++)
+                ((int *) repo.randData)[i] = random();
 
         //
         // Define sending rate table
@@ -526,15 +554,31 @@ int main(int argc, char **argv) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].endTime, >)) {
                                                 if (monConn >= 0) {
                                                         var = sprintf(scratch, "[%d]End time reached\n", i);
-                                                        send_proc(monConn, scratch, var);
                                                 }
-                                                if (!repo.isServer) {
+                                                if (repo.isServer) {
+                                                        // Adjust current upstream/downstream bandwidth
+                                                        if (conn[i].testType == TEST_TYPE_US) {
+                                                                if ((repo.usBandwidth -= conn[i].maxBandwidth) < 0)
+                                                                        repo.usBandwidth = 0;
+                                                        } else {
+                                                                if ((repo.dsBandwidth -= conn[i].maxBandwidth) < 0)
+                                                                        repo.dsBandwidth = 0;
+                                                        }
+                                                        if (monConn >= 0) { // Add new bandwidth values for tracking
+                                                                var += sprintf(&scratch[var - 1], " (New USBW: %d, DSBW: %d)\n",
+                                                                               repo.usBandwidth, repo.dsBandwidth);
+                                                        }
+                                                } else {
+                                                        // Finalize JSON processing
                                                         if (conf.jsonOutput) {
                                                                 appstatus = json_finish(i);
                                                         } else {
                                                                 appstatus = repo.endTimeStatus;
                                                         }
                                                         sig_exit = 1;
+                                                }
+                                                if (monConn >= 0) {
+                                                        send_proc(monConn, scratch, var);
                                                 }
                                                 init_conn(i, TRUE);
                                                 continue;
@@ -583,6 +627,8 @@ int main(int argc, char **argv) {
         free(repo.sendingRates);
         free(repo.sndBuffer);
         free(repo.defBuffer);
+        free(repo.randData);
+        free(repo.sndBufRand);
         free(conn);
 
         //
@@ -634,7 +680,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *optstring = "ud46xevsf:jDSri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46xevsf:jTDXSB:ri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -776,11 +822,30 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 'j':
                         conf.jumboStatus = !DEF_JUMBO_STATUS; // Not the default
                         break;
+                case 'T':
+                        conf.traditionalMTU = TRUE;
+                        break;
                 case 'D':
                         conf.debug = TRUE;
                         break;
+                case 'X':
+                        conf.randPayload = TRUE;
+                        break;
                 case 'S':
                         conf.showSendingRates = TRUE;
+                        break;
+                case 'B':
+                        if (repo.isServer) {
+                                var = MAX_SERVER_BW;
+                        } else {
+                                var = MAX_CLIENT_BW;
+                        }
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_REQUIRED_BW, var)) > 0) {
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.maxBandwidth = value;
                         break;
                 case 'r':
                         conf.showLossRatio = TRUE;
@@ -835,7 +900,12 @@ int proc_parameters(int argc, char **argv, int fd) {
                         break;
                 case 'I':
                         // Server will use as configured maximum
-                        value = atoi(optarg);
+                        lbuf = optarg;
+                        if (*lbuf == SRIDX_ISSTART_PREFIX) {
+                                lbuf++;
+                                conf.srIndexIsStart = TRUE; // Use SR index as starting point instead of static value
+                        }
+                        value = atoi(lbuf);
                         if ((var = param_error(value, MIN_SRINDEX_CONF, MAX_SRINDEX_CONF)) > 0) {
                                 var = write(fd, scratch, var);
                                 return -1;
@@ -1011,23 +1081,26 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "       -s           Summary/Max output only (no sub-interval output)\n"
                                       "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
+                                      "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(m)    -X           Randomize datagram payload (else zeroes)\n"
                                       "       -S           Show server sending rate table and exit\n"
+                                      "       -B mbps      Max bandwidth required by client OR available to server\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
                                       "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
                                       "(c)    -R           Ignore Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"
-                                      "(m)    -I index     Index for static sending rate (see '-S') [Default <Auto>]\n"
+                                      "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
                                       "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n"
                                       "(c)    -P period    Sub-interval period in seconds [Default %d]\n"
                                       "       -p port      Port number used for control [Default %d]\n",
-                                      AUTH_KEY_SIZE, DEF_IPTOS_BYTE, DEF_TESTINT_TIME, MAX_TESTINT_TIME, DEF_SUBINT_PERIOD,
-                                      DEF_CONTROL_PORT);
+                                      AUTH_KEY_SIZE, DEF_IPTOS_BYTE, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME,
+                                      MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
                                       "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n"
@@ -1044,16 +1117,19 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
                                       DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX);
                         var = write(fd, scratch, var);
-                        var = sprintf(scratch, "Parameters:\n"
-                                               "      server       Hostname/IP of server (or local interface IP if server)\n\n"
-                                               "Notes:\n"
-                                               "(c) = Used only by client.\n"
-                                               "(s) = Used only by server.\n"
-                                               "(e) = Suppressed due to expected errors with overloaded network interfaces.\n"
-                                               "(j) = Datagram sizes that would result in jumbo frames if available.\n"
-                                               "(m) = Used as a request by the client or a maximum by the server. Client\n"
-                                               "      requests that exceed server maximum are automatically coerced down.\n"
-                                               "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n");
+                        var = sprintf(scratch,
+                                      "Parameters:\n"
+                                      "      server       Hostname/IP of server (or local interface IP if server)\n\n"
+                                      "Notes:\n"
+                                      "(c) = Used only by client.\n"
+                                      "(s) = Used only by server.\n"
+                                      "(e) = Suppressed due to expected errors with overloaded network interfaces.\n"
+                                      "(j) = Datagram sizes that would result in jumbo frames if available.\n"
+                                      "(m) = Used as a request by the client or a maximum by the server. Client\n"
+                                      "      requests that exceed server maximum are automatically coerced down.\n"
+                                      "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n"
+                                      "(i) = Static OR starting (with '%c' prefix) sending rate index.\n",
+                                      SRIDX_ISSTART_PREFIX);
                         var = write(fd, scratch, var);
                         return -1;
                 }
