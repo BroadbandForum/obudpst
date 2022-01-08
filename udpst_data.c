@@ -60,6 +60,7 @@
  * Len Ciavattone          12/08/2021    Add starting sending rate
  * Len Ciavattone          12/17/2021    Add payload randomization
  * Len Ciavattone          12/24/2021    Handle interface byte counter wrap
+ * Len Ciavattone          01/08/2022    Check burstsize >1 if forcing to 1
  *
  */
 
@@ -378,7 +379,8 @@ int send_loadpdu(int connindex, int transmitter) {
         // Handle test stop in progress
         //
         if (c->testAction != TEST_ACT_TEST) {
-                burstsize = 1; // Reduce load w/min burst size
+                if (burstsize > 1)
+                        burstsize = 1; // Reduce load w/min burst size
                 if (repo.isServer) {
                         if (monConn >= 0 && c->testAction == TEST_ACT_STOP1) {
                                 int var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
