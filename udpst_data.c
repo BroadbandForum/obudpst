@@ -218,7 +218,8 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 }
         }
 }
-#endif /* HAVE_SENDMMSG */
+
+#else
 
 //
 // Send a burst of messages using the slower but more widely available sendmsg syscall
@@ -268,6 +269,8 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                 }
         }
 }
+
+#endif /* HAVE_SENDMMSG */
 
 // Send load PDUs via periodic timers for transmitters 1 & 2
 //
@@ -564,8 +567,8 @@ int service_loadpdu(int connindex) {
                 }
         }
         if (var < 2) {
-                c->lpduHistBuf[c->lpduHistIdx] = seqno;                                // Save sequence number in history buffer
-                c->lpduHistIdx                 = ++c->lpduHistIdx & LPDU_HISTORY_MASK; // Update history buffer index
+                c->lpduHistBuf[c->lpduHistIdx] = seqno;                                    // Save sequence number in history buffer
+                c->lpduHistIdx                 = ((c->lpduHistIdx)+1) & LPDU_HISTORY_MASK; // Update history buffer index
         }
         if (var > 0) {
                 return 0; // No further processing for non-increasing sequence numbers
@@ -1160,7 +1163,7 @@ int output_currate(int connindex) {
         int i, var, sec;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, mbps, sent, delivered = 0.0, intfmbps = 0.0;
-        char connid[8], intfrate[16];
+        char connid[16], intfrate[16];
         struct testSummary *ts = &c->testSum;
 
         //
@@ -1347,7 +1350,7 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8], maxtext[32], intfrate[16];
+        char *testtype, connid[16], maxtext[32], intfrate[16];
         int i, sibegin, siend, var;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, sent, delivered = 0.0;
@@ -1727,8 +1730,13 @@ int send_proc(int connindex, char *sendbuffer, int sendsize) {
         // Prefix send buffer with timestamp for log file write
         //
         if (c->type == T_LOG) {
-                var = strftime(scratch2, sizeof(scratch2), TIME_FORMAT, localtime(&repo.systemClock.tv_sec));
-                var += sprintf(&scratch2[var], " %s", sendbuffer);
+                struct tm *ltime = localtime(&repo.systemClock.tv_sec);
+                if (ltime) {
+                     var = strftime(scratch2, sizeof(scratch2), TIME_FORMAT, ltime);
+                     var += sprintf(&scratch2[var], " %s", sendbuffer);
+                } else {
+                     var = sprintf(&scratch2[0], "0000-00-00 00:00:00 %s", sendbuffer);
+                }
                 sendbuffer = scratch2;
                 sendsize   = var;
         } else if (sendsize == 0) {
@@ -1772,8 +1780,7 @@ int send_proc(int connindex, char *sendbuffer, int sendsize) {
                 repo.logFileSize += actual;
                 if (repo.logFileSize > conf.logFileMax) {
                         close(c->fd);
-                        strcpy(scratch2, conf.logFile);
-                        strcat(scratch2, ".old");
+                        snprintf(scratch2, sizeof(scratch2), "%s.old", conf.logFile);
                         var              = rename(conf.logFile, scratch2);
                         c->fd            = open(conf.logFile, LOGFILE_FLAGS, LOGFILE_MODE);
                         repo.logFileSize = 0;
@@ -1882,7 +1889,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
 void output_warning(int connindex, int type) {
         register struct connection *c = &conn[connindex];
         int var;
-        char connid[8], location[16];
+        char connid[16], location[16];
 
         if (c->testAction == TEST_ACT_TEST && (!repo.isServer || conf.verbose)) {
                 *connid = '\0';
@@ -1922,9 +1929,13 @@ void output_warning(int connindex, int type) {
 int create_timestamp(struct timespec *tspecvar) {
         int var;
 
-        var = strftime(scratch, STRING_SIZE, "%FT%T", gmtime(&tspecvar->tv_sec));
-        var += sprintf(&scratch[var], ".%06ldZ", tspecvar->tv_nsec / NSECINUSEC);
-
+        struct tm *gmt = gmtime(&tspecvar->tv_sec);
+        if (gmt) {
+                var = strftime(scratch, STRING_SIZE, "%FT%T", gmt);
+                var += sprintf(&scratch[var], ".%06ldZ", tspecvar->tv_nsec / NSECINUSEC);
+        } else {
+                var = 0;
+        }
         return var;
 }
 //----------------------------------------------------------------------------
@@ -1942,7 +1953,7 @@ double upd_intf_stats(int connindex, BOOL initialize) {
         if (!initialize) {
                 lseek(c->intfFD, 0, SEEK_SET); // Reset position to read new value
         }
-        if ((var = (int) read(c->intfFD, buffer, sizeof(buffer))) > 0) {
+        if ((var = (int) read(c->intfFD, buffer, sizeof(buffer)-1)) > 0) {
                 buffer[var] = '\0';
                 if ((intfbytes = atol(buffer)) > 0) {
                         if (!initialize) {

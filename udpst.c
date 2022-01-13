@@ -125,7 +125,7 @@ char json_errbuf[STRING_SIZE];
 //
 int main(int argc, char **argv) {
         pid_t pid;
-        int i, j, var, var2, readyfds, pristatus, secstatus, fd = -1;
+        int fi, i, j, var, var2, readyfds, pristatus, secstatus, fd = -1;
         int appstatus = 0, outputfd = STDOUT_FILENO, logfilefd = -1;
         struct itimerval itime;
         struct sigaction saction;
@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
         // Verify and process parameters, initialize configuration and repository
         //
         if (proc_parameters(argc, argv, outputfd) != 0) {
-                return -1;
+                exit(-1);
         }
 
         //
@@ -158,12 +158,13 @@ int main(int argc, char **argv) {
                         if ((logfilefd = open(conf.logFile, LOGFILE_FLAGS, LOGFILE_MODE)) < 0) {
                                 var = snprintf(scratch, STRING_SIZE, "OPEN ERROR: <%s> %s\n", conf.logFile, strerror(errno));
                                 var = write(outputfd, scratch, var);
-                                return -1;
+                                exit(-1);
                         }
                         if (fstat(logfilefd, &statbuf) < 0) {
                                 var = snprintf(scratch, STRING_SIZE, "FSTAT ERROR: <%s> %s\n", conf.logFile, strerror(errno));
                                 var = write(outputfd, scratch, var);
-                                return -1;
+                                close(logfilefd);
+                                exit(-1);
                         }
                         repo.logFileSize = (int) statbuf.st_size; // Initialize log file size
                         outputfd         = logfilefd;
@@ -174,9 +175,9 @@ int main(int argc, char **argv) {
                 if ((pid = fork()) < 0) {
                         var = sprintf(scratch, "ERROR: fork() failed\n");
                         var = write(outputfd, scratch, var);
-                        return -1;
+                        exit(-1);
                 } else if (pid != 0) {
-                        return 0; // Parent exits
+                        exit(0); // Parent exits
                 }
                 //
                 // Initialize child
@@ -184,12 +185,12 @@ int main(int argc, char **argv) {
                 setsid();
                 var = chdir("/");
                 umask(0);
-                if ((i = open("/dev/null", O_RDWR)) >= 0) {
-                        dup2(i, STDIN_FILENO);
-                        dup2(i, STDOUT_FILENO);
-                        dup2(i, STDERR_FILENO);
-                        if ((i != STDIN_FILENO) && (i != STDOUT_FILENO) && (i != STDERR_FILENO))
-                                close(i);
+                if ((fi = open("/dev/null", O_RDWR)) >= 0) {
+                        dup2(fi, STDIN_FILENO);
+                        dup2(fi, STDOUT_FILENO);
+                        dup2(fi, STDERR_FILENO);
+                        if ((fi != STDIN_FILENO) && (fi != STDOUT_FILENO) && (fi != STDERR_FILENO))
+                                close(fi);
                 }
         }
 
@@ -245,7 +246,7 @@ int main(int argc, char **argv) {
         if (repo.sendingRates == NULL || repo.sndBuffer == NULL || repo.defBuffer == NULL || conn == NULL) {
                 var = sprintf(scratch, "ERROR: Memory allocation(s) failed\n");
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
         for (i = 0; i < MAX_CONNECTIONS; i++)
                 init_conn(i, FALSE);
@@ -255,7 +256,7 @@ int main(int argc, char **argv) {
         //
         if ((var = def_sending_rates()) > 0) {
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
 
         //
@@ -263,9 +264,8 @@ int main(int argc, char **argv) {
         //
         if (conf.showSendingRates) {
                 show_sending_rates(outputfd);
-                return 0;
+                exit(0);
         }
-
         //
         // Check for needed clock resolution
         //
@@ -273,14 +273,14 @@ int main(int argc, char **argv) {
         if (clock_getres(CLOCK_REALTIME, &repo.systemClock) == -1) {
                 var = sprintf(scratch, "CLOCK_GETRES ERROR: %s\n", strerror(errno));
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
         if (repo.systemClock.tv_nsec > 1) {
                 var =
                     sprintf(scratch, "ERROR: Clock resolution (%ld ns) out of range [see compile-time option DISABLE_INT_TIMER]\n",
                             repo.systemClock.tv_nsec);
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
         clock_gettime(CLOCK_REALTIME, &repo.systemClock); // Reinitialize local copy of system time clock
 #endif
@@ -295,7 +295,7 @@ int main(int argc, char **argv) {
         if (sigaction(SIGALRM, &saction, NULL) != 0) {
                 var = sprintf(scratch, "SIGALRM ERROR: %s\n", strerror(errno));
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
 #endif
 
@@ -308,7 +308,7 @@ int main(int argc, char **argv) {
         if (setitimer(ITIMER_REAL, &itime, NULL) != 0) {
                 var = sprintf(scratch, "ITIMER ERROR: %s\n", strerror(errno));
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
 #endif
 
@@ -326,7 +326,7 @@ int main(int argc, char **argv) {
         if (pristatus != 0) {
                 var = sprintf(scratch, "ERROR: Unable to install exit signal handler\n");
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
 
         //
@@ -335,7 +335,7 @@ int main(int argc, char **argv) {
         if ((repo.epollFD = epoll_create1(0)) < 0) {
                 var = sprintf(scratch, "ERROR: Unable to open epoll file descriptor\n");
                 var = write(outputfd, scratch, var);
-                return -1;
+                exit(-1);
         }
 
         //
@@ -602,7 +602,7 @@ int main(int argc, char **argv) {
         var = fcntl(STDERR_FILENO, F_GETFL, 0);
         fcntl(STDERR_FILENO, F_SETFL, var & ~O_NONBLOCK);
 
-        return appstatus;
+        exit(appstatus);
 }
 //----------------------------------------------------------------------------
 //
@@ -816,7 +816,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return -1;
                         }
-                        strncpy(conf.authKey, optarg, AUTH_KEY_SIZE + 1);
+                        strncpy(conf.authKey, optarg, AUTH_KEY_SIZE);
                         conf.authKey[AUTH_KEY_SIZE] = '\0';
 #else
                         var = sprintf(scratch, "ERROR: Built without authentication functionality\n");
@@ -964,7 +964,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return -1;
                         }
-                        strncpy(conf.intfName, optarg, IFNAMSIZ + 1);
+                        strncpy(conf.intfName, optarg, IFNAMSIZ - 1);
                         conf.intfName[IFNAMSIZ] = '\0';
                         break;
                 case 'M':
@@ -1158,12 +1158,14 @@ int json_finish(int connindex) {
         // NOTE: When stdout is not redirected to a file, JSON may appear clipped due to non-blocking console writes
         //
         json_string     = cJSON_PrintBuffered(json_top, 16384, conf.jsonFormatted); // Size covers likely default test options
-        var             = strlen(json_string);
-        conf.jsonOutput = FALSE; // IMPORTANT: Disable JSON formatting prior to final send_proc() call
-        send_proc(errConn, json_string, var);
-        send_proc(errConn, "\n", 1);
-        //
-        free(json_string);
+        if (json_string) {
+                var             = strlen(json_string);
+                conf.jsonOutput = FALSE; // IMPORTANT: Disable JSON formatting prior to final send_proc() call
+                send_proc(errConn, json_string, var);
+                send_proc(errConn, "\n", 1);
+                //
+                free(json_string);
+        }
         cJSON_Delete(json_top);
         c->json_siArray = NULL;
 

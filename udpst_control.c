@@ -464,7 +464,7 @@ int service_setupresp(int connindex) {
         //
         if (cHdrSR->cmdResponse != CHSR_CRSP_ACKOK) {
                 if (cHdrSR->cmdResponse == CHSR_CRSP_BADVER) {
-                        var = sprintf(scratch, "ERROR: Client version (%u) does not match server (%u)\n", PROTOCOL_VER,
+                        var = sprintf(scratch, "ERROR: Client version (%i) does not match server (%u)\n", PROTOCOL_VER,
                                       ntohs(cHdrSR->protocolVer));
                 } else if (cHdrSR->cmdResponse == CHSR_CRSP_BADJS) {
                         var = sprintf(scratch, "ERROR: Client jumbo datagram size option does not match server\n");
@@ -574,7 +574,7 @@ int service_setupresp(int connindex) {
 int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
+        char *testhdr, *testtype, connid[16], delusage[8], sritext[16];
         char addrstr[INET6_ADDR_STRLEN], portstr[8], intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
@@ -885,7 +885,7 @@ int service_actreq(int connindex) {
 int service_actresp(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8];
+        char *testhdr, *testtype, connid[16], delusage[8], sritext[16];
         char intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = &c->srStruct; // Set to connection structure
         struct timespec tspecvar;
@@ -1181,6 +1181,7 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
         //
         if ((i = getaddrinfo(host, portstr, &hints, &res)) != 0) {
                 var = sprintf(scratch, "GETADDRINFO ERROR: %s (%s)\n", strerror(errno), (const char *) gai_strerror(i));
+                if (res) freeaddrinfo(res);
                 return var;
         }
 
@@ -1191,6 +1192,7 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
                 if (hostisaddr) {
                         if (conf.addrFamily != AF_UNSPEC && conf.addrFamily != hints.ai_family) {
                                 var = sprintf(scratch, "ERROR: Specified IP address does not match address family\n");
+                                if (res) freeaddrinfo(res);
                                 return var;
                         }
                 } else if (monConn >= 0) {
