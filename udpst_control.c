@@ -52,6 +52,7 @@
  *                                       Add bandwidth management support
  * Len Ciavattone          12/08/2021    Add starting sending rate
  * Len Ciavattone          12/17/2021    Add payload randomization
+ * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
  *
  */
 
@@ -107,6 +108,7 @@ extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
 extern char *boolText[];
+extern char *rateAdjAlgo[];
 //
 extern cJSON *json_top, *json_output;
 
@@ -121,7 +123,7 @@ extern cJSON *json_top, *json_output;
 #define RAND_TEXT   "random"
 #define TESTHDR_LINE1 \
         "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n"
-#define TESTHDR_LINE2 "    SendRate Index: %s, Cong. Thresh: %d, High-Speed Delta: %d, SeqError Thresh: %d, "
+#define TESTHDR_LINE2 "    SendRate Index: %s, Cong. Thresh: %d, High-Speed Delta: %d, SeqError Thresh: %d, Algo: %s, "
 static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d%s\n";
 static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d%s\n";
 
@@ -626,6 +628,8 @@ int service_setupresp(int connindex) {
                 c->randPayload = TRUE;
                 cHdrTA->modifierBitmap |= CHTA_RAND_PAYLOAD;
         }
+        c->rateAdjAlgo      = conf.rateAdjAlgo;
+        cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
 
         //
         // Send test activation request
@@ -838,6 +842,14 @@ int service_actreq(int connindex) {
                 }
         }
         //
+        // Rate adjustment algorithm
+        //
+        c->rateAdjAlgo = (int) cHdrTA->rateAdjAlgo;
+        if (c->rateAdjAlgo < CHTA_RA_ALGO_MIN || c->rateAdjAlgo > CHTA_RA_ALGO_MAX) {
+                c->rateAdjAlgo      = DEF_RA_ALGO;
+                cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
+        }
+        //
         // If upstream test, send back sending rate parameters from first row of table
         //
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
@@ -955,7 +967,7 @@ int service_actreq(int connindex) {
                         }
                         var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
                                       c->trialInt, boolText[c->ignoreOooDup], payload, sritext, c->slowAdjThresh, c->highSpeedDelta,
-                                      c->seqErrThresh, c->ipTosByte, intflabel);
+                                      c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
                 }
         }
@@ -1055,6 +1067,7 @@ int service_actresp(int connindex) {
         if (!(cHdrTA->modifierBitmap & CHTA_RAND_PAYLOAD)) {
                 c->randPayload = FALSE; // Payload randomization rejected by server
         }
+        c->rateAdjAlgo = (int) cHdrTA->rateAdjAlgo;
 
         //
         // Set connection test action as testing and initialize PDU received time
@@ -1136,7 +1149,7 @@ int service_actresp(int connindex) {
                 if (!conf.jsonOutput) {
                         var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
                                       c->trialInt, boolText[c->ignoreOooDup], payload, sritext, c->slowAdjThresh, c->highSpeedDelta,
-                                      c->seqErrThresh, c->ipTosByte, intflabel);
+                                      c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->ipTosByte, intflabel);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (!conf.jsonBrief) {
@@ -1225,6 +1238,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "HighSpeedDelta", c->highSpeedDelta);
                                 cJSON_AddNumberToObject(json_input, "SlowAdjThresh", c->slowAdjThresh);
                                 cJSON_AddNumberToObject(json_input, "HSpeedThresh", repo.hSpeedThresh * 1000000);
+                                cJSON_AddStringToObject(json_input, "RateAdjAlgorithm", rateAdjAlgo[c->rateAdjAlgo]);
                                 //
                                 // Add input object to top-level object
                                 //

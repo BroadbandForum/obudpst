@@ -102,33 +102,34 @@
 #define DEF_BIMODAL_COUNT    0          // Bimodal initial sub-interval count
 #define MIN_BIMODAL_COUNT    1          //
 #define MAX_BIMODAL_COUNT    (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
-#define DEF_SOCKET_BUF       1024000    // Socket buffer to request
-#define MIN_SOCKET_BUF       0          // (0 = System default/minimum)
-#define MAX_SOCKET_BUF       16777216   //
-#define DEF_LOW_THRESH       30         // Low delay variation threshold (ms)
-#define MIN_LOW_THRESH       1          //
-#define MAX_LOW_THRESH       10000      //
-#define DEF_UPPER_THRESH     90         // Upper delay variation threshold (ms)
-#define MIN_UPPER_THRESH     1          //
-#define MAX_UPPER_THRESH     10000      //
-#define DEF_TRIAL_INT        50         // Status feedback/trial interval (ms)
-#define MIN_TRIAL_INT        5          //
-#define MAX_TRIAL_INT        250        //
-#define DEF_SLOW_ADJ_TH      3          // Slow adjustment threshold
-#define MIN_SLOW_ADJ_TH      1          //
-#define MAX_SLOW_ADJ_TH      UINT16_MAX //
-#define DEF_HS_DELTA         10         // High-speed delta (rows)
-#define MIN_HS_DELTA         1          //
-#define MAX_HS_DELTA         UINT8_MAX  //
-#define DEF_SEQ_ERR_TH       10         // Sequence error threshold
-#define MIN_SEQ_ERR_TH       0          //
-#define MAX_SEQ_ERR_TH       UINT16_MAX //
-#define DEF_LOGFILE_MAX      1000       // Log file max size (KBytes)
-#define MIN_LOGFILE_MAX      10         //
-#define MAX_LOGFILE_MAX      1000000    //
-#define MIN_REQUIRED_BW      1          // Required OR available bandwidth (Mbps)
-#define MAX_CLIENT_BW        10000      //
-#define MAX_SERVER_BW        100000     //
+#define DEF_SOCKET_BUF       1024000        // Socket buffer to request
+#define MIN_SOCKET_BUF       0              // (0 = System default/minimum)
+#define MAX_SOCKET_BUF       16777216       //
+#define DEF_LOW_THRESH       30             // Low delay variation threshold (ms)
+#define MIN_LOW_THRESH       1              //
+#define MAX_LOW_THRESH       10000          //
+#define DEF_UPPER_THRESH     90             // Upper delay variation threshold (ms)
+#define MIN_UPPER_THRESH     1              //
+#define MAX_UPPER_THRESH     10000          //
+#define DEF_TRIAL_INT        50             // Status feedback/trial interval (ms)
+#define MIN_TRIAL_INT        5              //
+#define MAX_TRIAL_INT        250            //
+#define DEF_SLOW_ADJ_TH      3              // Slow adjustment threshold
+#define MIN_SLOW_ADJ_TH      1              //
+#define MAX_SLOW_ADJ_TH      UINT16_MAX     //
+#define DEF_HS_DELTA         10             // High-speed delta (rows)
+#define MIN_HS_DELTA         1              //
+#define MAX_HS_DELTA         UINT8_MAX      //
+#define DEF_SEQ_ERR_TH       10             // Sequence error threshold
+#define MIN_SEQ_ERR_TH       0              //
+#define MAX_SEQ_ERR_TH       UINT16_MAX     //
+#define DEF_LOGFILE_MAX      1000           // Log file max size (KBytes)
+#define MIN_LOGFILE_MAX      10             //
+#define MAX_LOGFILE_MAX      1000000        //
+#define MIN_REQUIRED_BW      1              // Required OR available bandwidth (Mbps)
+#define MAX_CLIENT_BW        10000          //
+#define MAX_SERVER_BW        100000         //
+#define DEF_RA_ALGO          CHTA_RA_ALGO_B // Default rate adjustment algorithm
 
 //----------------------------------------------------------------------------
 //
@@ -195,6 +196,7 @@ struct configuration {
         BOOL traditionalMTU;             // Traditional (1500 byte) MTU
         BOOL debug;                      // Enable debug messaging
         BOOL randPayload;                // Payload randomization
+        int rateAdjAlgo;                 // Rate adjustment algorithm
         BOOL showSendingRates;           // Display sending rate table parameters
         BOOL showLossRatio;              // Display loss ratio
         int bimodalCount;                // Bimodal initial sub-interval count
@@ -320,6 +322,7 @@ struct connection {
         int highSpeedDelta;  // High-speed row adjustment delta
         int seqErrThresh;    // Sequence error threshold
         BOOL randPayload;    // Payload randomization
+        int rateAdjAlgo;     // Rate adjustment algorithm
         //
         struct timespec endTime;      // Connection end time
         int (*priAction)(int);        // Primary action upon IO
@@ -377,11 +380,6 @@ struct connection {
         unsigned long intfBytes;  // Last byte counter of interface stats
         struct timespec intfTime; // Sample time of interface stats
         double intfMax[2];        // Interface maximums (bimodal)
-        //
-        int intAltUse;           // Alternate use integer
-        BOOL boolAltUse;         // Alternate use boolean
-        unsigned int uintAltUse; // Alternate use unsigned int
-        void *ptrAltUse;         // Alternate use pointer
 };
 //----------------------------------------------------------------------------
 

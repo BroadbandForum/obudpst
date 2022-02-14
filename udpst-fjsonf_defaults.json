@@ -20,7 +20,7 @@
 		"ProtocolVersion":	"Any",
 		"UDPPayloadMin":	35,
 		"UDPPayloadMax":	8972,
-		"UDPPayloadDefault":    1222,
+		"UDPPayloadDefault":	1222,
 		"UDPPayloadContent":	"zeroes",
 		"TestType":	"Search",
 		"IPDVEnable":	0,
@@ -44,7 +44,8 @@
 		"UpperThresh":	90,
 		"HighSpeedDelta":	10,
 		"SlowAdjThresh":	3,
-		"HSpeedThresh":	1000000000
+		"HSpeedThresh":	1000000000,
+		"RateAdjAlgorithm":	"B"
 	},
 	"Output":	{
 		"BOMTime":	"2021-11-08T16:23:31.727285Z",

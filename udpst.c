@@ -56,6 +56,7 @@
  * Len Ciavattone          12/08/2021    Add starting sending rate
  * Len Ciavattone          12/17/2021    Add payload randomization
  * Len Ciavattone          12/21/2021    Add traditional (1500 byte) MTU
+ * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
  *
  */
 
@@ -119,6 +120,7 @@ struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
 char *boolText[]                      = {"Disabled", "Enabled"};
+char *rateAdjAlgo[]                   = {"B"}; // Aligned to CHTA_RA_ALGO_x
 //
 cJSON *json_top = NULL, *json_output = NULL;
 char json_errbuf[STRING_SIZE];
@@ -137,6 +139,22 @@ int main(int argc, char **argv) {
         struct sigaction saction;
         struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
         struct stat statbuf;
+
+        //
+        // Sanity check that rate adjustment algorithm identifiers align with protocol
+        //
+        if (sizeof(rateAdjAlgo) / sizeof(char *) != CHTA_RA_ALGO_MAX + 1) {
+                var = sprintf(scratch, "ERROR: Invalid number of rate adjustment algorithm identifiers\n");
+                var = write(outputfd, scratch, var);
+                return -1;
+        }
+        for (var = CHTA_RA_ALGO_MIN; var <= CHTA_RA_ALGO_MAX; var++) {
+                if (rateAdjAlgo[var] == NULL) {
+                        var = sprintf(scratch, "ERROR: Null pointer for rate adjustment algorithm identifier\n");
+                        var = write(outputfd, scratch, var);
+                        return -1;
+                }
+        }
 
         //
         // Verify and process parameters, initialize configuration and repository
@@ -680,7 +698,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, var, value;
-        char *lbuf, *optstring = "ud46xevsf:jTDXSB:ri:oRa:m:I:t:P:p:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46xevsf:jTDXSB:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -736,6 +754,7 @@ int proc_parameters(int argc, char **argv, int fd) {
         conf.addrFamily   = AF_UNSPEC;
         conf.errSuppress  = TRUE;
         conf.jumboStatus  = DEF_JUMBO_STATUS;
+        conf.rateAdjAlgo  = DEF_RA_ALGO;
         conf.useOwDelVar  = DEF_USE_OWDELVAR;
         conf.ignoreOooDup = DEF_IGNORE_OOODUP;
         if (!repo.isServer) {
@@ -805,12 +824,12 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return -1;
                         }
-                        if (strcmp(optarg, "json") == 0) {
+                        if (strcasecmp(optarg, "json") == 0) {
                                 conf.jsonOutput = TRUE;
-                        } else if (strcmp(optarg, "jsonb") == 0) {
+                        } else if (strcasecmp(optarg, "jsonb") == 0) {
                                 conf.jsonOutput = TRUE;
                                 conf.jsonBrief  = TRUE;
-                        } else if (strcmp(optarg, "jsonf") == 0) {
+                        } else if (strcasecmp(optarg, "jsonf") == 0) {
                                 conf.jsonOutput    = TRUE;
                                 conf.jsonFormatted = TRUE;
                         } else {
@@ -941,6 +960,27 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 return -1;
                         }
                         conf.controlPort = value;
+                        break;
+                case 'A':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Rate adjustment algorithm only set by client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        value = 0;
+                        for (var = CHTA_RA_ALGO_MIN; var <= CHTA_RA_ALGO_MAX; var++) {
+                                if (strcasecmp(optarg, rateAdjAlgo[var]) == 0) {
+                                        value = var;
+                                        break;
+                                }
+                        }
+                        if (var <= CHTA_RA_ALGO_MAX) {
+                                conf.rateAdjAlgo = value;
+                        } else {
+                                var = sprintf(scratch, "ERROR: '%s' is not a valid rate adjustment algorithm\n", optarg);
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
                         break;
                 case 'b':
                         value = atoi(optarg);
@@ -1103,6 +1143,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
                                       "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n"
                                       "(c)    -L delvar    Low delay variation threshold in ms [Default %d]\n"
                                       "(c)    -U delvar    Upper delay variation threshold in ms [Default %d]\n"
@@ -1114,6 +1155,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -M           Use local interface rate to determine maximum\n"
                                       "(s)    -l logfile   Log file name when executing as daemon\n"
                                       "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n",
+                                      rateAdjAlgo[CHTA_RA_ALGO_MIN], rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO],
                                       DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
                                       DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX);
                         var = write(fd, scratch, var);

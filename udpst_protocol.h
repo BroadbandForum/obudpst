@@ -156,8 +156,12 @@ struct controlHdrTA {
         uint8_t ignoreOooDup;   // Ignore Out-of-Order/Duplicate datagrams
 #define CHTA_SRIDX_ISSTART 0x01
 #define CHTA_RAND_PAYLOAD  0x02
-        uint8_t modifierBitmap;      // Modifier bitmap (replaced reserved1 in v9)
-        uint16_t reserved2;          // (Alignment)
+        uint8_t modifierBitmap; // Modifier bitmap (replaced reserved1 in v9)
+#define CHTA_RA_ALGO_B   0
+#define CHTA_RA_ALGO_MIN CHTA_RA_ALGO_B
+#define CHTA_RA_ALGO_MAX CHTA_RA_ALGO_B
+        uint8_t rateAdjAlgo;         // Rate adjust. algo. (replaced reserved2 in v9)
+        uint8_t reserved1;           // (Alignment) (replaced reserved2 in v9)
         struct sendingRate srStruct; // Sending rate structure
 };
 #define CHTA_SIZE_CVER sizeof(struct controlHdrTA) // Current protocol version

@@ -61,6 +61,7 @@
  * Len Ciavattone          12/17/2021    Add payload randomization
  * Len Ciavattone          12/24/2021    Handle interface byte counter wrap
  * Len Ciavattone          01/08/2022    Check burstsize >1 if forcing to 1
+ * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
  *
  */
 
@@ -180,7 +181,7 @@ static void _randomize_payload(char *buffer, unsigned int length) {
         // Randomize initial bytes while aligning buffer on long int boundary
         //
         i = 0;
-        while (len && (long unsigned int) buffer % sizeof(long int)) {
+        while (len && (unsigned long int) buffer % sizeof(long int)) {
                 *buffer++ = (char) (rvar >> i++); // Keep it very simple
                 len--;
         }
@@ -1118,12 +1119,15 @@ int adjust_sending_rate(int connindex) {
 
         //
         // Adjust sending rate as needed
-        // This section of code corresponds to the flowchart in TR-471 section 5.2.1,
-        // Sending Rate Search Algorithm, and ITU-T Recommendation Y.1540, Annex B
         //
         if (c->srIndexConf != DEF_SRINDEX_CONF && !c->srIndexIsStart) {
                 c->srIndex = c->srIndexConf; // Use static sending rate if not specified as starting point
-        } else {
+
+        } else if (c->rateAdjAlgo == CHTA_RA_ALGO_B) {
+                //
+                // This section of code corresponds to the flowchart in TR-471 section 5.2.1,
+                // Sending Rate Search Algorithm, and ITU-T Recommendation Y.1540, Annex B
+                //
                 if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) {
                                 if (c->srIndex + c->highSpeedDelta > repo.hSpeedThresh)
