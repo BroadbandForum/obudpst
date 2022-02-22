@@ -2,7 +2,7 @@
 	"IPLayerMaxConnections":	1,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"7.X.X",
+		"SoftwareVersion":	"7.4.0",
 		"ControlProtocolVersion":	9,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
