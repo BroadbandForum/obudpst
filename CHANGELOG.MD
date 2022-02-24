@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 and TR-471 Issue 2. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
 
-# 2022-02-22: [UDPST 7.4.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.4.0)
+# 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.4.0)
 
 This release has many new features, supported by the version 9 protocol:
 
@@ -13,9 +13,9 @@ This release has many new features, supported by the version 9 protocol:
 * Fixed a reordering issue with fragments when Jumbo frames are enabled - uses single code thread.
 * Optional Start rate for load-adjustment algorithm
 * New README guidance for NUMA node selection. Fragmentation makes this more important.
-* Option to allow 1500 byte MTU. (-T)
+* Option to support 1500 byte MTU. (-T)
 * Bug fix for a 32-bit kernel and the L2 Interface counters wrapping as a result of smaller max count.
-* Bug fix for unexpected sub-1Mbps testing.
+* Bug fix for unexpected sub-10Mbps testing.
 * Backward compatibility: Servers can test with both protocol version 8 and version 9.
 * Additional JSON fields: example files have been updated (additions only)
 
