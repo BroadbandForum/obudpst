@@ -80,51 +80,56 @@
 //
 // Default and min/max parameter values
 //
-#define DEF_JUMBO_STATUS  TRUE       // Enable/disable jumbo datagram sizes
-#define DEF_USE_OWDELVAR  FALSE      // Use one-way delay instead of RTT
-#define DEF_IGNORE_OOODUP FALSE      // Ignore Out-of-Order/Duplicate datagrams
-#define DEF_IPTOS_BYTE    0          // IP ToS byte for testing
-#define MIN_IPTOS_BYTE    0          //
-#define MAX_IPTOS_BYTE    UINT8_MAX  //
-#define DEF_SRINDEX_CONF  UINT16_MAX // Sending rate index, <Auto> = UINT16_MAX
-#define MIN_SRINDEX_CONF  0          //
-#define MAX_SRINDEX_CONF  (MAX_SENDING_RATES - 1)
-#define DEF_TESTINT_TIME  10         // Test interval time (sec)
-#define MIN_TESTINT_TIME  5          //
-#define MAX_TESTINT_TIME  3600       //
-#define DEF_SUBINT_PERIOD 1          // Sub-interval period (sec)
-#define MIN_SUBINT_PERIOD 1          //
-#define MAX_SUBINT_PERIOD 10         //
-#define DEF_CONTROL_PORT  25000      // Control port
-#define MIN_CONTROL_PORT  0          // (0 = Random UDP ephemeral port)
-#define MAX_CONTROL_PORT  UINT16_MAX //
-#define DEF_BIMODAL_COUNT 0          // Bimodal initial sub-interval count
-#define MIN_BIMODAL_COUNT 1          //
-#define MAX_BIMODAL_COUNT (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
-#define DEF_SOCKET_BUF    1024000    // Socket buffer to request
-#define MIN_SOCKET_BUF    0          // (0 = System default/minimum)
-#define MAX_SOCKET_BUF    16777216   //
-#define DEF_LOW_THRESH    30         // Low delay variation threshold (ms)
-#define MIN_LOW_THRESH    1          //
-#define MAX_LOW_THRESH    10000      //
-#define DEF_UPPER_THRESH  90         // Upper delay variation threshold (ms)
-#define MIN_UPPER_THRESH  1          //
-#define MAX_UPPER_THRESH  10000      //
-#define DEF_TRIAL_INT     50         // Status feedback/trial interval (ms)
-#define MIN_TRIAL_INT     5          //
-#define MAX_TRIAL_INT     250        //
-#define DEF_SLOW_ADJ_TH   3          // Slow adjustment threshold
-#define MIN_SLOW_ADJ_TH   1          //
-#define MAX_SLOW_ADJ_TH   UINT16_MAX //
-#define DEF_HS_DELTA      10         // High-speed delta (rows)
-#define MIN_HS_DELTA      1          //
-#define MAX_HS_DELTA      UINT8_MAX  //
-#define DEF_SEQ_ERR_TH    10         // Sequence error threshold
-#define MIN_SEQ_ERR_TH    0          //
-#define MAX_SEQ_ERR_TH    UINT16_MAX //
-#define DEF_LOGFILE_MAX   1000       // Log file max size (KBytes)
-#define MIN_LOGFILE_MAX   10         //
-#define MAX_LOGFILE_MAX   1000000    //
+#define DEF_JUMBO_STATUS     TRUE       // Enable/disable jumbo datagram sizes
+#define DEF_USE_OWDELVAR     FALSE      // Use one-way delay instead of RTT
+#define DEF_IGNORE_OOODUP    FALSE      // Ignore Out-of-Order/Duplicate datagrams
+#define DEF_IPTOS_BYTE       0          // IP ToS byte for testing
+#define MIN_IPTOS_BYTE       0          //
+#define MAX_IPTOS_BYTE       UINT8_MAX  //
+#define DEF_SRINDEX_CONF     UINT16_MAX // Sending rate index, <Auto> = UINT16_MAX
+#define MIN_SRINDEX_CONF     0          //
+#define MAX_SRINDEX_CONF     (MAX_SENDING_RATES - 1)
+#define SRIDX_ISSTART_PREFIX '@'        // Prefix char for sending rate starting point
+#define DEF_TESTINT_TIME     10         // Test interval time (sec)
+#define MIN_TESTINT_TIME     5          //
+#define MAX_TESTINT_TIME     3600       //
+#define DEF_SUBINT_PERIOD    1          // Sub-interval period (sec)
+#define MIN_SUBINT_PERIOD    1          //
+#define MAX_SUBINT_PERIOD    10         //
+#define DEF_CONTROL_PORT     25000      // Control port
+#define MIN_CONTROL_PORT     0          // (0 = Random UDP ephemeral port)
+#define MAX_CONTROL_PORT     UINT16_MAX //
+#define DEF_BIMODAL_COUNT    0          // Bimodal initial sub-interval count
+#define MIN_BIMODAL_COUNT    1          //
+#define MAX_BIMODAL_COUNT    (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
+#define DEF_SOCKET_BUF       1024000        // Socket buffer to request
+#define MIN_SOCKET_BUF       0              // (0 = System default/minimum)
+#define MAX_SOCKET_BUF       16777216       //
+#define DEF_LOW_THRESH       30             // Low delay variation threshold (ms)
+#define MIN_LOW_THRESH       1              //
+#define MAX_LOW_THRESH       10000          //
+#define DEF_UPPER_THRESH     90             // Upper delay variation threshold (ms)
+#define MIN_UPPER_THRESH     1              //
+#define MAX_UPPER_THRESH     10000          //
+#define DEF_TRIAL_INT        50             // Status feedback/trial interval (ms)
+#define MIN_TRIAL_INT        5              //
+#define MAX_TRIAL_INT        250            //
+#define DEF_SLOW_ADJ_TH      3              // Slow adjustment threshold
+#define MIN_SLOW_ADJ_TH      1              //
+#define MAX_SLOW_ADJ_TH      UINT16_MAX     //
+#define DEF_HS_DELTA         10             // High-speed delta (rows)
+#define MIN_HS_DELTA         1              //
+#define MAX_HS_DELTA         UINT8_MAX      //
+#define DEF_SEQ_ERR_TH       10             // Sequence error threshold
+#define MIN_SEQ_ERR_TH       0              //
+#define MAX_SEQ_ERR_TH       UINT16_MAX     //
+#define DEF_LOGFILE_MAX      1000           // Log file max size (KBytes)
+#define MIN_LOGFILE_MAX      10             //
+#define MAX_LOGFILE_MAX      1000000        //
+#define MIN_REQUIRED_BW      1              // Required OR available bandwidth (Mbps)
+#define MAX_CLIENT_BW        10000          //
+#define MAX_SERVER_BW        100000         //
+#define DEF_RA_ALGO          CHTA_RA_ALGO_B // Default rate adjustment algorithm
 
 //----------------------------------------------------------------------------
 //
@@ -134,21 +139,23 @@
 #define BASE_SEND_TIMER1  MIN_INTERVAL_USEC      // Base send timer, transmitter 1 (us)
 #define BASE_SEND_TIMER2  1000                   // Base send timer, transmitter 2 (us)
 #define MAX_L3_PACKET     1250                   // Max desired L3 packet size
-#define MAX_JL3_PACKET    9000                   // Max desired jumbo L3 packet (MTU)
+#define MAX_JL3_PACKET    9000                   // Max desired jumbo L3 packet
+#define MAX_TL3_PACKET    1500                   // Max desired traditional L3 packet
 #define L3DG_OVERHEAD     (8 + 20)               // UDP + IPv4
 #define L2DG_OVERHEAD     (8 + 20 + 14)          // UDP + IPv4 + Eth(NoFCS)
 #define L1DG_OVERHEAD     (8 + 20 + 18 + 20)     // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG
 #define L0DG_OVERHEAD     (8 + 20 + 18 + 20 + 4) // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG + VLAN
 #define IPV6_ADDSIZE      20                     // IPv6 additional size (over IPv4)
-#define MIN_PAYLOAD_SIZE  (63 - L3DG_OVERHEAD)
+#define MIN_PAYLOAD_SIZE  (sizeof(struct loadHdr) + IPV6_ADDSIZE)
 #define MAX_PAYLOAD_SIZE  (MAX_L3_PACKET - L3DG_OVERHEAD)
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
+#define MAX_TPAYLOAD_SIZE (MAX_TL3_PACKET - L3DG_OVERHEAD)
 //
 // The send buffer needs to contain all the datagram payloads for a burst. The maximum
 // burst size that is used with non-jumbo payloads is actually much larger than the maximum
 // burst size used with jumbo payloads.
 //
-#define SND_BUFFER_SIZE (MAX_BURST_SIZE * MAX_PAYLOAD_SIZE)
+#define SND_BUFFER_SIZE (MAX_BURST_SIZE * MAX_TPAYLOAD_SIZE)
 #define DEF_BUFFER_SIZE 65536
 
 //----------------------------------------------------------------------------
@@ -186,7 +193,10 @@ struct configuration {
         BOOL jsonBrief;                  // JSON Output should be minimized
         BOOL jsonFormatted;              // JSON Output should be formatted
         BOOL jumboStatus;                // Enable/disable jumbo datagram sizes
+        BOOL traditionalMTU;             // Traditional (1500 byte) MTU
         BOOL debug;                      // Enable debug messaging
+        BOOL randPayload;                // Payload randomization
+        int rateAdjAlgo;                 // Rate adjustment algorithm
         BOOL showSendingRates;           // Display sending rate table parameters
         BOOL showLossRatio;              // Display loss ratio
         int bimodalCount;                // Bimodal initial sub-interval count
@@ -195,6 +205,7 @@ struct configuration {
         char authKey[AUTH_KEY_SIZE + 1]; // Authentication key
         int ipTosByte;                   // IP ToS byte for testing
         int srIndexConf;                 // Configured sending rate index
+        BOOL srIndexIsStart;             // Configured SR index is starting point
         int testIntTime;                 // Test interval time (sec)
         int subIntPeriod;                // Sub-interval period (sec)
         int controlPort;                 // Control port number for setup requests
@@ -206,6 +217,7 @@ struct configuration {
         int slowAdjThresh;               // Slow rate adjustment threshold
         int highSpeedDelta;              // High-speed row adjustment delta
         int seqErrThresh;                // Sequence error threshold
+        int maxBandwidth;                // Required OR available bandwidth
         BOOL intfForMax;                 // Local interface used for maximum
         char intfName[IFNAMSIZ + 1];     // Local interface for supplemental stats
         int logFileMax;                  // Maximum log file size
@@ -223,6 +235,8 @@ struct repository {
         int maxSendingRates;              // Size (rows) of sending rate table
         char *sndBuffer;                  // Send buffer for load PDUs
         char *defBuffer;                  // Default buffer for general I/O
+        char *randData;                   // Randomized seed data
+        char *sndBufRand;                 // Send buffer for randomized load PDUs
         int rcvDataSize;                  // Received data size in default buffer
         struct sockaddr_storage remSas;   // Remote IP sockaddr storage
         socklen_t remSasLen;              // Remote IP sockaddr storage length
@@ -231,6 +245,8 @@ struct repository {
         char *serverName;                 // Server hostname or IP address
         int hSpeedThresh;                 // Index of high-speed threshold
         int logFileSize;                  // Current log file size
+        int usBandwidth;                  // Current upstream bandwidth
+        int dsBandwidth;                  // Current downstream bandwidth
         int endTimeStatus;                // Exit status when end time expires
 };
 //----------------------------------------------------------------------------
@@ -291,16 +307,22 @@ struct connection {
         unsigned int lpduSeqNo;      // Load PDU sequence number
         unsigned int spduSeqNo;      // Status PDU sequence number
         int spduSeqErr;              // Status PDU sequence error count
-        int lowThresh;               // Low delay variation threshold
-        int upperThresh;             // Upper delay variation threshold
-        int slowAdjThresh;           // Slow rate adjustment threshold
-        int slowAdjCount;            // Slow rate adjustment counter
-        int trialInt;                // Status feedback/trial interval (ms)
-        int testIntTime;             // Test interval time (sec)
-        int subIntPeriod;            // Sub-interval period (sec)
-        int srIndexConf;             // Configured sending rate index
-        int highSpeedDelta;          // High-speed row adjustment delta
-        int seqErrThresh;            // Sequence error threshold
+        //
+        int protocolVer;     // Protocol version
+        int maxBandwidth;    // Required bandwidth
+        int lowThresh;       // Low delay variation threshold
+        int upperThresh;     // Upper delay variation threshold
+        int slowAdjThresh;   // Slow rate adjustment threshold
+        int slowAdjCount;    // Slow rate adjustment counter
+        int trialInt;        // Status feedback/trial interval (ms)
+        int testIntTime;     // Test interval time (sec)
+        int subIntPeriod;    // Sub-interval period (sec)
+        int srIndexConf;     // Configured sending rate index
+        BOOL srIndexIsStart; // Configured SR index is starting point
+        int highSpeedDelta;  // High-speed row adjustment delta
+        int seqErrThresh;    // Sequence error threshold
+        BOOL randPayload;    // Payload randomization
+        int rateAdjAlgo;     // Rate adjustment algorithm
         //
         struct timespec endTime;      // Connection end time
         int (*priAction)(int);        // Primary action upon IO
@@ -355,14 +377,9 @@ struct connection {
         //
         cJSON *json_siArray;      // JSON sub-interval array
         int intfFD;               // File descriptor to read interface stats
-        long intfBytes;           // Last byte counter of interface stats
+        unsigned long intfBytes;  // Last byte counter of interface stats
         struct timespec intfTime; // Sample time of interface stats
         double intfMax[2];        // Interface maximums (bimodal)
-        //
-        int intAltUse;           // Alternate use integer
-        BOOL boolAltUse;         // Alternate use boolean
-        unsigned int uintAltUse; // Alternate use unsigned int
-        void *ptrAltUse;         // Alternate use pointer
 };
 //----------------------------------------------------------------------------
 

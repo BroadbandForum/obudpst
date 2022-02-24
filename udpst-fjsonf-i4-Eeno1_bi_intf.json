@@ -2,8 +2,8 @@
 	"IPLayerMaxConnections":	1,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"7.3.0",
-		"ControlProtocolVersion":	8,
+		"SoftwareVersion":	"7.X.X",
+		"ControlProtocolVersion":	9,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"Input":	{
@@ -20,12 +20,14 @@
 		"ProtocolVersion":	"Any",
 		"UDPPayloadMin":	35,
 		"UDPPayloadMax":	8972,
+		"UDPPayloadDefault":	1222,
 		"UDPPayloadContent":	"zeroes",
 		"TestType":	"Search",
 		"IPDVEnable":	0,
 		"IPRREnable":	1,
 		"RIPREnable":	1,
 		"PreambleDuration":	0,
+		"StartSendingRateIndex":	0,
 		"SendingRateIndex":	-1,
 		"NumberTestSubIntervals":	10,
 		"NumberFirstModeTestSubIntervals":	4,
@@ -42,7 +44,8 @@
 		"UpperThresh":	90,
 		"HighSpeedDelta":	10,
 		"SlowAdjThresh":	3,
-		"HSpeedThresh":	1000000000
+		"HSpeedThresh":	1000000000,
+		"RateAdjAlgorithm":	"B"
 	},
 	"Output":	{
 		"BOMTime":	"2021-11-08T16:38:50.340897Z",

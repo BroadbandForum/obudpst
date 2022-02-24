@@ -57,6 +57,12 @@
  *                                       Add JSON bimodal output
  *                                       Add JSON error support to send_proc()
  *                                       Add interface traffic rate support
+ * Len Ciavattone          12/08/2021    Add starting sending rate
+ * Len Ciavattone          12/17/2021    Add payload randomization
+ * Len Ciavattone          12/24/2021    Handle interface byte counter wrap
+ * Len Ciavattone          01/08/2022    Check burstsize >1 if forcing to 1
+ * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
+ *
  */
 
 #include "config.h"
@@ -160,6 +166,45 @@ static void _populate_header(struct loadHdr *lHdr, struct connection *c) {
         lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
 }
+//
+// Randomize payload of datagram (via single call of random())
+//
+static void _randomize_payload(char *buffer, unsigned int length) {
+        register long int rvar = random(); // Obtain random value (0 - RAND_MAX)
+        register long int *b, *rd = (long int *) repo.randData;
+        register unsigned int len = length, i;
+
+#if LONG_MAX > 2147483647L
+        rvar |= rvar << 32; // Copy value to upper half when using 64 bits
+#endif
+        //
+        // Randomize initial bytes while aligning buffer on long int boundary
+        //
+        i = 0;
+        while (len && (unsigned long int) buffer % sizeof(long int)) {
+                *buffer++ = (char) (rvar >> i++); // Keep it very simple
+                len--;
+        }
+
+        //
+        // Randomize majority as long int values using randomized seed data
+        //
+        b = (long int *) buffer;
+        while (len > sizeof(long int)) {
+                *b++ = rvar ^ *rd++; // Also simple (but more efficient)
+                len -= sizeof(long int);
+        }
+        buffer = (char *) b;
+
+        //
+        // Randomize any remaining bytes
+        //
+        i = 8; // Something different than initial bytes
+        while (len) {
+                *buffer++ = (char) (rvar >> i++); // Back to very simple
+                len--;
+        }
+}
 
 #if defined(HAVE_SENDMMSG)
 //
@@ -174,7 +219,11 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
         int i, var;
 
         memset(mmsg, 0, totalburst * sizeof(struct mmsghdr));
-        nextsndbuf = repo.sndBuffer;
+        if (c->randPayload) {
+                nextsndbuf = repo.sndBufRand;
+        } else {
+                nextsndbuf = repo.sndBuffer;
+        }
         for (i = 0; i < totalburst; i++) {
                 struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
                 _populate_header(lHdr, c);
@@ -184,6 +233,9 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 else
                         uvar = addon;
                 lHdr->udpPayload = htons((uint16_t) uvar);
+                if (c->randPayload) {
+                        _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
+                }
 
                 //
                 // Setup corresponding message structure
@@ -229,9 +281,14 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
         struct connection *c = &conn[connindex];
         unsigned int uvar;
         int i;
-        struct loadHdr *lHdr = (struct loadHdr *) repo.sndBuffer;
+        struct loadHdr *lHdr;
 
         memset((void *) &msg, 0, sizeof(struct msghdr));
+        if (c->randPayload) {
+                lHdr = (struct loadHdr *) repo.sndBufRand;
+        } else {
+                lHdr = (struct loadHdr *) repo.sndBuffer;
+        }
         _populate_header(lHdr, c);
 
         for (i = 0; i < totalburst; i++) {
@@ -242,6 +299,9 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                 else
                         uvar = addon;
                 lHdr->udpPayload = htons((uint16_t) uvar);
+                if (c->randPayload) {
+                        _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
+                }
 
                 //
                 // Setup corresponding message structure
@@ -305,19 +365,23 @@ int send_loadpdu(int connindex, int transmitter) {
                 burstsize = (int) sr->burstSize2;
                 addon     = (unsigned int) sr->udpAddon2;
         }
+
+        //
+        // If IPv6 reduce payload to maintain L3 packet sizes
+        //
         if (c->ipProtocol == IPPROTO_IPV6) {
-                //
-                // Truncate payload if it would cause oversized IPv6 jumbo packet
-                //
-                if (payload > MAX_JPAYLOAD_SIZE - IPV6_ADDSIZE)
-                        payload = MAX_JPAYLOAD_SIZE - IPV6_ADDSIZE;
+                if (payload >= MIN_PAYLOAD_SIZE)
+                        payload -= IPV6_ADDSIZE;
+                if (addon >= MIN_PAYLOAD_SIZE)
+                        addon -= IPV6_ADDSIZE;
         }
 
         //
         // Handle test stop in progress
         //
         if (c->testAction != TEST_ACT_TEST) {
-                burstsize = 1; // Reduce load w/min burst size
+                if (burstsize > 1)
+                        burstsize = 1; // Reduce load w/min burst size
                 if (repo.isServer) {
                         if (monConn >= 0 && c->testAction == TEST_ACT_STOP1) {
                                 int var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
@@ -1055,12 +1119,15 @@ int adjust_sending_rate(int connindex) {
 
         //
         // Adjust sending rate as needed
-        // This section of code corresponds to the flowchart in TR-471 section 5.2.1,
-        // Sending Rate Search Algorithm, and ITU-T Recommendation Y.1540, Annex B
         //
-        if (c->srIndexConf != DEF_SRINDEX_CONF) {
-                c->srIndex = c->srIndexConf; // Use static sending rate if specified
-        } else {
+        if (c->srIndexConf != DEF_SRINDEX_CONF && !c->srIndexIsStart) {
+                c->srIndex = c->srIndexConf; // Use static sending rate if not specified as starting point
+
+        } else if (c->rateAdjAlgo == CHTA_RA_ALGO_B) {
+                //
+                // This section of code corresponds to the flowchart in TR-471 section 5.2.1,
+                // Sending Rate Search Algorithm, and ITU-T Recommendation Y.1540, Annex B
+                //
                 if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) {
                                 if (c->srIndex + c->highSpeedDelta > repo.hSpeedThresh)
@@ -1934,7 +2001,7 @@ int create_timestamp(struct timespec *tspecvar) {
 double upd_intf_stats(int connindex, BOOL initialize) {
         register struct connection *c = &conn[connindex];
         int var;
-        long intfbytes; // Use long to support 64-bit byte counters with 64-bit OS
+        unsigned long intfbytes; // Use unsigned long to support 64-bit counters with 64-bit OS
         double mbps = 0.0;
         struct timespec tspecvar;
         char buffer[32];
@@ -1944,11 +2011,16 @@ double upd_intf_stats(int connindex, BOOL initialize) {
         }
         if ((var = (int) read(c->intfFD, buffer, sizeof(buffer))) > 0) {
                 buffer[var] = '\0';
-                if ((intfbytes = atol(buffer)) > 0) {
+                if ((intfbytes = strtoul(buffer, NULL, 10)) > 0) {
                         if (!initialize) {
-                                if (intfbytes >= c->intfBytes && tspecisset(&c->intfTime)) {
+                                if (tspecisset(&c->intfTime)) {
                                         tspecminus(&repo.systemClock, &c->intfTime, &tspecvar);
-                                        mbps = (double) (intfbytes - c->intfBytes);
+                                        if (intfbytes >= c->intfBytes) {
+                                                mbps = (double) (intfbytes - c->intfBytes);
+                                        } else {
+                                                // Counter wrapped
+                                                mbps = (double) ((ULONG_MAX - c->intfBytes) + intfbytes + 1);
+                                        }
                                         mbps *= 8.0;
                                         mbps /= (double) tspecusec(&tspecvar);
                                 }

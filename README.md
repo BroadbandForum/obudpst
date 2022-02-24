@@ -41,8 +41,8 @@ adjustment algorithm to be more easily enhanced and customized to accommodate
 diverse network services and protocols. To that end, and to encourage
 additional testing and experimentation, the software has been structured so
 that virtually all of the settings and thresholds used by the algorithm are
-currently available as client-side command-line parameters (allowing modification
-beyond the current set of default values updated in Release 7.2.1).
+currently available as client-side command-line parameters (allowing
+modification beyond the current set of default values updated in Release 7.2.1).
 
 By default, both IPv4 and IPv6 tests can be serviced simultaneously when acting
 as a server. When acting as a client, testing is performed in one address
@@ -50,12 +50,16 @@ family at a time. Also, the default behavior is that jumbo datagram sizes
 (datagrams that would result in jumbo frames) are utilized for sending rates
 above 1 Gbps. The expectation is that jumbo frames can be accommodated
 end-to-end without fragmentation. For sending rates below 1 Gbps, or all
-sending rates when the `-j` option is used, the largest UDP payload size is
+sending rates when the `-j` option is used, the default UDP payload size is
 1222 bytes. This size was chosen because although it is relatively large it
 should still avoid any unexpected fragmentation due to intermediate protocols
-or tunneling. It also happens to produce a "convenient" number of bits at Layer
-3 when doing IPv4 testing. Note that the `-j` option must match between the
-client and server or the server will reject the test request.
+or tunneling. Alternatively, the `-T` option is available to allow slightly
+larger default datagrams that would create full packets when a traditional
+1500 byte MTU is available end-to-end. These larger sizes are optional because
+several consumer-grade routers have been shown to handle packet fragmentation,
+from a performance perspective, very poorly. Note that both the `-j` and `-T`
+options must match between the client and server or the server will reject the
+test request.
 
 All delay variation values, based on One-Way Delay (OWDVar) or Round-Trip Time
 (RTTVar), indicate the delays measured above the most recent minimum. Although
@@ -132,39 +136,45 @@ delay variation, etc., using -I index:
 $ udpst -d <server> -I 958
     Do downstream test from server (as hostname or IP address) to client at
     a fixed rate of 958 Mbps (0.99 times the Maximum IP-layer Capacity for 
-    udpst on a 1Gbps access link using one VLAN tag). 
+    udpst on a 1 Gbps access link using one VLAN tag). 
 ```
 
 There are circumstances when changes to the defaults are warranted, such as
-extremely long paths with unknown cross traffic, high levels of competing traffic,
-testing over radio links with highly variable loss and delay, and test 
+extremely long paths with unknown cross traffic, high levels of competing
+traffic, testing over radio links with highly variable loss and delay, and test 
 paths that exhibit bi-modal rate behavior in repeated tests. In these 
-circumstances, the following client-side command-line parameters have been useful:
+circumstances, the following client-side command-line parameters have been
+useful:
 ```
 $ udpst -?
-  ...
-        -i count     Display bimodal maxima (specify initial sub-intervals)
- (c)    -R           Ignore Out-of-Order/Duplicate datagrams
- (m)    -t time      Test interval time in seconds [Default 10, Max 3600]
- (c)    -U delvar    Upper delay variation threshold in ms [Default 90]
- (c)    -c thresh    Congestion slow adjustment threshold [Default 3]
- (c)    -h delta     High-speed (row adjustment) delta [Default 10]
- (c)    -q seqerr    Sequence error threshold [Default 10] 
+...
+(j)    -j           Disable jumbo datagram sizes above 1 Gbps
+       -T           Use datagram sizes for traditional (1500 byte) MTU
+       -i count     Display bimodal maxima (specify initial sub-intervals)
+(c)    -R           Ignore Out-of-Order/Duplicate datagrams
+(m,i)  -I [@]index  Index of sending rate (see '-S') [Default @0 = <Auto>]
+(m)    -t time      Test interval time in seconds [Default 10, Max 3600]
+(c)    -U delvar    Upper delay variation threshold in ms [Default 90]
+(c)    -c thresh    Congestion slow adjustment threshold [Default 3]
+(c)    -h delta     High-speed (row adjustment) delta [Default 10]
+(c)    -q seqerr    Sequence error threshold [Default 10]
 ```
 See the following publication (which is updated frequently) for more details
 on testing in the circumstances described above:
 
-- ITU-T Y-series Supplement 60 (2020): _Interpreting ITU-T Y.1540 maximum IP-layer capacity measurements_, 
-ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
+- ITU-T Y-series Supplement 60 (2020): _Interpreting ITU-T Y.1540 maximum
+IP-layer capacity measurements_, ITU-T Y.Sup60,
+https://www.itu.int/rec/T-REC-Y.Sup60/en
 
 
 ## Building OB-UDPST
 
-To build OB-UDPST a local installation of CMake is required. Please obtain them
+To build OB-UDPST a local installation of CMake is required. Please obtain it
 for your particular build system either using the locally available packages or
 consult with [https://cmake.org] for other download options.
 
 ```
+$ cmake .
 $ make
 ```
 *Note: Authentication functionality uses a command-line key along with the
@@ -271,8 +281,7 @@ the connection which closes the socket and deallocates it.
 
 For much more detail on the test protocol, see the ./protocol.md file.
 Also, an Internet-Draft, 
-https://datatracker.ietf.org/doc/html/draft-morton-ippm-capacity-metric-protocol-02
-describes Protocol Version 8 in even more detail.
+https://datatracker.ietf.org/doc/html/draft-morton-ippm-capacity-metric-protocol-02 describes Protocol Version 8 in even more detail.
 
 ## Linux Socket Buffer Optimization
 For very high speeds (typically above 1 Gbps), the socket buffer maximums of
@@ -293,17 +302,42 @@ be used if even higher buffer levels should be explicitly requested for each
 socket.*
 
 ## Considerations for Older Hardware and Low-End Devices
-Systems that are unable to support the required clock resolution will cause an
-error message at runtime (e.g., “ERROR: Clock resolution (xxxxxxx ns) out of
-range”) and udpst will exit. This is because without the needed interval timer
-frequency, sending rates would be skewed and the rate-adaption algorithm would
-not function properly.
+There are two general categories of devices in this area, 1) those that operate
+normally but lack the horsepower needed to reach a specific sending rate and
+2) those that are unable to function properly because they do not support the
+required clock resolution. In this case, an error message is produced
+(“ERROR: Clock resolution (xxxxxxx ns) out of range”) and the software exits
+because without the expected interval timer, sending rates would be skewed and
+the rate-adaption algorithm would not function properly.
 
-As a workaround for older devices, a compile-time option (DISABLE_INT_TIMER) is
-available that does not rely on an underlying system interval timer. However,
-the trade-off for this mode of operation is that it results in high CPU
-utilization, but clients running on older or low-capability hosts may be able
-to execute tests where they otherwise would not.
+Devices in the first category may be helped by the `-T` option when a
+traditional 1500 byte MTU is available end-to-end between client and server.
+This option will increase the default datagram payload size so that full 1500
+byte packets are generated. This reduces both the socket I/O and network packet
+rates (see `-S` vs. `-ST` output). Another beneficial option in these cases is
+`-j`. This is to disable all jumbo datagram sizes and prevent any possible
+fragmentation. This can happen with a very underpowered device when the server,
+attempting to drive the client higher and higher, ends up at sending rates
+above 1 Gbps.
+
+One specific device in this category worth mentioning is a Raspberry Pi 4
+running Raspberry Pi OS (previously called Raspbian). Testing has shown that to
+reach a 1 Gbps sending rate, it was necessary to set the CPU affinity of udpst
+to avoid CPU 0 (the CPU handling network interrupts when *irqbalance* is not
+used). Additionally, and especially when using a 32-bit Raspbian, both the `-T`
+and `-j` options were also needed. Although these last two options were not a
+hard requirement with a 64-bit Raspbian and 64-bit udpst, they are still
+recommended for ANY device in this general category (along with a 64-bit
+environment if applicable). The command to utilize these recommendations is:
+```
+taskset -c 1-3 udpst -u -T -j <server>
+```
+For devices in the second category (unsupported timer resolution), a
+compile-time option (DISABLE_INT_TIMER) is available that does not rely on an
+underlying system interval timer. However, the trade-off for this mode of
+operation is that it results in high CPU utilization. But, clients running on
+older or low-capability hosts may be able to execute tests where they otherwise
+would not.
 ```
 $ cmake -D DISABLE_INT_TIMER=ON .
 ```
@@ -325,15 +359,16 @@ occurs, the error status will be 1 (one) and the most recent warning message
 will be included. If a hard error or failure occurs the error status will be
 -1 (negative one) and an error message will be included.
 
-The file "ob-udpst_output_mapping...pdf" provides a mapping between JSON key names,
-TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various results.
+The file "ob-udpst_output_mapping...pdf" provides a mapping between JSON key
+names, TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various
+results.
 
 *Note: When stdout is not redirected to a file, JSON may appear clipped due to
 non-blocking console writes.*
 
 ## Local Interface Traffic Rate
 Where applicable, it is possible to also output the local interface traffic
-rate (in Mbps) via the `-E <intf>` option. This can be informative when trying
+rate (in Mbps) via the `-E intf` option. This can be informative when trying
 to account for external traffic that may be consuming a non-trivial amount of
 the interface bandwidth and competing with the measurement traffic. The rate is
 obtained by querying the specific interface byte counters that correspond with
@@ -343,10 +378,109 @@ for downstream tests). These values are obtained from the sysfs path
 also available to override normal behavior and use the interface rate instead
 of the measurement traffic to determine a maximum.
 
-When the `-E <intf>` option is utilized, the console output will show the
+When the `-E intf` option is utilized, the console output will show the
 interface name in square brackets in the header info and the Ethernet rate of
 the interface in square brackets after the L3/IP measured rate. When JSON
 output is also enabled, the interface name appears in "Interface" and the
 interface rate is in "InterfaceEthMbps". When this option is not utilized,
 these JSON fields will contain an empty string and zero respectively.
+
+## Server Bandwidth Management
+The `-B mbps` option can be used on a server to designate a maximum available
+bandwidth. Typically, this would specify the speed of the interface servicing
+tests and is managed separately for upstream and downstream (i.e., `-B 10000`
+indicates that 10 Gbps is available in each direction). One scenario to achieve
+better server utilization is to run multiple software instances on a machine
+with each one bound to a different physical interface (and this option set for
+the respective speed of each). Another scenario is to run multiple instances
+where each handles a portion of the bandwidth of a single physical interface.
+For example, 10 instances with `-B 10000` for a 100G connection. This can be
+done by either binding each to a different IP alias or configuring them to use
+different control ports (e.g., `-p 25000`, `-p 25001`, `-p 25002`,...). And
+although single threaded, each running instance will support multiple
+simultaneous overlapping tests (~128 by default).
+
+When configured on the server, clients will also need to utilize the `-B mbps`
+option in their test request to indicate the maximum bandwidth they require
+from the server for accurate testing. For example, a client connected via a 300
+Mbps Internet service would specify `-B 300`. If the server's available
+bandwidth is unable to accommodate what the client requires, due to tests
+already in progress, the test request is rejected and the client produces an
+error indicating this as the cause. The client can then retry the test a little
+later, when server bandwidth may be available, or immediately try either an
+alternate software instance (per the scenarios described above) or a different
+server altogether.
+
+*Note: This option does not alter the test methodology or the rate adjustment
+algorithm in any way. It only provides test admission control to better manage
+the server's network bandwidth.*
+
+## Increasing the Starting Sending Rate (Considerations)
+While the `-I index` option designates a fixed sending rate, it is also possible
+to set the starting rate with load adjustment enabled. Option `-I @index` allows
+selection of a higher initial sending rate starting at the specified index in
+the sending rate table (with the default equivalent to `-I @0` and shown as
+`<Auto>`). Note that with or without the `@` character prefix, this option
+relies on an index from the sending rate table (see `-S` for index values).
+
+For maximum capacities up to 1 Gbps, the `-h delta` option has been available
+for some time to allow customization of the ramp-up speed (which is used below
+1 Gbps until congestion is detected). In some cases, and especially with
+maximum capacities above 1 Gbps (where `-h delta` no longer has an impact), it
+can make sense to start at an initial sending rate above index 0 (zero). For
+example, specifying `-I @1000` when testing a 10 Gbps service would start with
+a sending rate of 1 Gbps.
+
+One important consideration with the `-I @index` option is that setting too high
+a value can be counter-productive to finding an accurate maximum. This is
+because when some devices or communication channels are suddenly overwhelmed by
+the appearance of very-high sustained traffic, it can result in early congestion
+and data loss that make it prematurely appear as if a maximum capacity has been
+reached. As such, it is recommended to use starting rates of only 10-20% of the
+expected maximum to avoid an early overload condition and false maximum.
+
+## Server Optimization - Particularly When Jumbo Frames Are Unavailable
+By default, the sending rate table utilizes jumbo size datagrams when testing
+above 1 Gbps. As expected, maximum performance is obtained when the network
+also supports a jumbo MTU size (9000+ bytes). However, some environments are
+restricted to a traditional MTU of 1500 bytes and would be required to fragment
+the jumbo datagrams into multiple IP packets.
+
+One available option in these scenarios is to utilize the `-j` option on both
+the server and client to restrict datagrams to non-jumbo sizes above 1 Gbps.
+However, because of the extremely high resulting socket I/O rate at high
+speeds, it is unlikely that a full 10 Gbps can be achieved with this option.
+The compromise, to maintain a reasonable socket I/O rate, is to leave jumbo
+datagrams enabled (the default) and rely on the IP layer to fragment them.
+
+An important performance consideration, due to the higher network overhead in
+these scenarios (although beneficial under any circumstances), is to
+instantiate the udpst process in the same Non-Uniform Memory Access (NUMA)
+node as the network interface. This placement will limit cross-NUMA memory
+access on systems with more than one NUMA node. Testing has shown this
+commonplace server optimization can significantly increase sending rates while
+also reducing CPU utilization. The goal is to set the CPU affinity of the
+process to the same NUMA node as the one handling the network interface used
+for testing. Follow the steps below to achieve this:
+
+First, obtain the NUMA node count (to verify applicability if >1) as well as
+the CPU listing for each node.
+```
+$ lscpu | grep NUMA
+NUMA node(s):                    2
+NUMA node0 CPU(s):               0-13,28-41
+NUMA node1 CPU(s):               14-27,42-55
+```
+Next, find the NUMA node that corresponds to the test interface (in this case
+ens1f0 is associated with node 0).
+```
+$ cat /sys/class/net/ens1f0/device/numa_node
+0
+```
+Finally, start the process with a CPU affinity that matches the NUMA node of
+the test interface (node0 = 0-13,28-41). This example also uses a starting
+sending rate of 1 Gbps.
+```
+$ taskset -c 0-13,28-41 udpst -u -I @1000 <server>
+```
 

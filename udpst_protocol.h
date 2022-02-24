@@ -43,7 +43,9 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 8 // Protocol version between client and server
+#define PROTOCOL_VER 9 // Current protocol version between client and server
+#define PROTOCOL_MIN 8 // Minimum protocol version for backward compatibility
+#define BWMGMT_PVER  9 // Protocol version required for bandwidth management
 
 //----------------------------------------------------------------------------
 //
@@ -101,10 +103,16 @@ struct controlHdrSR {
 #define CHSR_CRSP_AUTHINV  6
 #define CHSR_CRSP_AUTHFAIL 7
 #define CHSR_CRSP_AUTHTIME 8
-        uint8_t cmdResponse; // Command response
-        uint16_t reserved1;  // (alignment)
-        uint16_t testPort;   // Test port on server
-        uint8_t jumboStatus; // Jumbo datagram support status (BOOL)
+#define CHSR_CRSP_NOMAXBW  9
+#define CHSR_CRSP_CAPEXC   10
+#define CHSR_CRSP_BADTMTU  11
+        uint8_t cmdResponse;   // Command response
+#define CHSR_USDIR_BIT 0x8000  // Bandwidth upstream direction bit
+        uint16_t maxBandwidth; // Required bandwidth (added in v9)
+        uint16_t testPort;     // Test port on server
+#define CHSR_JUMBO_STATUS    0x01
+#define CHSR_TRADITIONAL_MTU 0x02
+        uint8_t modifierBitmap; // Modifier bitmap (replaced jumboStatus in v9)
 #define AUTHMODE_NONE   0
 #define AUTHMODE_SHA256 1
         uint8_t authMode;      // Authentication mode
@@ -116,6 +124,8 @@ struct controlHdrSR {
 #endif
         unsigned char authDigest[AUTH_DIGEST_LENGTH];
 };
+#define CHSR_SIZE_CVER sizeof(struct controlHdrSR) // Current protocol version
+#define CHSR_SIZE_MVER (CHSR_SIZE_CVER - 0)        // Minimum protocol version
 //----------------------------------------------------------------------------
 //
 // Control header for UDP payload of Test Activation PDUs
@@ -131,23 +141,31 @@ struct controlHdrTA {
 #define CHTA_CRSP_NONE     0
 #define CHTA_CRSP_ACKOK    1
 #define CHTA_CRSP_BADPARAM 2
-        uint8_t cmdResponse;         // Command response
-        uint16_t lowThresh;          // Low delay variation threshold
-        uint16_t upperThresh;        // Upper delay variation threshold
-        uint16_t trialInt;           // Status feedback/trial interval (ms)
-        uint16_t testIntTime;        // Test interval time (sec)
-        uint8_t subIntPeriod;        // Sub-interval period (sec)
-        uint8_t ipTosByte;           // IP ToS byte for testing
-        uint16_t srIndexConf;        // Configured sending rate index
-        uint8_t useOwDelVar;         // Use one-way delay instead of RTT
-        uint8_t highSpeedDelta;      // High-speed row adjustment delta
-        uint16_t slowAdjThresh;      // Slow rate adjustment threshold
-        uint16_t seqErrThresh;       // Sequence error threshold
-        uint8_t ignoreOooDup;        // Ignore Out-of-Order/Duplicate datagrams
-        uint8_t reserved1;           // (Alignment)
-        uint16_t reserved2;          // (Alignment)
+        uint8_t cmdResponse;    // Command response
+        uint16_t lowThresh;     // Low delay variation threshold
+        uint16_t upperThresh;   // Upper delay variation threshold
+        uint16_t trialInt;      // Status feedback/trial interval (ms)
+        uint16_t testIntTime;   // Test interval time (sec)
+        uint8_t subIntPeriod;   // Sub-interval period (sec)
+        uint8_t ipTosByte;      // IP ToS byte for testing
+        uint16_t srIndexConf;   // Configured sending rate index
+        uint8_t useOwDelVar;    // Use one-way delay instead of RTT
+        uint8_t highSpeedDelta; // High-speed row adjustment delta
+        uint16_t slowAdjThresh; // Slow rate adjustment threshold
+        uint16_t seqErrThresh;  // Sequence error threshold
+        uint8_t ignoreOooDup;   // Ignore Out-of-Order/Duplicate datagrams
+#define CHTA_SRIDX_ISSTART 0x01
+#define CHTA_RAND_PAYLOAD  0x02
+        uint8_t modifierBitmap; // Modifier bitmap (replaced reserved1 in v9)
+#define CHTA_RA_ALGO_B   0
+#define CHTA_RA_ALGO_MIN CHTA_RA_ALGO_B
+#define CHTA_RA_ALGO_MAX CHTA_RA_ALGO_B
+        uint8_t rateAdjAlgo;         // Rate adjust. algo. (replaced reserved2 in v9)
+        uint8_t reserved1;           // (Alignment) (replaced reserved2 in v9)
         struct sendingRate srStruct; // Sending rate structure
 };
+#define CHTA_SIZE_CVER sizeof(struct controlHdrTA) // Current protocol version
+#define CHTA_SIZE_MVER (CHTA_SIZE_CVER - 0)        // Minimum protocol version
 //----------------------------------------------------------------------------
 //
 // Load header for UDP payload of load PDUs
@@ -197,8 +215,8 @@ struct statusHdr {
         uint32_t rttMinimum;    // Minimum round-trip time sampled
         uint32_t rttSample;     // Last round-trip time sample
         uint8_t delayMinUpd;    // Delay minimum(s) updated
-        uint8_t reserved2;      // (alignment)
-        uint16_t reserved3;     // (alignment)
+        uint8_t reserved2;      // (Alignment)
+        uint16_t reserved3;     // (Alignment)
         //
         uint32_t tiDeltaTime;   // Trial interval delta time
         uint32_t tiRxDatagrams; // Trial interval receive datagrams
