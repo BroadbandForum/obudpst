@@ -169,7 +169,7 @@ https://www.itu.int/rec/T-REC-Y.Sup60/en
 
 ## Building OB-UDPST
 
-To build OB-UDPST a local installation of CMake version 3.0 or higher is required. Please obtain them
+To build OB-UDPST a local installation of CMake version 3.0 or higher is required. Please obtain it
 for your particular build system either using the locally available packages (`apt-get install cmake` or `yum install cmake3`) or
 consult with [https://cmake.org] for other download options.
 
