@@ -1,6 +1,6 @@
 Name:           udpst
 Version:        7.4.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
@@ -43,6 +43,8 @@ systemctl daemon-reload
 firewall-cmd --permanent --add-port=25000/udp
 firewall-cmd --permanent --add-port=32768-60999/udp
 firewall-cmd --reload
+systemctl restart udpst
+systemctl status  udpst --lines=0
 
 %files
 %defattr(0644,root,root,-)
