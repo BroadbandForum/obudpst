@@ -13,12 +13,12 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  glibc-headers
 BuildRequires:  openssl-devel
-Requires:       systemd
-Requires:       firewalld
 
 %package server
 Requires:       %{name} = %{version}-%{release}
 Summary:        Open Broadband-UDP Speed Test Server
+Requires:       systemd
+Requires:       firewalld
 
 %description
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to demonstrate one approach of doing IP capacity measurements
@@ -46,12 +46,16 @@ firewall-cmd --reload
 
 %files
 %defattr(0644,root,root,-)
+%attr(0755,root,root) %{_bindir}/%{name}
 
 %files server
-%attr(0755,root,root) %{_bindir}/%{name}
 %attr(0644,root,root) %{_unitdir}/%{name}.service
 
 %changelog
+* Mon Apr 04 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.4.0-1
+- Updated to upstream version 7.4.0
+- Fixed client RPM only install
+
 * Thu Mar 18 2021 Michael R. Davis <mrdvt92@yahoo.com> - 7.1.0-3
 - Split out server package and added firewall-cmd to open ports
 
