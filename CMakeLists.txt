@@ -65,10 +65,13 @@ CHECK_INCLUDE_FILES (sys/sysctl.h HAVE_SYSCTL_H)
 CHECK_INCLUDE_FILES (linux/socket.h HAVE_SIOCGIFHWADDR)
 CHECK_SYMBOL_EXISTS (LLADDR "sys/socket.h;net/if_dl.h" HAVE_NET_IF_DL_H)
 
+CHECK_FUNCTION_EXISTS (sendmmsg HAVE_SENDMMSG)
 CHECK_FUNCTION_EXISTS (timegm HAVE_TIMEGM)
 CHECK_FUNCTION_EXISTS (mkfifo HAVE_MKFIFO)
 CHECK_FUNCTION_EXISTS (getifaddrs HAVE_GETIFADDRS)
 CHECK_FUNCTION_EXISTS (fork HAVE_WORKING_FORK)
+
+OPTION(DISABLE_INT_TIMER "Disable the timer for systems which don't provide the required timer resolution. Increases CPU utilization." OFF)
 
 add_definitions(-DSYSCONFDIR=\"${CMAKE_INSTALL_PREFIX}/etc\")
 add_definitions(-DLOCALSTATEDIR=\"${CMAKE_INSTALL_PREFIX}/var/lib\")
@@ -78,11 +81,11 @@ add_definitions(-DRUNDIR=\"${CMAKE_INSTALL_PREFIX}/run\")
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 # Define a library called udpst_core containing all core functionality
-add_library(udpst_core udpst_control.c udpst_data.c udpst_srates.c)
+add_library(udpst_core udpst_control.c udpst_data.c udpst_srates.c cJSON.c)
 set(libraries udpst_core ${libraries})
 
 add_executable(udpst udpst.c)
-target_link_libraries(udpst ${libraries})
+target_link_libraries(udpst ${libraries} m)
 install(TARGETS udpst RUNTIME)
 
 # For some reason Ninja sometimes faces a stupid error which is fixed by

@@ -5,9 +5,11 @@ cmake_install.cmake
 compile_commands.json
 Makefile
 *.o
+*.a
 **.orig
 package
 *.tar
 *.tar.gz
 udpst
 config.h
+build

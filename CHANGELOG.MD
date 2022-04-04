@@ -1,7 +1,55 @@
-# CHANGELOG.MD for udpst 7.1.0 Release
+# CHANGELOG.MD for udpst 7.x.0 Releases
 
-*The udpst utility conforms to TR-471. The latest TR-471 specification can be found at
+*The udpst utility conforms to TR-471 and TR-471 Issue 2. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
+
+# 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.4.0)
+
+This release has many new features, supported by the version 9 protocol:
+
+* Best Practices file (Discusses the application of udpst for formal and automated testing across various speeds, with multiple servers, using current and new features.)
+* Implementation of Random payload option. Performance suggests very limited compressibility.
+* Server can accept a BW limit for mission-control, Client must supply a max BW for testing, -B option
+* Fixed a reordering issue with fragments when Jumbo frames are enabled - uses single code thread.
+* Optional Start rate for load-adjustment algorithm
+* New README guidance for NUMA node selection. Fragmentation makes this more important.
+* Option to support 1500 byte MTU. (-T)
+* Bug fix for a 32-bit kernel and the L2 Interface counters wrapping as a result of smaller max count.
+* Bug fix for unexpected sub-10Mbps testing.
+* Backward compatibility: Servers can test with both protocol version 8 and version 9.
+* Additional JSON fields: example files have been updated (additions only)
+
+# 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.3.0)
+
+This release has a greatly expanded (optional) JSON-formatted version of the command-line output.
+
+Further, this release implements virtually all the TR-471 Issue 2 and TR-181 IPLayerCapacity{} data model elements.
+The File "ob-udpst_output_mapping_to_current_JSON and_TR-471_info model-v33-20211118_071424.pdf" provides the mapping
+where names differ in small ways, or where additional names are provided in the JSON format or STDOUT.
+
+We also include measurement of Ethernet Interface traffic during a test, to help identify when customer traffic was 
+present that might cause the IP-Layer Capacity measurement to under-estimate the maximum capacity.
+
+## 2021-08-20: [UDPST 7.2.1](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.2.1)
+
+This supplemental release incorporates results from recent testing, where two changes 
+in default parameters to protect the fast ramp-up seem prudent, and the status of default
+values needed additional explanation:
+* slowAdjThresh; Slow rate adjustment threshold value default=3 (changed from 2)
+* seqErrThresh; Sequence error threshold value default=10 (changed from 0)
+* The READ.md describes the default values, the changes in (7.2.1), and circumstances when 
+test orgs. should consider changes to the default values.  In other words, the defaults are 
+provided as a starting point; any test campaign should consider whether one or more default 
+values need to be changed for their specific circumstances!
+
+
+## 2021-07-16: [UDPST 7.2.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.2.0)
+
+This release will have the first features for compute environment adaptation:
+* OS limitations (detect sendmsg()-only or sendmmsg()-available)
+* clock precision limitations and/or CPU power limitations (a pre-compile option)
+
+Also, an optional JSON-formatted version of the command-line output.
 
 ## 2021-03-05: [UDPST 7.1.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.1.0)
 
