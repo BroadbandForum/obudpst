@@ -6,7 +6,7 @@ Group:          Development/Libraries
 License:        BSD 3-Clause
 URL:            https://github.com/BroadbandForum/obudpst
 #git archive --format=tar.gz -o udpst-7.1.0.tar.gz --prefix=udpst-7.1.0/ main
-Source0:        udpst-7.1.0.tar.gz
+Source0:        udpst-%{version}.tar.gz
 BuildRequires:  cmake3
 BuildRequires:  make
 BuildRequires:  gcc
