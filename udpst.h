@@ -174,6 +174,12 @@
 #define SMA_UPDATE 2
 
 //----------------------------------------------------------------------------
+//
+// Rate Adjustment Algorithms
+//
+#define RETRY_THRESH_ALGOC 5 // AlgoC: Initial retry threshold
+
+//----------------------------------------------------------------------------
 // Data structures
 //----------------------------------------------------------------------------
 //
@@ -323,6 +329,11 @@ struct connection {
         int seqErrThresh;    // Sequence error threshold
         BOOL randPayload;    // Payload randomization
         int rateAdjAlgo;     // Rate adjustment algorithm
+        //
+        int algoCRateWImpair; // AlgoC: Previous max send rate during multiplicative ramp-up
+        int algoCRetryCount;  // AlgoC: Waiting timer till next multiplicative retry
+        int algoCRetryThresh; // AlgoC: Threshold for multiplicative retry
+        BOOL algoCUpdate;     // AlgoC: Indicates when max send rate was updated
         //
         struct timespec endTime;      // Connection end time
         int (*priAction)(int);        // Primary action upon IO

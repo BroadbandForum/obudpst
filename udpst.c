@@ -120,7 +120,7 @@ struct connection *conn;                   // Connection table (array)
 static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
 static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
 char *boolText[]                      = {"Disabled", "Enabled"};
-char *rateAdjAlgo[]                   = {"B"}; // Aligned to CHTA_RA_ALGO_x
+char *rateAdjAlgo[]                   = {"B", "C"}; // Aligned to CHTA_RA_ALGO_x
 //
 cJSON *json_top = NULL, *json_output = NULL;
 char json_errbuf[STRING_SIZE];

@@ -62,6 +62,7 @@
  * Len Ciavattone          12/24/2021    Handle interface byte counter wrap
  * Len Ciavattone          01/08/2022    Check burstsize >1 if forcing to 1
  * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
+ * Al Morton               04/12/2022    Type C algoithm, Multiply and Retry
  *
  */
 
@@ -1151,7 +1152,65 @@ int adjust_sending_rate(int connindex) {
                                         c->srIndex--;
                         }
                 }
+        }else if (c->rateAdjAlgo == CHTA_RA_ALGO_C) {
+                if (c->algoCRetryThresh == 0)
+                        c->algoCRetryThresh = RETRY_THRESH_ALGOC; // Keep non-zero initialization local to algorithm
+                //
+                // Multiplicative adjust sending rate : 2x previous rate : with retry after waiting (if new max rate achieved)
+                // This section of code would be an optional algorithm, with the properties of
+                // faster search to the max region, also shorter time when errors might end the fast search
+                //
+                if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
+                        if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) { // Congestion not detected
+                                if (c->srIndex * 2 > repo.hSpeedThresh) { // If no room to jump within high-speed threshold
+                                        c->srIndex = repo.hSpeedThresh;   // Truncate jump at high-speed threshold
+                                } else {
+                                        if (c->srIndex == 0)
+                                                c->srIndex++; // Pre-increment to deal with zero index
+               //       Halve the Multiplicative Rate, using algoCUpdate
+                                             if(c->algoCUpdate == TRUE) {
+                                             c->srIndex *= 2;      // Jump forward (while staying below high-speed threshold)
+                                             c->algoCUpdate = FALSE;
+                                             } else {
+                                             c->algoCUpdate = TRUE;
+                                             }
+                                }
+                                c->slowAdjCount = 0; // Reset congestion detection counter
+                        } else {
+                                if (c->srIndex < repo.maxSendingRates - 1) {
+                                        c->srIndex++;         // Increment index (slow path)
+                                        c->algoCRetryCount++; // Increment waiting count until retry
+                                }
+                                if (c->algoCRetryCount >= c->algoCRetryThresh) {
+                                        c->slowAdjCount    = 0;                    // Retry fast ramp-up again
+                                        c->algoCRetryCount = 0;                    // Use the same thresholds in the next 2x ramp-up
+                                        c->algoCRetryThresh += RETRY_THRESH_ALGOC; // Bump thresh out
+                                }
+                        }
+                } else if (seqerr > c->seqErrThresh || delay > c->upperThresh) {
+                        c->slowAdjCount++;
+                        if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount == c->slowAdjThresh) { // Congestion detected
+                                if (c->srIndex > c->highSpeedDelta * HS_DELTA_BACKUP) {              // If room to jump backward
+                                        c->srIndex -= c->highSpeedDelta * HS_DELTA_BACKUP; // Jump backward (staying above start)
+                                } else {
+                                        c->srIndex = 0; // Jump backward to start
+                                }
+                        } else {
+                                if (c->srIndex > 0) {
+                                        c->srIndex--;         // Decrement index (slow path)
+                                        c->algoCRetryCount++; // Increment waiting count until retry
+
+                                          if (c->algoCRetryCount >= c->algoCRetryThresh) {
+                                                c->slowAdjCount    = 0; // Retry fast ramp-up again
+                                                c->algoCRetryCount = 0; // Use the same thresholds in the next mult. ramp-up
+
+                                        }
+                                     
+                                }
+                        }
+                }
         }
+
 
         //
         // Display debug info if needed

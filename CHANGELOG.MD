@@ -3,6 +3,16 @@
 *The udpst utility conforms to TR-471 and TR-471 Issue 2. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
 
+# 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.0)
+
+This release has one major new feature, which was anticipated by the version 9 protocol:
+
+* Optional Load Adjustment (Search) Algorithm, Type C, briefly described as "Multiply and Retry"
+* The "fast" ramp-up is now a multiplicative rate increase to congestion, reaching 1Gbps in ~1 second
+* The "fast" ramp-up can be re-tried when conditions warrent, to ensure that the Max IP-Layer Capacity is reached
+* This algorithm supports a search over the full range of rates, even if the subscribed rate is >1Gbps
+* The Type B algorithm remains the default, for testing that does not benefit from "Multiply and Retry" aspects
+
 # 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.4.0)
 
 This release has many new features, supported by the version 9 protocol:
