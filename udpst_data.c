@@ -1152,13 +1152,13 @@ int adjust_sending_rate(int connindex) {
                                         c->srIndex--;
                         }
                 }
-        }else if (c->rateAdjAlgo == CHTA_RA_ALGO_C) {
+        } else if (c->rateAdjAlgo == CHTA_RA_ALGO_C) {
                 if (c->algoCRetryThresh == 0)
                         c->algoCRetryThresh = RETRY_THRESH_ALGOC; // Keep non-zero initialization local to algorithm
                 //
-                // Multiplicative adjust sending rate : 2x previous rate : with retry after waiting (if new max rate achieved)
-                // This section of code would be an optional algorithm, with the properties of
-                // faster search to the max region, also shorter time when errors might end the fast search
+                // Multiplicative adjust sending rate : 1.5x previous rate : with retry after waiting
+                // This section of code provides an optional algorithm, with the properties of faster search to the
+                // max region, meaning less time when errors might end a fast search, and retry fast if that happens.
                 //
                 if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) { // Congestion not detected
@@ -1167,50 +1167,49 @@ int adjust_sending_rate(int connindex) {
                                 } else {
                                         if (c->srIndex == 0)
                                                 c->srIndex++; // Pre-increment to deal with zero index
-               //       Halve the Multiplicative Rate, using algoCUpdate
-                                             if(c->algoCUpdate == TRUE) {
-                                             c->srIndex *= 2;      // Jump forward (while staying below high-speed threshold)
-                                             c->algoCUpdate = FALSE;
-                                             } else {
-                                             c->algoCUpdate = TRUE;
-                                             }
+
+                                        if (c->algoCUpdate == TRUE) { // Halve the multiplicative rate, using algoCUpdate
+                                                c->srIndex *= 2;      // Jump forward (while staying below high-speed threshold)
+                                                c->algoCUpdate = FALSE;
+                                        } else {
+                                                c->algoCUpdate = TRUE;
+                                        }
                                 }
                                 c->slowAdjCount = 0; // Reset congestion detection counter
                         } else {
                                 if (c->srIndex < repo.maxSendingRates - 1) {
                                         c->srIndex++;         // Increment index (slow path)
-                                        c->algoCRetryCount++; // Increment waiting count until retry
+                                        c->algoCRetryCount++; // Increment waiting count until retry fast ramp-up
                                 }
                                 if (c->algoCRetryCount >= c->algoCRetryThresh) {
-                                        c->slowAdjCount    = 0;                    // Retry fast ramp-up again
-                                        c->algoCRetryCount = 0;                    // Use the same thresholds in the next 2x ramp-up
-                                        c->algoCRetryThresh += RETRY_THRESH_ALGOC; // Bump thresh out
+                                        c->slowAdjCount    = 0; // Retry fast ramp-up again
+                                        c->algoCRetryCount = 0; // Clear variables to enable fast ramp-up
+                                        c->algoCRetryThresh +=
+                                            RETRY_THRESH_ALGOC; // Use higher wait threshold for the next fast ramp-up
                                 }
                         }
                 } else if (seqerr > c->seqErrThresh || delay > c->upperThresh) {
                         c->slowAdjCount++;
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount == c->slowAdjThresh) { // Congestion detected
                                 if (c->srIndex > c->highSpeedDelta * HS_DELTA_BACKUP) {              // If room to jump backward
-                                        c->srIndex -= c->highSpeedDelta * HS_DELTA_BACKUP; // Jump backward (staying above start)
+                                        c->srIndex -=
+                                            c->highSpeedDelta * HS_DELTA_BACKUP; // Large jump backward (staying above start)
                                 } else {
                                         c->srIndex = 0; // Jump backward to start
                                 }
                         } else {
                                 if (c->srIndex > 0) {
                                         c->srIndex--;         // Decrement index (slow path)
-                                        c->algoCRetryCount++; // Increment waiting count until retry
+                                        c->algoCRetryCount++; // Increment waiting count until fast ramp-up retry
 
-                                          if (c->algoCRetryCount >= c->algoCRetryThresh) {
+                                        if (c->algoCRetryCount >= c->algoCRetryThresh) {
                                                 c->slowAdjCount    = 0; // Retry fast ramp-up again
-                                                c->algoCRetryCount = 0; // Use the same thresholds in the next mult. ramp-up
-
+                                                c->algoCRetryCount = 0; // Use the same thresholds in the next fast ramp-up
                                         }
-                                     
                                 }
                         }
                 }
         }
-
 
         //
         // Display debug info if needed
