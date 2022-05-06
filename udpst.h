@@ -135,7 +135,7 @@
 //
 // Sending rate payload, protocol, and buffer sizes
 //
-#define MAX_SENDING_RATES 1091                   // Max rows in sending rate table
+#define MAX_SENDING_RATES 1109                   // Max rows in sending rate table
 #define BASE_SEND_TIMER1  MIN_INTERVAL_USEC      // Base send timer, transmitter 1 (us)
 #define BASE_SEND_TIMER2  1000                   // Base send timer, transmitter 2 (us)
 #define MAX_L3_PACKET     1250                   // Max desired L3 packet size
@@ -151,11 +151,9 @@
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
 #define MAX_TPAYLOAD_SIZE (MAX_TL3_PACKET - L3DG_OVERHEAD)
 //
-// The send buffer needs to contain all the datagram payloads for a burst. The maximum
-// burst size that is used with non-jumbo payloads is actually much larger than the maximum
-// burst size used with jumbo payloads.
+// The send buffer needs to contain all the datagram payloads for a burst.
 //
-#define SND_BUFFER_SIZE (MAX_BURST_SIZE * MAX_TPAYLOAD_SIZE)
+#define SND_BUFFER_SIZE (MAX_BURST_SIZE * MAX_JPAYLOAD_SIZE)
 #define DEF_BUFFER_SIZE 65536
 
 //----------------------------------------------------------------------------
@@ -172,6 +170,12 @@
 #define SMA_LOOKUP 0
 #define SMA_BIND   1
 #define SMA_UPDATE 2
+
+//----------------------------------------------------------------------------
+//
+// Rate Adjustment Algorithms
+//
+#define RETRY_THRESH_ALGOC 5 // AlgoC: Initial retry threshold
 
 //----------------------------------------------------------------------------
 // Data structures
@@ -323,6 +327,10 @@ struct connection {
         int seqErrThresh;    // Sequence error threshold
         BOOL randPayload;    // Payload randomization
         int rateAdjAlgo;     // Rate adjustment algorithm
+        //
+        int algoCRetryCount;  // AlgoC: Waiting timer till next multiplicative retry
+        int algoCRetryThresh; // AlgoC: Threshold for multiplicative retry
+        BOOL algoCUpdate;     // AlgoC: Indicates when max send rate was updated
         //
         struct timespec endTime;      // Connection end time
         int (*priAction)(int);        // Primary action upon IO

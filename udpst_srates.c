@@ -43,6 +43,7 @@
  *                                       with IPv6. No longer mixing jumbo
  *                                       sizes with non-jumbo sizes.
  * Len Ciavattone          12/21/2021    Add traditional (1500 byte) MTU
+ * Len Ciavattone          04/21/2022    Increase sending rates to 40 Gbps
  *
  */
 
@@ -167,66 +168,39 @@ int def_sending_rates(void) {
                 //
                 // Increase payload sizes until jumbo limit
                 //
+                // To better support the use of jumbo sizes with a non-jumbo MTU, do not use any payload sizes
+                // that would mix datagrams requiring fragmentation with datagrams not requiring fragmentation.
+                // Because this has been shown to produce reordering, all payload sizes will be greater than
+                // what can be accommodated in IPv6 with a 1500 byte MTU.
+                //
                 for (i = MAX_L3_PACKET + 125; i <= MAX_JL3_PACKET; i += 125) {
                         sr              = &repo.sendingRates[repo.maxSendingRates++];
                         sr->txInterval1 = BASE_SEND_TIMER1;
                         sr->udpPayload1 = i - L3DG_OVERHEAD;
                         sr->burstSize1  = 10;
                 }
-                //
-                // With jumbo payload size for transmitter 1, add additional payload required for 2
-                //
-                // To better support the use of jumbo sizes with a non-jumbo MTU, do not use any payload sizes
-                // that would mix datagrams requiring fragmentation with datagrams not requiring fragmentation.
-                // Because this has been shown to produce reordering, all payload sizes will be greater than
-                // what can be accommodated in IPv6 with a 1500 byte MTU.
-                //
-                for (i = 0; i < 4; i++) {
-                        var = MAX_L3_PACKET - (i * 125 * 2);
-                        for (j = 0; j < 7; j++) {
-                                sr              = &repo.sendingRates[repo.maxSendingRates++];
-                                sr->txInterval1 = BASE_SEND_TIMER1;
-                                sr->udpPayload1 = MAX_JPAYLOAD_SIZE;
-                                sr->burstSize1  = 10 + i;
-                                sr->txInterval2 = BASE_SEND_TIMER1;
-                                sr->udpPayload2 = (var + (j * MAX_L3_PACKET)) - L3DG_OVERHEAD;
-                                // Avoid non-jumbo sizes with less frequent larger payloads
-                                if (j == 0) {
-                                        sr->txInterval2 *= 4;
-                                        sr->udpPayload2 *= 4;
-                                } else if (j == 1) {
-                                        sr->txInterval2 *= 2;
-                                        sr->udpPayload2 *= 2;
-                                }
-                                sr->burstSize2 = 1;
-                                sr->udpAddon2  = 0;
-                        }
-                }
+                jmax    = 11;
+                payload = MAX_JPAYLOAD_SIZE;
+
+        } else if (conf.traditionalMTU) {
+                jmax    = 9;
+                payload = MAX_TPAYLOAD_SIZE;
         } else {
-                if (conf.traditionalMTU) {
-                        jmax    = 9;
-                        payload = MAX_TPAYLOAD_SIZE;
-                } else {
-                        jmax    = 11;
-                        payload = MAX_PAYLOAD_SIZE;
-                }
-                for (j = jmax; j <= MAX_BURST_SIZE; j++) {
-                        sr              = &repo.sendingRates[repo.maxSendingRates++];
-                        sr->txInterval1 = BASE_SEND_TIMER1;
-                        sr->udpPayload1 = payload;
-                        sr->burstSize1  = j;
-                        if (conf.traditionalMTU && j < 23) {
-                                sr              = &repo.sendingRates[repo.maxSendingRates++];
-                                sr->txInterval1 = BASE_SEND_TIMER1;
-                                sr->udpPayload1 = payload;
-                                sr->burstSize1  = j;
-                                sr->txInterval2 = BASE_SEND_TIMER2;
-                                sr->udpPayload2 = payload;
-                                sr->burstSize2  = 5;
-                        }
-                        if (repo.maxSendingRates == MAX_SENDING_RATES)
-                                break;
-                }
+                jmax    = 11;
+                payload = MAX_PAYLOAD_SIZE;
+        }
+        for (j = jmax; repo.maxSendingRates < MAX_SENDING_RATES; j++) {
+                sr              = &repo.sendingRates[repo.maxSendingRates++];
+                sr->txInterval1 = BASE_SEND_TIMER1;
+                sr->udpPayload1 = payload;
+                if (j < MAX_BURST_SIZE)
+                        sr->burstSize1 = j;
+                else
+                        sr->burstSize1 = MAX_BURST_SIZE;
+                sr->txInterval2 = 0;
+                sr->udpPayload2 = 0;
+                sr->burstSize2  = 0;
+                sr->udpAddon2   = 0;
         }
 
         //
@@ -243,9 +217,9 @@ int def_sending_rates(void) {
 // Display sending rate table parameters for each index
 //
 void show_sending_rates(int fd) {
-        int i, var, var2, payload1, payload2, addon, ipv6add;
+        int i, var, payload1, payload2, addon, ipv6add;
         char ipver[8];
-        double dvar;
+        double dvar, dvar2;
         struct sendingRate *sr;
 
         //
@@ -268,23 +242,23 @@ void show_sending_rates(int fd) {
         // Output each row
         //
         for (i = 0, sr = repo.sendingRates; i < repo.maxSendingRates; i++, sr++) {
-                var = var2 = 0;
+                dvar = dvar2 = 0;
                 payload1 = payload2 = addon = 0;
                 if (sr->burstSize1 > 0) {
-                        var      = (USECINSEC / sr->txInterval1) * sr->burstSize1;
+                        dvar     = (double) ((USECINSEC / sr->txInterval1) * sr->burstSize1);
                         payload1 = (int) sr->udpPayload1 - ipv6add;
-                        var *= payload1 + L3DG_OVERHEAD + ipv6add;
+                        dvar *= (double) (payload1 + L3DG_OVERHEAD + ipv6add);
                 }
                 if (sr->burstSize2 > 0) {
-                        var2     = (USECINSEC / sr->txInterval2) * sr->burstSize2;
+                        dvar2    = (double) ((USECINSEC / sr->txInterval2) * sr->burstSize2);
                         payload2 = (int) sr->udpPayload2 - ipv6add;
-                        var2 *= payload2 + L3DG_OVERHEAD + ipv6add;
+                        dvar2 *= (double) (payload2 + L3DG_OVERHEAD + ipv6add);
                 }
                 if (sr->udpAddon2 > 0) {
                         addon = (int) sr->udpAddon2 - ipv6add;
-                        var2 += (USECINSEC / sr->txInterval2) * (addon + L3DG_OVERHEAD + ipv6add);
+                        dvar2 += (double) ((USECINSEC / sr->txInterval2) * (addon + L3DG_OVERHEAD + ipv6add));
                 }
-                dvar = (double) (var + var2);
+                dvar += dvar2;
                 dvar *= 8;       // Convert to bits/sec
                 dvar /= 1000000; // Convert to Mbps
                 var = sprintf(scratch, "%5d) %8u  %7d %5u  + %8u  %7d %5u %5d  = %10.2f\n", i, sr->txInterval1, payload1,
