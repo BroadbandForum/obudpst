@@ -1,6 +1,6 @@
 Name:           udpst
 Version:        7.5.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
@@ -13,6 +13,8 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  glibc-headers
 BuildRequires:  openssl-devel
+BuildRequires:  pandoc
+BuildRequires:  gzip
 
 %package server
 Requires:       %{name} = %{version}-%{release}
@@ -32,11 +34,13 @@ Open Broadband-UDP Speed Test (OB-UDPST) server configuration package
 %build
 cmake3 -DCMAKE_INSTALL_PREFIX=/usr .
 make %{?_smp_mflags}
+pandoc -s -f markdown -t man README.md | gzip > %{name}.1.gz
 
 %install
 make install DESTDIR=%{buildroot}
 mkdir -p           $RPM_BUILD_ROOT/%{_unitdir}/
 cp %{name}.service $RPM_BUILD_ROOT/%{_unitdir}/
+cp %{name}.1.gz    $RPM_BUILD_ROOT/%{_mandir}/man1/
 
 %post server
 systemctl daemon-reload
@@ -49,11 +53,15 @@ systemctl status  udpst --lines=0
 %files
 %defattr(0644,root,root,-)
 %attr(0755,root,root) %{_bindir}/%{name}
+#%{_mandir}/man1/*
 
 %files server
 %attr(0644,root,root) %{_unitdir}/%{name}.service
 
 %changelog
+* Fri Jun 03 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.5.0-2
+- Added pandoc man file
+
 * Fri Jun 03 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.5.0-1
 - Updated to upstream version 7.5.0
 
