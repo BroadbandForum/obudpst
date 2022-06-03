@@ -159,6 +159,19 @@ $ udpst -?
 (c)    -h delta     High-speed (row adjustment) delta [Default 10]
 (c)    -q seqerr    Sequence error threshold [Default 10]
 ```
+An option in Release 7.5.0 allows the client to request the algorithm used for
+load adjustment when conducting a search for the Maximum IP-Layer Capacity.
+The Type C algorithm (a.k.a. Multiply and Retry) will provide a fast
+rate increase to congestion, reaching 1Gbps in ~1 second. The "fast" ramp-up
+will be re-tried when conditions warrent, to ensure that the Max IP-Layer
+Capacity has been reached. This option is activated using -A algo:
+```
+$ udpst -d <server> -A c
+    Do downstream test from server (as hostname or IP address) to client 
+    using the Type C algorithm
+```
+The Type B algorithm remains the default.
+
 See the following publication (which is updated frequently) for more details
 on testing in the circumstances described above:
 
