@@ -54,6 +54,9 @@ systemctl status  udpst --lines=0
 %attr(0644,root,root) %{_unitdir}/%{name}.service
 
 %changelog
+* Fri Jun 03 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.5.0-1
+- Updated to upstream version 7.5.0
+
 * Mon Apr 04 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.4.0-1
 - Updated to upstream version 7.4.0
 - Fixed client RPM only install
