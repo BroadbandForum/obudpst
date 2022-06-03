@@ -40,6 +40,7 @@ pandoc -s -f markdown -t man README.md | gzip > %{name}.1.gz
 make install DESTDIR=%{buildroot}
 mkdir -p           $RPM_BUILD_ROOT/%{_unitdir}/
 cp %{name}.service $RPM_BUILD_ROOT/%{_unitdir}/
+mkdir -p           $RPM_BUILD_ROOT/%{_mandir}/man1/
 cp %{name}.1.gz    $RPM_BUILD_ROOT/%{_mandir}/man1/
 
 %post server
@@ -53,7 +54,7 @@ systemctl status  udpst --lines=0
 %files
 %defattr(0644,root,root,-)
 %attr(0755,root,root) %{_bindir}/%{name}
-#%{_mandir}/man1/*
+%{_mandir}/man1/*
 
 %files server
 %attr(0644,root,root) %{_unitdir}/%{name}.service
