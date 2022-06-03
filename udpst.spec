@@ -1,6 +1,6 @@
 Name:           udpst
-Version:        7.4.0
-Release:        3%{?dist}
+Version:        7.5.0
+Release:        1%{?dist}
 Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
