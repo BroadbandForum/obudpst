@@ -13,3 +13,4 @@ package
 udpst
 config.h
 build
+udpst.1.gz
