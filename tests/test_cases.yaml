@@ -1,0 +1,33 @@
+---
+- check-max-performance:
+    client-cli: "-s -f jsonf -d server"
+    server-cli: "-v -s"
+    metrics:
+      check-max-rate: results["Output"]["AtMax"]["MaxETHCapacityNoFCS"] > 2000
+- check-downstream-ds1Gbps-us100Mbps:
+    client-cli: "-s -f jsonf -d server"
+    server-cli: "-v -s"
+    netem: 
+      downstream:
+        rate: 
+          - 100Mbps
+      upstream:
+        rate:
+          - 10Mbps
+    metrics:
+      downstream-max-rate: results["Output"]["Summary"]["IPLayerCapacitySummary"] > 600
+- check-upstream-ds1Gbps-us100Mbps:
+    client-cli: "-s -f jsonf -u server"
+    server-cli: "-v -s"
+    netem: 
+      downstream:
+        rate: 
+          - 100Mbps
+      upstream:
+        rate:
+          - 10Mbps
+    metrics:
+      upstream-summary-rate: within_range(results["Output"]["Summary"]["IPLayerCapacitySummary"], 70, 100)
+      upstream-max-rate: results["Output"]["AtMax"]["MaxETHCapacityNoFCS"] > 150
+      # Note, the above metric is expected to fail, as an example.
+...
