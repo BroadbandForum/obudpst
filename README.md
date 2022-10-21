@@ -179,7 +179,7 @@ The default can be changed; the function of the -R option was changed from
 "Ignore" to "Include". We justified the change by recognizing that both
 Out-of-Order and Duplicate datagrams are a legitimate part of IP-Layer Capacity.
 
-...
+```
 (c)    -R           Include Out-of-Order/Duplicate datagrams
 ```
 
