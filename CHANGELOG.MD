@@ -1,7 +1,17 @@
 # CHANGELOG.MD for udpst 7.x.0 Releases
 
-*The udpst utility conforms to TR-471 and TR-471 Issue 2. The latest TR-471 specification can be found at
+*The udpst utility conforms to TR-471 and TR-471 Issue 3. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
+
+ 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.1)
+
+This release has one new feature, which is a response to testing/experience on mobile access:
+
+* The team made the decision to change a default setting: UDPST will now Ignore Reordering (and duplication) in the Load Adjustment search algorithm. The Reordered and Duplicate packets are legitimate contributions to IP-Layer Capacity. The utility measures these metrics under all conditions, this only affects search processing in Type B and Type C algorithms.
+
+Also, this release makes several updates to documentation (reflecting the latest features implemented in the utility). 
+
+
 
 # 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.0)
 
