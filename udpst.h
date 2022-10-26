@@ -82,7 +82,7 @@
 //
 #define DEF_JUMBO_STATUS     TRUE       // Enable/disable jumbo datagram sizes
 #define DEF_USE_OWDELVAR     FALSE      // Use one-way delay instead of RTT
-#define DEF_IGNORE_OOODUP    FALSE      // Ignore Out-of-Order/Duplicate datagrams
+#define DEF_IGNORE_OOODUP    TRUE       // Ignore Out-of-Order/Duplicate datagrams
 #define DEF_IPTOS_BYTE       0          // IP ToS byte for testing
 #define MIN_IPTOS_BYTE       0          //
 #define MAX_IPTOS_BYTE       UINT8_MAX  //
