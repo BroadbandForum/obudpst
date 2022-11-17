@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 and TR-471 Issue 3. The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf *
 
- 2022-11-11: [UDPST 7.5.1] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.1)
+# 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.1)
 
 This release has one new feature, which is a response to testing/experience on mobile access:
 
