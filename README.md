@@ -2,13 +2,13 @@
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to
 demonstrate one approach of doing IP capacity measurements as described by:
 
-- Broadband Forum TR-471 (07/2020): _Maximum IP-Layer Capacity Metric, Related Metrics, and Measurements_,
+- Broadband Forum TR-471 Issue 3 (12/2022): _Maximum IP-Layer Capacity Metric, Related Metrics, and Measurements_,
 BBF TR-471, https://www.broadband-forum.org/technical/download/TR-471.pdf
 
 - ITU-T Recommendation Y.1540 (12/2019): _Internet protocol data communication service - IP packet transfer and availability performance parameters_, 
 ITU-T Y.1540, https://www.itu.int/rec/T-REC-Y.1540-201912-I/en 
    
-- ITU-T Y-series Supplement 60 (2020): _Interpreting ITU-T Y.1540 maximum IP-layer capacity measurements_, 
+- ITU-T Y-series Supplement 60 (2022): _Interpreting ITU-T Y.1540 maximum IP-layer capacity measurements_, 
 ITU-T Y.Sup60, https://www.itu.int/rec/T-REC-Y.Sup60/en
 
 - ETSI Technical Specification 103 222 Part 2 (08/2019): _Reference benchmarking and KPIs for High speed internet_, 
@@ -24,7 +24,7 @@ ETSI TR 103 702, V.0.1.0 https://www.etsi.org/deliver/etsi_tr/103700_103799/1037
 
 ## Overview
 Utilizing an adaptive transmission rate, via a pre-built table of discreet
-sending rates (from 0.5 Mbps to 10 Gbps), UDP datagrams are sent from client
+sending rates (from 0.5 Mbps to 40 Gbps), UDP datagrams are sent from client
 to server or server to client to determine the maximum available IP-layer
 capacity between them. The load traffic is only sent in one direction at a
 time, and status feedback messages are sent periodically in the opposite
@@ -42,7 +42,7 @@ diverse network services and protocols. To that end, and to encourage
 additional testing and experimentation, the software has been structured so
 that virtually all of the settings and thresholds used by the algorithm are
 currently available as client-side command-line parameters (allowing
-modification beyond the current set of default values updated in Release 7.2.1).
+modification beyond the current set of default values updated in Release 7.5.1).
 
 By default, both IPv4 and IPv6 tests can be serviced simultaneously when acting
 as a server. When acting as a client, testing is performed in one address
@@ -151,7 +151,7 @@ $ udpst -?
 (j)    -j           Disable jumbo datagram sizes above 1 Gbps
        -T           Use datagram sizes for traditional (1500 byte) MTU
        -i count     Display bimodal maxima (specify initial sub-intervals)
-(c)    -R           Ignore Out-of-Order/Duplicate datagrams
+(c)    -R           Include Out-of-Order/Duplicate datagrams
 (m,i)  -I [@]index  Index of sending rate (see '-S') [Default @0 = <Auto>]
 (m)    -t time      Test interval time in seconds [Default 10, Max 3600]
 (c)    -U delvar    Upper delay variation threshold in ms [Default 90]
@@ -171,6 +171,18 @@ $ udpst -d <server> -A c
     using the Type C algorithm
 ```
 The Type B algorithm remains the default.
+
+Another change to the default settings is in Release 7.5.1. The Load Adjustment search 
+algorithm  will now Ignore Reordering (and duplication) as a component of the 
+sequence errors: only packet loss will increase the sequence error count.
+The default can be changed; the function of the -R option was changed from
+"Ignore" to "Include". We justified the change by recognizing that both
+Out-of-Order and Duplicate datagrams are a legitimate part of IP-Layer Capacity.
+
+```
+(c)    -R           Include Out-of-Order/Duplicate datagrams
+```
+
 
 See the following publication (which is updated frequently) for more details
 on testing in the circumstances described above:
@@ -294,7 +306,8 @@ the connection which closes the socket and deallocates it.
 
 For much more detail on the test protocol, see the ./protocol.md file.
 Also, an Internet-Draft, 
-https://datatracker.ietf.org/doc/html/draft-morton-ippm-capacity-metric-protocol-02 describes Protocol Version 8 in even more detail.
+https://datatracker.ietf.org/doc/html/draft-ietf-ippm-capacity-metric-protocol-02 
+describes Protocol Version 9 in even more detail.
 
 ## Linux Socket Buffer Optimization
 For very high speeds (typically above 1 Gbps), the socket buffer maximums of
@@ -372,7 +385,7 @@ occurs, the error status will be 1 (one) and the most recent warning message
 will be included. If a hard error or failure occurs the error status will be
 -1 (negative one) and an error message will be included.
 
-The file "ob-udpst_output_mapping...pdf" provides a mapping between JSON key
+The file "ob-udpst_output_mapping.pdf" provides a mapping between JSON key
 names, TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various
 results.
 
@@ -437,8 +450,8 @@ the sending rate table (with the default equivalent to `-I @0` and shown as
 relies on an index from the sending rate table (see `-S` for index values).
 
 For maximum capacities up to 1 Gbps, the `-h delta` option has been available
-for some time to allow customization of the ramp-up speed (which is used below
-1 Gbps until congestion is detected). In some cases, and especially with
+for some time to allow customization of the ramp-up speed in the Type B Algorithm 
+(which is used below 1 Gbps until congestion is detected). In some cases, and especially with
 maximum capacities above 1 Gbps (where `-h delta` no longer has an impact), it
 can make sense to start at an initial sending rate above index 0 (zero). For
 example, specifying `-I @1000` when testing a 10 Gbps service would start with

@@ -1132,7 +1132,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "       -r           Display loss ratio instead of delivered percentage\n"
                                       "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
-                                      "(c)    -R           Ignore Out-of-Order/Duplicate datagrams\n"
+                                      "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"
                                       "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"

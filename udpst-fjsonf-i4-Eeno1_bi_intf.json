@@ -39,7 +39,7 @@
 		"TmaxRTT":	3000,
 		"TimestampResolution":	1,
 		"SeqErrThresh":	10,
-		"ReordDupIgnoreEnable":	0,
+		"ReordDupIgnoreEnable":	1,
 		"LowerThresh":	30,
 		"UpperThresh":	90,
 		"HighSpeedDelta":	10,
