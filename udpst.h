@@ -50,15 +50,19 @@
 #define USTEST_TEXT       "Upstream"
 #define DSTEST_TEXT       "Downstream"
 #define TIME_FORMAT       "%Y-%m-%d %H:%M:%S"
-#define STRING_SIZE       1024 // String buffer size
-#define AUTH_KEY_SIZE     32   // Authentication key size
-#define HS_DELTA_BACKUP   3    // High-speed delta backup multiplier
-#define MAX_EPOLL_EVENTS  8    // Max epoll events handled at one time
-#define MAX_CONNECTIONS   128  // Max simultaneous connections
-#define AUTH_TIME_WINDOW  150  // Authentication +/- time windows (sec)
-#define AUTH_ENFORCE_TIME TRUE // Enforce authentication time window
-#define WARNING_MSG_LIMIT 50   // Warning message limit
-#define WARNING_NOTRAFFIC 1    // Receive traffic stopped warning threshold (sec)
+#define STRING_SIZE       1024               // String buffer size
+#define AUTH_KEY_SIZE     32                 // Authentication key size
+#define HS_DELTA_BACKUP   3                  // High-speed delta backup multiplier
+#define MAX_SERVER_CONN   256                // Max server connections
+#define MAX_CLIENT_CONN   (MAX_MC_COUNT + 1) // Max client connections (plus aggregate)
+#define MAX_EPOLL_EVENTS  MAX_SERVER_CONN    // Max epoll events handled at one time
+#define AGG_QUERY_TIME    10                 // Query timer for aggregate connection (ms)
+#define MIN_RANDOM_START  5                  // Minimum used for random I/O start (ms)
+#define MAX_RANDOM_START  50                 // Maximum used for random I/O start (ms)
+#define AUTH_TIME_WINDOW  150                // Authentication +/- time windows (sec)
+#define AUTH_ENFORCE_TIME TRUE               // Enforce authentication time window
+#define WARNING_MSG_LIMIT 10                 // Warning message limit (per connection)
+#define WARNING_NOTRAFFIC 1                  // Receive traffic stopped warning threshold (sec)
 #define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 2)
 #define STATUS_SUCCESS    0  // Success (test completed without incident)
 #define STATUS_WARNING    1  // Warning or soft error (test runs but with anomaly)
@@ -83,6 +87,9 @@
 #define DEF_JUMBO_STATUS     TRUE       // Enable/disable jumbo datagram sizes
 #define DEF_USE_OWDELVAR     FALSE      // Use one-way delay instead of RTT
 #define DEF_IGNORE_OOODUP    TRUE       // Ignore Out-of-Order/Duplicate datagrams
+#define DEF_MC_COUNT         1          // Multi-connection test count
+#define MIN_MC_COUNT         1          //
+#define MAX_MC_COUNT         24         //
 #define DEF_IPTOS_BYTE       0          // IP ToS byte for testing
 #define MIN_IPTOS_BYTE       0          //
 #define MAX_IPTOS_BYTE       UINT8_MAX  //
@@ -97,7 +104,7 @@
 #define MIN_SUBINT_PERIOD    1          //
 #define MAX_SUBINT_PERIOD    10         //
 #define DEF_CONTROL_PORT     25000      // Control port
-#define MIN_CONTROL_PORT     0          // (0 = Random UDP ephemeral port)
+#define MIN_CONTROL_PORT     1          //
 #define MAX_CONTROL_PORT     UINT16_MAX //
 #define DEF_BIMODAL_COUNT    0          // Bimodal initial sub-interval count
 #define MIN_BIMODAL_COUNT    1          //
@@ -135,17 +142,17 @@
 //
 // Sending rate payload, protocol, and buffer sizes
 //
-#define MAX_SENDING_RATES 1109                   // Max rows in sending rate table
-#define BASE_SEND_TIMER1  MIN_INTERVAL_USEC      // Base send timer, transmitter 1 (us)
-#define BASE_SEND_TIMER2  1000                   // Base send timer, transmitter 2 (us)
-#define MAX_L3_PACKET     1250                   // Max desired L3 packet size
-#define MAX_JL3_PACKET    9000                   // Max desired jumbo L3 packet
-#define MAX_TL3_PACKET    1500                   // Max desired traditional L3 packet
-#define L3DG_OVERHEAD     (8 + 20)               // UDP + IPv4
-#define L2DG_OVERHEAD     (8 + 20 + 14)          // UDP + IPv4 + Eth(NoFCS)
-#define L1DG_OVERHEAD     (8 + 20 + 18 + 20)     // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG
-#define L0DG_OVERHEAD     (8 + 20 + 18 + 20 + 4) // UDP + IPv4 + Eth(w/FCS) + Preamble/IFG + VLAN
-#define IPV6_ADDSIZE      20                     // IPv6 additional size (over IPv4)
+#define MAX_SENDING_RATES 1109              // Max rows in sending rate table
+#define BASE_SEND_TIMER1  MIN_INTERVAL_USEC // Base send timer, transmitter 1 (us)
+#define BASE_SEND_TIMER2  1000              // Base send timer, transmitter 2 (us)
+#define MAX_L3_PACKET     1250              // Max desired L3 packet size
+#define MAX_JL3_PACKET    9000              // Max desired jumbo L3 packet
+#define MAX_TL3_PACKET    1500              // Max desired traditional L3 packet
+#define L3DG_OVERHEAD     (8 + 20)          // UDP + IPv4
+#define L2DG_OVERHEAD     (8 + 20 + 14)     // UDP + IPv4 + Eth(NoFCS)
+#define L1DG_OVERHEAD     (8 + 20 + 18)     // UDP + IPv4 + Eth(w/FCS)
+#define L0DG_OVERHEAD     (8 + 20 + 18 + 4) // UDP + IPv4 + Eth(w/FCS) + VLAN
+#define IPV6_ADDSIZE      20                // IPv6 additional size (over IPv4)
 #define MIN_PAYLOAD_SIZE  (sizeof(struct loadHdr) + IPV6_ADDSIZE)
 #define MAX_PAYLOAD_SIZE  (MAX_L3_PACKET - L3DG_OVERHEAD)
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
@@ -184,12 +191,16 @@
 // Configuration structure for settings and parameters
 //
 struct configuration {
+        int maxConnections;              // Maximum simultaneous connections
         BOOL usTesting;                  // Upstream testing requested
         BOOL dsTesting;                  // Downstream testing requested
         int addrFamily;                  // Address family
         BOOL ipv4Only;                   // Only allow IPv4 testing
         BOOL ipv6Only;                   // Only allow IPv6 testing
+        int minConnCount;                // Minimum multi-connection count
+        int maxConnCount;                // Maximum multi-connection count
         BOOL isDaemon;                   // Execute as daemon
+        BOOL oneTest;                    // Exit after one test (server only)
         BOOL errSuppress;                // Suppress send/receive errors
         BOOL verbose;                    // Enable verbose messaging
         BOOL summaryOnly;                // Do not show sub-interval stats
@@ -231,32 +242,11 @@ struct configuration {
 //
 // Repository of global variables and structures
 //
-struct repository {
-        struct timespec systemClock;      // Clock reference (CLOCK_REALTIME)
-        int epollFD;                      // Epoll file descriptor
-        int maxConnIndex;                 // Largest (current) connection index
-        struct sendingRate *sendingRates; // Sending rate table (array)
-        int maxSendingRates;              // Size (rows) of sending rate table
-        char *sndBuffer;                  // Send buffer for load PDUs
-        char *defBuffer;                  // Default buffer for general I/O
-        char *randData;                   // Randomized seed data
-        char *sndBufRand;                 // Send buffer for randomized load PDUs
-        int rcvDataSize;                  // Received data size in default buffer
-        struct sockaddr_storage remSas;   // Remote IP sockaddr storage
-        socklen_t remSasLen;              // Remote IP sockaddr storage length
-        BOOL isServer;                    // Execute as server
-        char serverIp[INET6_ADDR_STRLEN]; // Server IP address
-        char *serverName;                 // Server hostname or IP address
-        int hSpeedThresh;                 // Index of high-speed threshold
-        int logFileSize;                  // Current log file size
-        int usBandwidth;                  // Current upstream bandwidth
-        int dsBandwidth;                  // Current downstream bandwidth
-        int endTimeStatus;                // Exit status when end time expires
+struct serverId {
+        char *name;                 // Server hostname or IP address
+        char ip[INET6_ADDR_STRLEN]; // Server IP address
+        int port;                   // Server control port number
 };
-//----------------------------------------------------------------------------
-//
-// Test totals and overall test statistics
-//
 struct testSummary {
         unsigned int rxDatagrams; // Total rx datagrams
         unsigned int seqErrLoss;  // Loss sum
@@ -270,6 +260,49 @@ struct testSummary {
         double rateSumL3;         // Rate sum at L3
         double rateSumIntf;       // Rate sum of local interface
         unsigned int sampleCount; // Sample count
+};
+struct repository {
+        struct timespec systemClock;          // Clock reference (CLOCK_REALTIME)
+        int epollFD;                          // Epoll file descriptor
+        int maxConnIndex;                     // Largest (current) connection index
+        int mcIdent;                          // Multi-connection identifier
+        struct sendingRate *sendingRates;     // Sending rate table (array)
+        int maxSendingRates;                  // Size (rows) of sending rate table
+        char *sndBuffer;                      // Send buffer for load PDUs
+        char *defBuffer;                      // Default buffer for general I/O
+        char *randData;                       // Randomized seed data
+        char *sndBufRand;                     // Send buffer for randomized load PDUs
+        int rcvDataSize;                      // Received data size in default buffer
+        struct sockaddr_storage remSas;       // Remote IP sockaddr storage
+        socklen_t remSasLen;                  // Remote IP sockaddr storage length
+        BOOL isServer;                        // Execute as server
+        struct serverId server[MAX_MC_COUNT]; // Array of server ID structures
+        int serverCount;                      // Size of server structure array
+        int hSpeedThresh;                     // Index of high-speed threshold
+        int logFileSize;                      // Current log file size
+        int usBandwidth;                      // Current upstream bandwidth
+        int dsBandwidth;                      // Current downstream bandwidth
+        int endTimeStatus;                    // Exit status when end time expires
+        int actConnCount;                     // Active testing connection count
+        int sisConnCount;                     // Sub-interval stats connection count
+        BOOL testHdrDone;                     // Test header creation complete
+        double siAggRateL3;                   // Sub-interval L3 aggregate rate
+        double siAggRateL2;                   // Sub-interval L2 aggregate rate
+        double siAggRateL1;                   // Sub-interval L1 aggregate rate
+        double siAggRateL0;                   // Sub-interval L1+VLAN aggregate rate
+        struct testSummary testSum;           // Test summary statistics
+        int intfFD;                           // File descriptor to read interface stats
+        unsigned long intfBytes;              // Last byte counter of interface stats
+        struct timespec intfTime;             // Sample time of interface stats
+        struct timespec timeOfMax[2];         // Time of maximums (bimodal)
+        int actConnections[2];                // Active testing connections (bimodal)
+        struct subIntStats sisMax[2];         // Sub-interval maximum stats (bimodal)
+        double rateMaxL3[2];                  // L3 rate maximums (bimodal)
+        double rateMaxL2[2];                  // L2 rate maximums (bimodal)
+        double rateMaxL1[2];                  // L1 rate maximums (bimodal)
+        double rateMaxL0[2];                  // L1+VLAN rate maximums (bimodal)
+        double intfMax[2];                    // Interface maximums (bimodal)
+        double intfMbps;                      // Last interface rate obtained
 };
 //----------------------------------------------------------------------------
 //
@@ -299,6 +332,8 @@ struct connection {
 #define TEST_TYPE_DS  2
         int testType;                    // Test type being executed
         int testAction;                  // Test action (see load header)
+        BOOL dataReady;                  // Data ready indicator
+        int serverIndex;                 // Index of server ID
         int ipProtocol;                  // IPPROTO_IP or IPPROTO_IPV6
         int ipTosByte;                   // IP ToS byte for testing
         char locAddr[INET6_ADDR_STRLEN]; // Local IP address as string
@@ -312,7 +347,11 @@ struct connection {
         unsigned int spduSeqNo;      // Status PDU sequence number
         int spduSeqErr;              // Status PDU sequence error count
         //
-        int protocolVer;     // Protocol version
+        int protocolVer; // Protocol version
+        int mcIndex;     // Multi-connection index
+        int mcCount;     // Multi-connection count
+        int mcIdent;     // Multi-connection identifier
+        //
         int maxBandwidth;    // Required bandwidth
         int lowThresh;       // Low delay variation threshold
         int upperThresh;     // Upper delay variation threshold
@@ -342,15 +381,12 @@ struct connection {
         struct timespec timer3Thresh; // Third timer threshold
         int (*timer3Action)(int);     // Third action upon expiry
         //
-        struct timespec subIntClock;  // Sub-interval clock
-        unsigned int accumTime;       // Accumulated time
-        unsigned int subIntSeqNo;     // Sub-interval sequence number
-        struct subIntStats sisAct;    // Sub-interval active stats
-        struct subIntStats sisSav;    // Sub-interval saved stats
-        struct subIntStats sisMax[2]; // Sub-interval maximum stats (bimodal)
-        double rateMax[2];            // Rate maximums (bimodal)
-        struct timespec timeOfMax[2]; // Time of maximums (bimodal)
-        int subIntCount;              // Sub-interval count
+        struct timespec subIntClock; // Sub-interval clock
+        unsigned int accumTime;      // Accumulated time
+        unsigned int subIntSeqNo;    // Sub-interval sequence number
+        struct subIntStats sisAct;   // Sub-interval active stats
+        struct subIntStats sisSav;   // Sub-interval saved stats
+        int subIntCount;             // Sub-interval count
         //
 #define LPDU_HISTORY_SIZE 32 // Size must be power of 2
 #define LPDU_HISTORY_MASK (LPDU_HISTORY_SIZE - 1)
@@ -367,7 +403,7 @@ struct connection {
         unsigned int delayVarMax; // Delay variation maximum
         unsigned int delayVarSum; // Delay variation sum
         unsigned int delayVarCnt; // Delay variation count
-        unsigned int rttMinimum;  // Minimum round-trip time (sampled)
+        unsigned int rttMinimum;  // Minimum round-trip time
         unsigned int rttSample;   // Last round-trip time (sampled)
         BOOL delayMinUpd;         // Delay minimum(s) updated
         //
@@ -376,18 +412,11 @@ struct connection {
         unsigned int tiRxDatagrams;    // Trial interval receive datagrams
         unsigned int tiRxBytes;        // Trial interval receive bytes
         //
-        int warningCount;           // Warning message count
-        BOOL rxStoppedLoc;          // Local receive traffic stopped indicator
-        BOOL rxStoppedRem;          // Remote receive traffic stopped indicator
-        struct timespec pduRxTime;  // Receive time of last load or status PDU
-        struct timespec spduTime;   // Send time in last received status PDU
-        struct testSummary testSum; // Test summary statistics
-        //
-        cJSON *json_siArray;      // JSON sub-interval array
-        int intfFD;               // File descriptor to read interface stats
-        unsigned long intfBytes;  // Last byte counter of interface stats
-        struct timespec intfTime; // Sample time of interface stats
-        double intfMax[2];        // Interface maximums (bimodal)
+        int warningCount;          // Warning message count
+        BOOL rxStoppedLoc;         // Local receive traffic stopped indicator
+        BOOL rxStoppedRem;         // Remote receive traffic stopped indicator
+        struct timespec pduRxTime; // Receive time of last load or status PDU
+        struct timespec spduTime;  // Send time in last received status PDU
 };
 //----------------------------------------------------------------------------
 

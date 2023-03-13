@@ -40,7 +40,7 @@
 
 extern void init_conn(int, BOOL);
 extern int null_action(int);
-extern int send_setupreq(int);
+extern int send_setupreq(int, int, int);
 extern int service_setupreq(int);
 extern int service_setupresp(int);
 extern int sock_mgmt(int, char *, int, char *, int);

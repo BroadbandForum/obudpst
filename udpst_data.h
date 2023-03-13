@@ -43,10 +43,13 @@ extern int send2_loadpdu(int);
 extern int service_loadpdu(int);
 extern int send_statuspdu(int);
 extern int service_statuspdu(int);
+extern int proc_subinterval(int, BOOL);
+extern int agg_query_proc(int);
 extern int stop_test(int);
 extern int recv_proc(int);
 extern int send_proc(int, char *, int);
 extern void sr_copy(struct sendingRate *, struct sendingRate *, BOOL);
 extern int create_timestamp(struct timespec *);
+extern int getuniform(int, int);
 
 #endif /* UDPST_DATA_H */

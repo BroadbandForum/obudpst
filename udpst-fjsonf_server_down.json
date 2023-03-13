@@ -1,11 +1,11 @@
 {
-	"IPLayerMaxConnections":	1,
+	"IPLayerMaxConnections":	24,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"7.4.0",
-		"ControlProtocolVersion":	9,
+		"SoftwareVersion":	"8.0.0",
+		"ControlProtocolVersion":	10,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"ErrorStatus":	-1,
-	"ErrorMessage":	"Timeout awaiting server response, exiting!"
+	"ErrorMessage":	"ERROR: Timeout awaiting response from server 10.0.0.1:25000"
 }
