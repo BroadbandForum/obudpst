@@ -1256,7 +1256,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -u|-d        Test %s OR %s as client\n"
                                       "       -4           Use only IPv4 address family (AF_INET)\n"
                                       "       -6           Use only IPv6 address family (AF_INET6)\n"
-                                      "(c)    -C min[-max] Multi-connection count(s) [Default %d-%d]\n"
+                                      "(c)    -C cnt[-max] Multi-connection count [Default %d per server]\n"
                                       "(s)    -x           Execute server as background (daemon) process\n"
                                       "(s)    -1           Server exits after one test execution\n"
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
@@ -1264,7 +1264,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "       -s           Summary/Max output only (no sub-interval output)\n"
                                       "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
                                       "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n",
-                                      SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT, DEF_MC_COUNT);
+                                      SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
                                       "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"

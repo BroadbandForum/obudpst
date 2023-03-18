@@ -12,15 +12,16 @@ These assumptions, as well as the subsequent recommendations, are based on an
 architecture that generally involves regionally deployed test servers
 supporting tests from various network-owned client devices on the customer
 premises.
-1. Jumbo frames are NOT supported between the client and server, at any
-provisioned speed. IP fragmentation is expected with sending rates >1 Gbps.
+1. Jumbo frames are NOT supported between the client and server (although
+highly recommended). As such, IP fragmentation is expected when connection
+counts result in connection sending rates above 1 Gbps.
 2. A traditional 1500 byte MTU is available end-to-end without fragmentation.
 3. Multiple connections (UDP flows) are used between the client and
 server(s) to better utilize link aggregation and ECMP within the network.
 4. All tests are performed to multiple server instances to provide load
-balancing as well as avoid high-bandwidth "elephant" flows.
-5. A minimum (and sometimes maximum) number of connections is specified to
-allow at least one server instance to be unreachable or unavailable.
+balancing as well as avoid individual high-bandwidth "elephant" flows.
+5. A minimum number of connections is specified to allow at least one server
+instance to be unreachable or unavailable.
 6. Older or low-end client devices would benefit from any available performance
 recommendations.
 7. Because the client devices may encounter background user traffic competing
@@ -45,16 +46,13 @@ its respective test interface (see README for additional details).
 ```
 Server example with two 10G interfaces on two different NUMA nodes.
 One interface is on node 0 (CPUs 0-13,28-41) and the other is on node 1 (CPUs
-14-27,42-55). A total of 20 server instances are run across them using a
-bandwidth value of 1 Gbps each. A client could then utilize any number of them,
-in addition to other physical servers, when testing.
+14-27,42-55). A total of 4 server instances are run across them using a
+bandwidth value of 5 Gbps each.
 
-$ taskset -c 0-13,28-41  udpst -x -B 1000 -T <Local_IP1>
-...
-$ taskset -c 0-13,28-41  udpst -x -B 1000 -T <Local_IP10>
-$ taskset -c 14-27,42-55 udpst -x -B 1000 -T <Local_IP11>
-...
-$ taskset -c 14-27,42-55 udpst -x -B 1000 -T <Local_IP20>
+$ taskset -c 0-13,28-41  udpst -x -B 5000 -T <Local_IP1>
+$ taskset -c 0-13,28-41  udpst -x -B 5000 -T <Local_IP2>
+$ taskset -c 14-27,42-55 udpst -x -B 5000 -T <Local_IP3>
+$ taskset -c 14-27,42-55 udpst -x -B 5000 -T <Local_IP4>
 ```
 ```
 Server example with a 100G interface on NUMA node 0 (CPU cores 0-13,28-41).
@@ -85,30 +83,35 @@ via the `-E intf` option.
 * Formatted JSON output is used for easier text parsing.
 * A client will specify a minimum number of connections that will allow for one
 server to be unreachable or unavailable.
-* When the provisioned speed is 10 Gbps and the number of connections is small
-(so no significant multiplicative effect), tests could be started at 1 Gbps via
-`-I @1000` to reduce ramp-up time. (not shown below)
+* Clients with provisioned speeds up to 1 Gbps will use higher connection
+counts while those provisioned above 1 Gbps will use lower connection counts.
+This will avoid jumbo datagram sizes at low speeds and take advantage of them
+at high speeds.
 ```
-Client example for a device with a 4-core CPU, testing with 6 connections to 6
-server instances on 3 different physical servers. A minimum connection count of
-4 allows one server to be offline or any two instances to be unreachable.
+Client example for low-speed services (<=1G) on a 4-core CPU device. Testing
+uses 12 connections to 12 server instances on 3 different physical servers. A
+minimum connection count of 8 allows one server to be offline or unreachable.
 
-$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 4 \
-  <Server1_IP1> <Server1_IP2> <Server2_IP1> <Server2_IP2> <Server3_IP1> \
-  <Server3_IP2> >udpst.json
+$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 8 \
+  <Server1_IP1> <Server1_IP2> <Server1_IP3> <Server1_IP4> <Server2_IP1> \
+  <Server2_IP2> <Server2_IP3> <Server2_IP4> <Server3_IP1> <Server3_IP2> \
+  <Server3_IP3> <Server3_IP4> >udpst.json
 ```
 ```
 Alternate client example using different UDP control ports.
 
-$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 4 \
-  <Server1_IP>:25001 <Server1_IP>:25006 <Server2_IP>:25003 <Server2_IP>:25007 \
-  <Server3_IP>:25007 <Server3_IP>:25010 >udpst.json
+$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 8 \
+  <Server1_IP>:25005 <Server1_IP>:25006 <Server1_IP>:25007 <Server1_IP>:25008 \
+  <Server2_IP>:25001 <Server2_IP>:25002 <Server2_IP>:25003 <Server2_IP>:25004 \
+  <Server3_IP>:25002 <Server3_IP>:25004 <Server3_IP>:25006 <Server3_IP>:25008 \
+  >udpst.json
 ```
 ```
-Client example testing with 8 connections to 4 server instances (2 each) on 2
-different physical servers.
+Client example for high-speed services (>1G) with 3 connections to 3 server
+instances on 3 different physical servers. A minimum connection count of 2
+allows one server to be offline or unreachable.
 
-$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 4-8 \
-  <Server1_IP1> <Server1_IP2> <Server2_IP1> <Server2_IP2> >udpst.json
+$ taskset -c 1-3 udpst -d -B <mbps> -E <intf> -M -T -f jsonf -C 2 \
+  <Server1_IP1> <Server2_IP1> <Server3_IP1> >udpst.json
 ```
 

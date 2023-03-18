@@ -174,7 +174,7 @@ UDP flows) to one or more server instances. Each server instance can itself
 service up to 256 independent client connections. When the client wants to
 establish more than one connection per server instance OR the client wants to
 specify a minimum (and optional maximum) number of connections, the
-`-C min[-max]` option is used.
+`-C cnt[-max]` option is used.
 
 For better utilization of hosts, multiple server instances can reside
 on one physical machine and service test requests across one or more network
@@ -203,31 +203,41 @@ centers,...)
 
 **Important Considerations**
 
-There will be different system and network resource impacts for the client and
-server given the contrasting downstream vs. upstream (N-to-1 vs. 1-to-N)
+There will be different system and network resource impacts for the client
+and server given the contrasting downstream vs. upstream (N-to-1 vs. 1-to-N)
 traffic dynamic. Very often, more connections will not equal more capacity
-(the law of diminishing returns is ever-present). Using an excessive number of
-connections may simply create new congestion bottlenecks within a host or along
-a path.
+(the law of diminishing returns is ever-present). And while low-speed testing
+up to 1 Gbps can typically utilize more connections (10+) effectively,
+high-speed testing above that threshold generally performs best with fewer
+connections (2-4).
 
-In one situation, the use of multiple flows for testing caused an undesirable
-outbound congestion condition on the local interface of the host. The result
+With high-speed testing the number of connections can significantly impact
+achievable rates due to the default udpst behavior of using jumbo size
+datagrams for sending rates above 1 Gbps (i.e., when `-j` is not used). With
+fewer connections, where each one will need to drive traffic above 1 Gbps,
+they will be able to take advantage of the much higher network efficiency and
+reduced I/O rate of larger datagrams. If the network does not support jumbo
+frames via a 9K MTU, it is important to make sure that the hosts have adequate
+reassembly memory for the resulting IP fragmentation (see “Fragment Reassembly
+Memory” below).
+
+In another situation observed on a Raspberry Pi 4 (but called out here for
+its possible relevance to other devices), the use of multiple flows caused an
+undesirable outbound congestion condition on the local interface. The result
 was unreliable and inconsistent measurements because some flows would either
-monopolize all the bandwidth or be completely starved of it. And although this
-has only been observed with a Raspberry Pi 4, it's being called out for its
-possible relevance to other devices.
+monopolize all the bandwidth or be completely starved of it. The cause of the
+issue was its multi-queue network interface coupled with its default behavior
+of assigning flows to those queues using a 4-tuple hash. Depending on how the
+flows were hashed, some were able to completely starve the others. And this
+behavior was not unique to udpst. The same multi-flow starvation was observed
+with iPerf, for both UDP and TCP.
 
-The cause of the issue was the multi-queue network interface available on the
-Pi4, coupled with its default behavior of assigning flows to those queues using
-a 4-tuple hash. Depending on how the high-traffic-rate flows were hashed, some
-were able to completely starve the others. And this behavior was not unique
-to udpst. The same multi-flow starvation could be observed with iPerf, for both
-UDP and TCP. One simple way to avoid this issue if it is encountered is to do
-testing with a single connection. Alternatively, XPS (Transmit Packet Steering)
-can be utilized to make the device behave the same as servers normally do with
-multi-queue NICs. That is, having each CPU map onto one queue. Additional
-details, as well as the XPS configuration used on the Pi4, are available below
-under "Considerations for Older Hardware and Low-End Devices".
+One simple way to avoid this issue on the Pi4 is to do testing with a single
+connection. Alternatively, XPS (Transmit Packet Steering) can be utilized to
+make the device behave the same as servers normally do with multi-queue NICs.
+That is, having each CPU map onto one queue. Additional details, as well as
+the XPS configuration used on the Pi4, are available below under
+"Considerations for Older Hardware and Low-End Devices".
 
 ## Building OB-UDPST
 To build OB-UDPST a local installation of CMake is required. Please obtain it
