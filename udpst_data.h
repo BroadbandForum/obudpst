@@ -41,6 +41,7 @@
 extern int send1_loadpdu(int);
 extern int send2_loadpdu(int);
 extern int service_loadpdu(int);
+extern int service_grobuf(int);
 extern int send_statuspdu(int);
 extern int service_statuspdu(int);
 extern int proc_subinterval(int, BOOL);

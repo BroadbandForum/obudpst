@@ -64,6 +64,8 @@ CHECK_INCLUDE_FILES (sys/sysinfo.h HAVE_SYSINFO_H)
 CHECK_INCLUDE_FILES (sys/sysctl.h HAVE_SYSCTL_H)
 CHECK_INCLUDE_FILES (linux/socket.h HAVE_SIOCGIFHWADDR)
 CHECK_SYMBOL_EXISTS (LLADDR "sys/socket.h;net/if_dl.h" HAVE_NET_IF_DL_H)
+CHECK_SYMBOL_EXISTS (UDP_SEGMENT "netinet/udp.h" HAVE_GSO)
+CHECK_SYMBOL_EXISTS (UDP_GRO "netinet/udp.h" HAVE_GRO)
 
 CHECK_FUNCTION_EXISTS (sendmmsg HAVE_SENDMMSG)
 CHECK_FUNCTION_EXISTS (timegm HAVE_TIMEGM)
@@ -72,6 +74,9 @@ CHECK_FUNCTION_EXISTS (getifaddrs HAVE_GETIFADDRS)
 CHECK_FUNCTION_EXISTS (fork HAVE_WORKING_FORK)
 
 OPTION(DISABLE_INT_TIMER "Disable the timer for systems which don't provide the required timer resolution. Increases CPU utilization." OFF)
+OPTION(HAVE_SENDMMSG "Enable/Disable use of SendMMsg()" ON)
+OPTION(HAVE_GSO "Enable/Disable use of Generic Segmentation Offload (GSO)" ON)
+OPTION(HAVE_GRO "Enable/Disable use of Generic Receive Offload (GRO)" ON)
 
 add_definitions(-DSYSCONFDIR=\"${CMAKE_INSTALL_PREFIX}/etc\")
 add_definitions(-DLOCALSTATEDIR=\"${CMAKE_INSTALL_PREFIX}/var/lib\")

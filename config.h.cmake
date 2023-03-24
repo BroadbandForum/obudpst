@@ -14,6 +14,8 @@
 #cmakedefine HAVE_TIMEGM
 #cmakedefine HAVE_WORKING_FORK
 #cmakedefine HAVE_SENDMMSG
+#cmakedefine HAVE_GSO
+#cmakedefine HAVE_GRO
 #cmakedefine DISABLE_INT_TIMER
 
 #endif /* CONFIG_H */

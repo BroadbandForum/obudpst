@@ -261,13 +261,19 @@ int main(int argc, char **argv) {
                 var += sprintf(&scratch[var], ", Authentication: Available");
 #else
                 var += sprintf(&scratch[var], ", Authentication: Unavailable");
-#endif
+#endif // AUTH_KEY_ENABLE
+                var += sprintf(&scratch[var], ", Optimizations:");
 #ifdef HAVE_SENDMMSG
-                var += sprintf(&scratch[var], ", SendMMsg(): Available\n");
-#else
-                var += sprintf(&scratch[var], ", SendMMsg(): Unavailable\n");
+                var += sprintf(&scratch[var], " SendMMsg()");
+#ifdef HAVE_GSO
+                var += sprintf(&scratch[var], "+GSO");
+#endif // HAVE_GSO
+#endif // HAVE_SENDMMSG
+#ifdef HAVE_GRO
+                var += sprintf(&scratch[var], " GRO");
 #endif
-                var = write(outputfd, scratch, var);
+                scratch[var++] = '\n';
+                var            = write(outputfd, scratch, var);
         } else {
                 //
                 // Add initial items to top-level object
@@ -288,7 +294,7 @@ int main(int argc, char **argv) {
         //
         repo.sendingRates = calloc(1, MAX_SENDING_RATES * sizeof(struct sendingRate));
         repo.sndBuffer    = calloc(1, SND_BUFFER_SIZE);
-        repo.defBuffer    = calloc(1, DEF_BUFFER_SIZE);
+        repo.defBuffer    = calloc(1, RCV_BUFFER_SIZE);
         repo.randData     = malloc(MAX_JPAYLOAD_SIZE);
         repo.sndBufRand   = malloc(SND_BUFFER_SIZE);
         conn              = malloc(conf.maxConnections * sizeof(struct connection));

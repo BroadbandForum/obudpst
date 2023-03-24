@@ -142,7 +142,7 @@
 //
 // Sending rate payload, protocol, and buffer sizes
 //
-#define MAX_SENDING_RATES 1109              // Max rows in sending rate table
+#define MAX_SENDING_RATES 1153              // Max rows in sending rate table
 #define BASE_SEND_TIMER1  MIN_INTERVAL_USEC // Base send timer, transmitter 1 (us)
 #define BASE_SEND_TIMER2  1000              // Base send timer, transmitter 2 (us)
 #define MAX_L3_PACKET     1250              // Max desired L3 packet size
@@ -158,10 +158,15 @@
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
 #define MAX_TPAYLOAD_SIZE (MAX_TL3_PACKET - L3DG_OVERHEAD)
 //
-// The send buffer needs to contain all the datagram payloads for a burst.
+// Send buffer needs to contain all datagram payloads without GSO, or all segment buffers with it
 //
-#define SND_BUFFER_SIZE (MAX_BURST_SIZE * MAX_JPAYLOAD_SIZE)
-#define DEF_BUFFER_SIZE 65536
+#define DEF_BUFFER_SIZE  65536 // Larger than IP_MAXPACKET (even boundary)
+#define MMSG_SEGMENTS    ((MAX_BURST_SIZE / (DEF_BUFFER_SIZE / MAX_JPAYLOAD_SIZE) + 1))
+#define SND_BUFFER_SIZE  (DEF_BUFFER_SIZE * MMSG_SEGMENTS)
+#define RCV_BUFFER_SIZE  (DEF_BUFFER_SIZE * MMSG_SEGMENTS)
+#define UDP_MAX_SEGMENTS (1 << 6)
+#define GSOGRO_CMSG_LEN  (CMSG_LEN(sizeof(uint16_t)))   // Level SOL_UDP, type UDP_SEGMENT/UDP_GRO
+#define GSOGRO_CMSG_SIZE (CMSG_SPACE(sizeof(uint16_t))) // Level SOL_UDP, type UDP_SEGMENT/UDP_GRO
 
 //----------------------------------------------------------------------------
 //
@@ -272,7 +277,10 @@ struct repository {
         char *defBuffer;                      // Default buffer for general I/O
         char *randData;                       // Randomized seed data
         char *sndBufRand;                     // Send buffer for randomized load PDUs
+        char *rcvDataPtr;                     // Received data pointer used with GRO
         int rcvDataSize;                      // Received data size in default buffer
+        int rcvBlkSize[MMSG_SEGMENTS];        // Received block size with GRO
+        int rcvSegSize[MMSG_SEGMENTS];        // Received segment size with GRO
         struct sockaddr_storage remSas;       // Remote IP sockaddr storage
         socklen_t remSasLen;                  // Remote IP sockaddr storage length
         BOOL isServer;                        // Execute as server

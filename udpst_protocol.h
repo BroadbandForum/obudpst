@@ -70,7 +70,7 @@ struct sendingRate {
 #define INITIAL_MIN_DELAY UINT32_MAX // Initial minimum delay (no data/value)
 struct subIntStats {
         uint32_t rxDatagrams; // Received datagrams
-        uint32_t rxBytes;     // Received bytes
+        uint64_t rxBytes;     // Received bytes
         uint32_t deltaTime;   // Time delta
         uint32_t seqErrLoss;  // Loss sum
         uint32_t seqErrOoo;   // Out-of-Order sum

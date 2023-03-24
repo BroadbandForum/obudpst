@@ -66,6 +66,7 @@
  * Len Ciavattone          12/26/2022    Add random payload size support
  * Len Ciavattone          12/29/2022    Add single test option on server
  * Len Ciavattone          01/14/2023    Add multi-connection support
+ * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
  *
  */
 
@@ -86,6 +87,8 @@
 #include <unistd.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <netinet/ip.h>  // For GSO/GRO support
+#include <netinet/udp.h> // For GSO/GRO support
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
 #include <openssl/x509.h>
@@ -214,13 +217,136 @@ static void _randomize_payload(char *buffer, unsigned int length) {
 }
 
 #if defined(HAVE_SENDMMSG)
+#if defined(HAVE_GSO)
+//
+// Send a burst of messages using GSO (Generic Segmentation Offload)
+//
+static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
+        char *sndbuf, *nextsndbuf, cmsgbuf[GSOGRO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
+        unsigned int uvar, rttrd = 0, totalsize;
+        int i, j, var;
+        struct cmsghdr *cmsg;
+        struct mmsghdr mmsg[MMSG_SEGMENTS];
+        struct iovec iov[MMSG_SEGMENTS];
+        struct timespec tspecvar;
+
+        //
+        // Calculate RTT response delay
+        //
+        if (tspecisset(&c->pduRxTime)) {
+                tspecminus(&repo.systemClock, &c->pduRxTime, &tspecvar);
+                rttrd = (unsigned int) tspecmsec(&tspecvar);
+        }
+
+        //
+        // Prepare send structures
+        //
+        memset(mmsg, 0, sizeof(mmsg));
+        if (c->randPayload) {
+                sndbuf = repo.sndBufRand;
+        } else {
+                sndbuf = repo.sndBuffer;
+        }
+        j    = 0; // Message count
+        cmsg = (struct cmsghdr *) cmsgbuf;
+        while (totalburst > 0) {
+                //
+                // Fill send buffer until GSO limit or burst completion
+                //
+                totalsize  = 0;
+                nextsndbuf = sndbuf;
+                for (i = 0; i < totalburst; i++) {
+                        if (i < burstsize)
+                                uvar = payload;
+                        else
+                                uvar = addon;
+                        //
+                        // Check for GSO limits
+                        //
+                        if (i >= UDP_MAX_SEGMENTS) // Segment limit
+                                break;
+                        if (totalsize + uvar > IP_MAXPACKET) // Size limit
+                                break;
+                        //
+                        // Build load PDU (including corresponding control message on first one)
+                        //
+                        struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
+                        _populate_header(lHdr, c, rttrd);
+                        lHdr->lpduSeqNo  = htonl((uint32_t) ++c->lpduSeqNo);
+                        lHdr->udpPayload = htons((uint16_t) uvar);
+                        if (c->randPayload) {
+                                _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
+                        }
+                        if (i == 0) {
+                                cmsg->cmsg_len                  = GSOGRO_CMSG_LEN;
+                                cmsg->cmsg_level                = SOL_UDP;
+                                cmsg->cmsg_type                 = UDP_SEGMENT;
+                                *((uint16_t *) CMSG_DATA(cmsg)) = (uint16_t) uvar;
+                        }
+                        totalsize += uvar;
+                        nextsndbuf += payload;
+                }
+                totalburst -= i;
+                if (burstsize > 0)
+                        burstsize -= i;
+
+                //
+                // Setup message structure for buffer
+                //
+                iov[j].iov_base                = (void *) sndbuf;
+                iov[j].iov_len                 = (size_t) totalsize;
+                mmsg[j].msg_hdr.msg_iov        = &iov[j];
+                mmsg[j].msg_hdr.msg_iovlen     = 1;
+                mmsg[j].msg_hdr.msg_control    = cmsg;
+                mmsg[j].msg_hdr.msg_controllen = GSOGRO_CMSG_SIZE;
+                j++;
+
+                //
+                // Advance to next send buffer
+                //
+                sndbuf += DEF_BUFFER_SIZE;
+                cmsg = (struct cmsghdr *) ((char *) cmsg + GSOGRO_CMSG_SIZE);
+        }
+
+        //
+        // Send complete burst with single system call
+        //
+        // NOTE: Certain error conditions are expected when overloading an interface
+        //
+        var = sendmmsg(c->fd, mmsg, j, 0);
+        if (var == -1 && errno == EINVAL) { // Flag GSO incompatibility
+                var = sprintf(scratch, "ERROR: GSO incompatible with IP fragmentation (disable jumbo sizes or increase MTU)\n");
+                send_proc(errConn, scratch, var);
+                tspeccpy(&c->endTime, &repo.systemClock); // End testing
+                return;
+        }
+        if (!conf.errSuppress) {
+                if (var < 0) {
+                        //
+                        // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
+                        //
+                        if ((var = socket_error(connindex, errno, "SENDMMSG+GSO")) > 0)
+                                send_proc(errConn, scratch, var);
+
+                } else if (var < j) {
+                        //
+                        // Not all messages sent indicates the send buffer is full
+                        //
+                        var = sprintf(scratch, "[%d]SENDMMSG+GSO INCOMPLETE: Only %d out of %d sent\n", connindex, var, j);
+                        send_proc(errConn, scratch, var);
+                }
+        }
+}
+#endif // HAVE_GSO
+
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
 //
 static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
         static struct mmsghdr mmsg[MAX_BURST_SIZE]; // Static array
         static struct iovec iov[MAX_BURST_SIZE];    // Static array
-        struct connection *c = &conn[connindex];
         unsigned int uvar, rttrd = 0;
         char *nextsndbuf;
         int i, var;
@@ -289,15 +415,15 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 }
         }
 }
-#endif /* HAVE_SENDMMSG */
+#endif // HAVE_SENDMMSG
 
 //
 // Send a burst of messages using the slower but more widely available sendmsg syscall
 //
 static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
         struct msghdr msg;
         struct iovec iov;
-        struct connection *c = &conn[connindex];
         unsigned int uvar, rttrd = 0;
         int i;
         struct loadHdr *lHdr;
@@ -372,7 +498,7 @@ int send2_loadpdu(int connindex) {
 int send_loadpdu(int connindex, int transmitter) {
         register struct connection *c = &conn[connindex];
         int var, burstsize, totalburst, txintpri, txintalt;
-        unsigned int payload, addon;
+        unsigned int uvar, payload, addon;
         BOOL randpayload;
         struct timespec tspecvar, *tspecpri, *tspecalt;
         struct sendingRate *sr;
@@ -525,10 +651,14 @@ int send_loadpdu(int connindex, int transmitter) {
                 totalburst++;
 
 #if defined(HAVE_SENDMMSG)
+#if defined(HAVE_GSO)
+        _sendmmsg_gso(connindex, totalburst, burstsize, payload, addon);
+#else
         _sendmmsg_burst(connindex, totalburst, burstsize, payload, addon);
+#endif // HAVE_GSO
 #else
         _sendmsg_burst(connindex, totalburst, burstsize, payload, addon);
-#endif /* HAVE_SENDMMSG */
+#endif // HAVE_SENDMMSG
 
         return 0;
 }
@@ -541,7 +671,7 @@ int service_loadpdu(int connindex) {
         int i, delta, var;
         BOOL bvar, firstpdu = FALSE;
         unsigned int uvar, seqno, rttrd;
-        struct loadHdr *lHdr = (struct loadHdr *) repo.defBuffer;
+        struct loadHdr *lHdr = (struct loadHdr *) repo.rcvDataPtr;
         struct timespec tspecvar, tspecdelta;
 
         //
@@ -614,11 +744,11 @@ int service_loadpdu(int connindex) {
         }
 
         //
-        // Update traffic stats (use size specified in PDU, actual receive was truncated)
+        // Update traffic stats (use size specified in PDU, actual receive may have been truncated)
         //
         uvar = (unsigned int) ntohs(lHdr->udpPayload);
         c->sisAct.rxDatagrams++;
-        c->sisAct.rxBytes += (uint32_t) uvar;
+        c->sisAct.rxBytes += (uint64_t) uvar;
         c->tiRxDatagrams++;
         c->tiRxBytes += uvar;
 
@@ -1897,7 +2027,8 @@ int output_maxrate(int connindex) {
 //
 double get_rate(int connindex, struct subIntStats *sis, int overhead) {
         register struct connection *c = &conn[connindex];
-        unsigned int delta, dgrams, bytes;
+        unsigned int delta, dgrams;
+        unsigned long long bytes;
         double mbps = 0.0;
 
         if (c->ipProtocol == IPPROTO_IPV6)
@@ -1906,11 +2037,11 @@ double get_rate(int connindex, struct subIntStats *sis, int overhead) {
         if (sis == NULL) {
                 delta  = c->tiDeltaTime;
                 dgrams = c->tiRxDatagrams;
-                bytes  = c->tiRxBytes;
+                bytes  = (unsigned long long) c->tiRxBytes;
         } else {
                 delta  = (unsigned int) sis->deltaTime;
                 dgrams = (unsigned int) sis->rxDatagrams;
-                bytes  = (unsigned int) sis->rxBytes;
+                bytes  = (unsigned long long) sis->rxBytes;
         }
         if (delta > 0) {
                 mbps = (double) dgrams;
@@ -1942,27 +2073,108 @@ int stop_test(int connindex) {
 }
 //----------------------------------------------------------------------------
 //
+// Service GRO buffers for load PDUs
+//
+int service_grobuf(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int i, totaldata;
+        char *rcvbuf;
+
+        rcvbuf = repo.defBuffer;
+        for (i = 0; i < MMSG_SEGMENTS; i++) {
+                if (repo.rcvBlkSize[i] == 0)
+                        break;
+
+                totaldata       = repo.rcvBlkSize[i];
+                repo.rcvDataPtr = rcvbuf;
+                while (totaldata > 0) {
+                        if (repo.rcvSegSize[i] > 0 && totaldata >= repo.rcvSegSize[i])
+                                repo.rcvDataSize = repo.rcvSegSize[i];
+                        else
+                                repo.rcvDataSize = totaldata;
+                        //
+                        // Call secondary receive action directly after data pointer and size are set
+                        //
+                        service_loadpdu(connindex);
+
+                        repo.rcvDataPtr += repo.rcvDataSize;
+                        totaldata -= repo.rcvDataSize;
+                }
+                rcvbuf += DEF_BUFFER_SIZE;
+        }
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
 // Generic connection receive processor
 //
 int recv_proc(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var, recvsize;
+        char *rcvbuf, cmsgbuf[GSOGRO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
+        int i, var, recvsize;
+        struct cmsghdr *cmsg;
+        struct msghdr *msg;
+        struct mmsghdr mmsg[MMSG_SEGMENTS];
+        struct iovec iov[MMSG_SEGMENTS];
 
         //
-        // Specify receive buffer size (minimize for load PDUs to reduce overhead of memory copy)
+        // Specify receive buffer size (minimize for load PDUs [w/o GRO] to reduce overhead of memory copy)
         //
         if (c->secAction == &service_loadpdu) {
                 recvsize = sizeof(struct loadHdr);
         } else {
                 recvsize = DEF_BUFFER_SIZE;
         }
+        repo.rcvDataPtr = repo.defBuffer; // Default to start of general I/O buffer for non-GRO reads
 
         //
         // Issue read
         //
         if (c->subType == SOCK_STREAM || c->connected) {
-                repo.rcvDataSize = recv(c->fd, repo.defBuffer, recvsize, 0);
-
+                //
+                // Process based on GRO enabled or not
+                //
+                if (c->secAction == &service_grobuf) {
+                        //
+                        // Prepare message structures
+                        //
+                        memset(mmsg, 0, sizeof(mmsg));
+                        rcvbuf = repo.defBuffer;
+                        cmsg   = (struct cmsghdr *) cmsgbuf;
+                        for (i = 0; i < MMSG_SEGMENTS; i++) {
+                                iov[i].iov_base                = rcvbuf;
+                                iov[i].iov_len                 = IP_MAXPACKET;
+                                mmsg[i].msg_hdr.msg_iov        = &iov[i];
+                                mmsg[i].msg_hdr.msg_iovlen     = 1;
+                                mmsg[i].msg_hdr.msg_control    = cmsg;
+                                mmsg[i].msg_hdr.msg_controllen = GSOGRO_CMSG_SIZE;
+                                //
+                                rcvbuf += DEF_BUFFER_SIZE;
+                                cmsg = (struct cmsghdr *) ((char *) cmsg + GSOGRO_CMSG_SIZE);
+                                //
+                                repo.rcvBlkSize[i] = 0;
+                                repo.rcvSegSize[i] = 0;
+                        }
+#ifdef HAVE_GRO
+                        //
+                        // Perform read and process messages into individual block/segment sizes
+                        //
+                        repo.rcvDataSize = recvmmsg(c->fd, mmsg, MMSG_SEGMENTS, 0, NULL); // Returns number of messages
+                        for (i = 0; i < repo.rcvDataSize; i++) {
+                                msg                = &mmsg[i].msg_hdr;
+                                repo.rcvBlkSize[i] = (int) mmsg[i].msg_len;
+                                repo.rcvSegSize[i] = 0;
+                                for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
+                                        if (cmsg->cmsg_level == SOL_UDP && cmsg->cmsg_type == UDP_GRO) {
+                                                repo.rcvSegSize[i] = (int) (*(uint16_t *) CMSG_DATA(cmsg));
+                                                break;
+                                        }
+                                }
+                        }
+#endif
+                } else {
+                        repo.rcvDataSize = recv(c->fd, repo.defBuffer, recvsize, 0);
+                }
         } else if (c->subType == SOCK_DGRAM) {
                 repo.remSasLen   = sizeof(repo.remSas);
                 repo.rcvDataSize = recvfrom(c->fd, repo.defBuffer, recvsize, 0, (struct sockaddr *) &repo.remSas, &repo.remSasLen);
@@ -2139,7 +2351,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
         //
         if (hton) {
                 sisnet->rxDatagrams = htonl(sishost->rxDatagrams);
-                sisnet->rxBytes     = htonl(sishost->rxBytes);
+                sisnet->rxBytes     = (uint64_t) htonll(sishost->rxBytes);
                 sisnet->deltaTime   = htonl(sishost->deltaTime);
                 sisnet->seqErrLoss  = htonl(sishost->seqErrLoss);
                 sisnet->seqErrOoo   = htonl(sishost->seqErrOoo);
@@ -2153,7 +2365,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sisnet->accumTime   = htonl(sishost->accumTime);
         } else {
                 sishost->rxDatagrams = ntohl(sisnet->rxDatagrams);
-                sishost->rxBytes     = ntohl(sisnet->rxBytes);
+                sishost->rxBytes     = (uint64_t) ntohll(sisnet->rxBytes);
                 sishost->deltaTime   = ntohl(sisnet->deltaTime);
                 sishost->seqErrLoss  = ntohl(sisnet->seqErrLoss);
                 sishost->seqErrOoo   = ntohl(sisnet->seqErrOoo);

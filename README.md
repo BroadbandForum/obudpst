@@ -28,7 +28,7 @@ https://www.etsi.org/deliver/etsi_tr/103700_103799/103702/01.01.01_60/tr_103702v
 
 ## Overview
 Utilizing an adaptive transmission rate, via a pre-built table of discreet
-sending rates (from 0.11 Mbps to 40 Gbps), UDP datagrams are sent from client
+sending rates (starting at 0.11 Mbps), UDP datagrams are sent from client
 to server(s) or server(s) to client to determine the maximum available IP-layer
 capacity between them. The load traffic is only sent in one direction at a
 time, and status feedback messages are sent periodically in the opposite
@@ -216,10 +216,8 @@ achievable rates due to the default udpst behavior of using jumbo size
 datagrams for sending rates above 1 Gbps (i.e., when `-j` is not used). With
 fewer connections, where each one will need to drive traffic above 1 Gbps,
 they will be able to take advantage of the much higher network efficiency and
-reduced I/O rate of larger datagrams. If the network does not support jumbo
-frames via a 9K MTU, it is important to make sure that the hosts have adequate
-reassembly memory for the resulting IP fragmentation (see “Fragment Reassembly
-Memory” below).
+reduced I/O rate of larger datagrams. Of course, this assumes that jumbo
+frames are supported by the network and IP fragmentation can be avoided.
 
 In another situation observed on a Raspberry Pi 4 (but called out here for
 its possible relevance to other devices), the use of multiple flows caused an
@@ -484,12 +482,17 @@ also supports a jumbo MTU size (9000+ bytes). However, some environments are
 restricted to a traditional MTU of 1500 bytes and would be required to fragment
 the jumbo datagrams into multiple IP packets.
 
-One available option in these scenarios is to utilize the `-j` option on both
-the server and client to restrict datagrams to non-jumbo sizes above 1 Gbps.
-However, because of the extremely high resulting socket I/O rate at high
-speeds, it is unlikely that a full 10+ Gbps can be achieved with this option.
-The compromise, to maintain a reasonable socket I/O rate, can be to leave jumbo
-datagrams enabled (the default) and rely on the IP layer to fragment them.
+In these situations, the recommendation is to utilize the `-j` option on both
+the client and server to restrict all datagrams to non-jumbo sizes. However,
+because of the resulting higher socket I/O rate at high speeds, this may limit
+the maximum rate that can be achieved. If jumbo size datagrams are still
+desired and udpst was compiled with the GSO (Generic Segmentation Offload)
+optimization, the default with reasonably recent Linux kernels, it will need to
+be recompiled without it as GSO is incompatible with IP fragmentation. This can
+be accomplished via the following:
+```
+$ cmake -D HAVE_GSO=OFF .
+```
 
 **NUMA Node Selection**
 
@@ -551,11 +554,12 @@ at a time (one on each node).*
 
 **Fragment Reassembly Memory**
 
-When IP fragmentation of jumbo size datagrams is expected as a normal part of
-testing, it is important to make sure that adequate memory is available for
-fragment reassembly. When not available, the "packet reassemblies failed"
-counter under `netstat -s` and/or `netstat -s -6` (for IPv6) will show the
-failures.
+If the `-j` option is not used and IP fragmentation of jumbo size datagrams
+must be expected as a normal part of testing (where udpst must also be built
+without the GSO optimization), it is important to make sure that adequate
+memory is available for fragment reassembly. When not available, the "packet
+reassemblies failed" counter under `netstat -s` and/or `netstat -s -6` (for
+IPv6) will show the failures.
 
 To increase the memory available to reassemble fragments, as well as limit the
 time a fragment should be kept awaiting reassembly, the following could be
@@ -607,9 +611,9 @@ Devices in the first category may be helped by the `-T` option when a
 traditional 1500 byte MTU is available end-to-end between client and server.
 This option will increase the default datagram payload size so that full 1500
 byte packets are generated. This reduces both the socket I/O and network packet
-rates (see `-S` vs. `-ST` output). Another beneficial option in these cases,
+rates (see `-S` vs. `-ST` output). Another important option in these cases,
 when jumbo frames are not supported by the network, is `-j`. This will disable
-all jumbo datagram sizes and prevent any possible fragmentation. This can
+all jumbo datagram sizes and prevent any possible IP fragmentation. This can
 happen with a very underpowered device when the server, attempting to drive the
 client higher and higher, ends up at sending rates above 1 Gbps.
 
@@ -618,10 +622,9 @@ running Raspberry Pi OS (previously called Raspbian). Testing has shown that to
 reach a 1 Gbps sending rate, it was necessary to set the CPU affinity of udpst
 to avoid CPU 0 (the CPU handling network interrupts when *irqbalance* is not
 used). Additionally, and especially when using a 32-bit Raspbian, both the `-T`
-and `-j` options were also needed. Although these last two options were not a
-hard requirement with a 64-bit Raspbian and 64-bit udpst, they are still
-recommended for any device in this general category. The command to utilize
-these recommendations is:
+and `-j` options were also needed. And these options are recommended for any
+device in this general category. The command to utilize these recommendations
+is:
 ```
 $ taskset -c 1-3 udpst -u -T -j <server>
 ```
