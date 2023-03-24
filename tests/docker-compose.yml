@@ -1,0 +1,26 @@
+version: "3.3"  # optional since v1.27.0
+services:
+  server:
+    build: 
+      context: ../.
+      dockerfile: tests/Dockerfile
+    cap_add:
+      - NET_ADMIN
+    environment: 
+      - MIN_TESTPORT=40000
+      - MAX_TESTPORT=40005
+      - NETEM_COMMAND=${DOWN_NETEM_COMMAND}
+      - UDPST_COMMAND=${SERVER_ARGS}
+  client:
+    build: 
+      context: ../.
+      dockerfile: tests/Dockerfile
+    cap_add:
+      - NET_ADMIN
+    environment: 
+        - MIN_TESTPORT=40000
+        - MAX_TESTPORT=40005
+        - NETEM_COMMAND=${UP_NETEM_COMMAND}
+        - UDPST_COMMAND=${CLIENT_ARGS}
+    depends_on: 
+      - server
