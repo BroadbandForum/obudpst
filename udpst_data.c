@@ -67,6 +67,7 @@
  * Len Ciavattone          12/29/2022    Add single test option on server
  * Len Ciavattone          01/14/2023    Add multi-connection support
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
+ * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  *
  */
 
@@ -87,8 +88,8 @@
 #include <unistd.h>
 #include <net/if.h>
 #include <arpa/inet.h>
-#include <netinet/ip.h>  // For GSO/GRO support
-#include <netinet/udp.h> // For GSO/GRO support
+#include <netinet/ip.h>  // For GSO support
+#include <netinet/udp.h> // For GSO support
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
 #include <openssl/x509.h>
@@ -155,6 +156,7 @@ extern char json_errbuf[STRING_SIZE];
 #define CLIENT_DEBUG     "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
 #define SERVER_DEBUG     "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
 static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
+static int mmsgDataSize[RECVMMSG_SIZE]; // Received data size of each message
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -223,7 +225,7 @@ static void _randomize_payload(char *buffer, unsigned int length) {
 //
 static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
         register struct connection *c = &conn[connindex];
-        char *sndbuf, *nextsndbuf, cmsgbuf[GSOGRO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
+        char *sndbuf, *nextsndbuf, cmsgbuf[GSO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
         unsigned int uvar, rttrd = 0, totalsize;
         int i, j, var;
         struct cmsghdr *cmsg;
@@ -279,7 +281,7 @@ static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned
                                 _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
                         }
                         if (i == 0) {
-                                cmsg->cmsg_len                  = GSOGRO_CMSG_LEN;
+                                cmsg->cmsg_len                  = GSO_CMSG_LEN;
                                 cmsg->cmsg_level                = SOL_UDP;
                                 cmsg->cmsg_type                 = UDP_SEGMENT;
                                 *((uint16_t *) CMSG_DATA(cmsg)) = (uint16_t) uvar;
@@ -299,14 +301,14 @@ static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned
                 mmsg[j].msg_hdr.msg_iov        = &iov[j];
                 mmsg[j].msg_hdr.msg_iovlen     = 1;
                 mmsg[j].msg_hdr.msg_control    = cmsg;
-                mmsg[j].msg_hdr.msg_controllen = GSOGRO_CMSG_SIZE;
+                mmsg[j].msg_hdr.msg_controllen = GSO_CMSG_SIZE;
                 j++;
 
                 //
                 // Advance to next send buffer
                 //
                 sndbuf += DEF_BUFFER_SIZE;
-                cmsg = (struct cmsghdr *) ((char *) cmsg + GSOGRO_CMSG_SIZE);
+                cmsg = (struct cmsghdr *) ((char *) cmsg + GSO_CMSG_SIZE);
         }
 
         //
@@ -2073,34 +2075,18 @@ int stop_test(int connindex) {
 }
 //----------------------------------------------------------------------------
 //
-// Service GRO buffers for load PDUs
+// Service recvmmsg() data buffers for load PDUs
 //
-int service_grobuf(int connindex) {
-        register struct connection *c = &conn[connindex];
-        int i, totaldata;
-        char *rcvbuf;
+int service_recvmmsg(int connindex) {
+        int i;
 
-        rcvbuf = repo.defBuffer;
-        for (i = 0; i < MMSG_SEGMENTS; i++) {
-                if (repo.rcvBlkSize[i] == 0)
+        repo.rcvDataPtr = repo.defBuffer;
+        for (i = 0; i < RECVMMSG_SIZE; i++) {
+                if (mmsgDataSize[i] == 0)
                         break;
-
-                totaldata       = repo.rcvBlkSize[i];
-                repo.rcvDataPtr = rcvbuf;
-                while (totaldata > 0) {
-                        if (repo.rcvSegSize[i] > 0 && totaldata >= repo.rcvSegSize[i])
-                                repo.rcvDataSize = repo.rcvSegSize[i];
-                        else
-                                repo.rcvDataSize = totaldata;
-                        //
-                        // Call secondary receive action directly after data pointer and size are set
-                        //
-                        service_loadpdu(connindex);
-
-                        repo.rcvDataPtr += repo.rcvDataSize;
-                        totaldata -= repo.rcvDataSize;
-                }
-                rcvbuf += DEF_BUFFER_SIZE;
+                repo.rcvDataSize = mmsgDataSize[i];
+                service_loadpdu(connindex);
+                repo.rcvDataPtr += RCV_HEADER_SIZE;
         }
         return 0;
 }
@@ -2110,66 +2096,51 @@ int service_grobuf(int connindex) {
 //
 int recv_proc(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *rcvbuf, cmsgbuf[GSOGRO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
+        static struct mmsghdr mmsg[RECVMMSG_SIZE]; // Static array
+        static struct iovec iov[RECVMMSG_SIZE];    // Static array
+        char *rcvbuf;
         int i, var, recvsize;
-        struct cmsghdr *cmsg;
         struct msghdr *msg;
-        struct mmsghdr mmsg[MMSG_SEGMENTS];
-        struct iovec iov[MMSG_SEGMENTS];
 
         //
-        // Specify receive buffer size (minimize for load PDUs [w/o GRO] to reduce overhead of memory copy)
+        // Specify receive buffer size (truncate load PDUs to reduce overhead of memory copy)
         //
-        if (c->secAction == &service_loadpdu) {
-                recvsize = sizeof(struct loadHdr);
+        if (c->secAction == &service_recvmmsg || c->secAction == &service_loadpdu) {
+                recvsize = RCV_HEADER_SIZE;
         } else {
                 recvsize = DEF_BUFFER_SIZE;
         }
-        repo.rcvDataPtr = repo.defBuffer; // Default to start of general I/O buffer for non-GRO reads
+        repo.rcvDataPtr = repo.defBuffer; // Default to start of general I/O buffer
 
         //
         // Issue read
         //
         if (c->subType == SOCK_STREAM || c->connected) {
                 //
-                // Process based on GRO enabled or not
+                // Process based on secondary action routine
                 //
-                if (c->secAction == &service_grobuf) {
+                if (c->secAction == &service_recvmmsg) {
                         //
                         // Prepare message structures
                         //
                         memset(mmsg, 0, sizeof(mmsg));
                         rcvbuf = repo.defBuffer;
-                        cmsg   = (struct cmsghdr *) cmsgbuf;
-                        for (i = 0; i < MMSG_SEGMENTS; i++) {
-                                iov[i].iov_base                = rcvbuf;
-                                iov[i].iov_len                 = IP_MAXPACKET;
-                                mmsg[i].msg_hdr.msg_iov        = &iov[i];
-                                mmsg[i].msg_hdr.msg_iovlen     = 1;
-                                mmsg[i].msg_hdr.msg_control    = cmsg;
-                                mmsg[i].msg_hdr.msg_controllen = GSOGRO_CMSG_SIZE;
+                        for (i = 0; i < RECVMMSG_SIZE; i++) {
+                                iov[i].iov_base            = rcvbuf;
+                                iov[i].iov_len             = recvsize;
+                                mmsg[i].msg_hdr.msg_iov    = &iov[i];
+                                mmsg[i].msg_hdr.msg_iovlen = 1;
                                 //
-                                rcvbuf += DEF_BUFFER_SIZE;
-                                cmsg = (struct cmsghdr *) ((char *) cmsg + GSOGRO_CMSG_SIZE);
-                                //
-                                repo.rcvBlkSize[i] = 0;
-                                repo.rcvSegSize[i] = 0;
+                                rcvbuf += recvsize;  // Next buffer
+                                mmsgDataSize[i] = 0; // Initialize as empty
                         }
-#ifdef HAVE_GRO
+#ifdef HAVE_RECVMMSG
                         //
-                        // Perform read and process messages into individual block/segment sizes
+                        // Perform read and process messages
                         //
-                        repo.rcvDataSize = recvmmsg(c->fd, mmsg, MMSG_SEGMENTS, 0, NULL); // Returns number of messages
+                        repo.rcvDataSize = recvmmsg(c->fd, mmsg, RECVMMSG_SIZE, MSG_TRUNC, NULL); // Returns number of messages
                         for (i = 0; i < repo.rcvDataSize; i++) {
-                                msg                = &mmsg[i].msg_hdr;
-                                repo.rcvBlkSize[i] = (int) mmsg[i].msg_len;
-                                repo.rcvSegSize[i] = 0;
-                                for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
-                                        if (cmsg->cmsg_level == SOL_UDP && cmsg->cmsg_type == UDP_GRO) {
-                                                repo.rcvSegSize[i] = (int) (*(uint16_t *) CMSG_DATA(cmsg));
-                                                break;
-                                        }
-                                }
+                                mmsgDataSize[i] = (int) mmsg[i].msg_len; // Save actual received length (although truncated)
                         }
 #endif
                 } else {
@@ -2187,9 +2158,9 @@ int recv_proc(int connindex) {
         //
         if (repo.rcvDataSize < 0) {
                 repo.rcvDataSize = 0;
-                if ((var = receive_trunc(errno, recvsize, sizeof(struct loadHdr))) > 0) {
+                if ((var = receive_trunc(errno, recvsize, RCV_HEADER_SIZE)) > 0) {
                         repo.rcvDataSize = var;
-                } else if ((var = socket_error(connindex, errno, "RECV/RECVFROM")) > 0) {
+                } else if ((var = socket_error(connindex, errno, "RECVMMSG/RECV/RECVFROM")) > 0) {
                         if (!conf.errSuppress) {
                                 send_proc(errConn, scratch, var);
                         }

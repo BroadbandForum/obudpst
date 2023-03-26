@@ -62,6 +62,7 @@
  * Len Ciavattone          02/14/2023    Add per-server port selection and
  *                                       clock updates based on rx packets
  * Len Ciavattone          03/04/2023    Load balance returned epoll events
+ * Len Ciavattone          03/22/2023    Add optimization output to banner
  *
  */
 
@@ -269,9 +270,9 @@ int main(int argc, char **argv) {
                 var += sprintf(&scratch[var], "+GSO");
 #endif // HAVE_GSO
 #endif // HAVE_SENDMMSG
-#ifdef HAVE_GRO
-                var += sprintf(&scratch[var], " GRO");
-#endif
+#ifdef HAVE_RECVMMSG
+                var += sprintf(&scratch[var], " RecvMMsg()+Trunc");
+#endif // HAVE_RECVMMSG
                 scratch[var++] = '\n';
                 var            = write(outputfd, scratch, var);
         } else {
@@ -520,12 +521,7 @@ int main(int argc, char **argv) {
                         fdpass = 0;
                         do {
                                 //
-                                // Update local copy of system time clock
-                                //
-                                clock_gettime(CLOCK_REALTIME, &repo.systemClock);
-
-                                //
-                                // Do single read from each ready FD
+                                // Do single read (up to RECVMMSG_SIZE) from each ready FD
                                 //
                                 var2 = 0; // Track if any data is read on this pass
                                 for (j = 0; j < readyfds; j++) {
@@ -556,6 +552,11 @@ int main(int argc, char **argv) {
                                         } else if (!conn[i].dataReady) {
                                                 continue; // Nothing to do for this connection
                                         }
+
+                                        //
+                                        // Update local copy of system time clock
+                                        //
+                                        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
 
                                         //
                                         // Execute primary and secondary actions

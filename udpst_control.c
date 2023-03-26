@@ -60,6 +60,7 @@
  * Len Ciavattone          02/14/2023    Add per-server port selection
  * Len Ciavattone          03/05/2023    Fix server setup error messages
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
+ * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  *
  */
 
@@ -75,7 +76,6 @@
 #include <netdb.h>
 #include <net/if.h>
 #include <arpa/inet.h>
-#include <netinet/udp.h> // For GSO/GRO support
 #include <sys/epoll.h>
 #include <sys/file.h>
 #ifdef AUTH_KEY_ENABLE
@@ -927,15 +927,8 @@ int service_actreq(int connindex) {
                         testtype      = USTEST_TEXT;
                         c->rttMinimum = INITIAL_MIN_DELAY;
                         c->rttSample  = INITIAL_MIN_DELAY;
-#ifdef HAVE_GRO
-                        var = 1;
-                        if (setsockopt(c->fd, IPPROTO_UDP, UDP_GRO, &var, sizeof(var)) < 0) {
-                                var = sprintf(scratch, "ERROR: Failure enabling GRO (%s)\n", strerror(errno));
-                                send_proc(errConn, scratch, var);
-                                c->secAction = &service_loadpdu; // Use standard receive routine
-                        } else {
-                                c->secAction = &service_grobuf;
-                        }
+#ifdef HAVE_RECVMMSG
+                        c->secAction = &service_recvmmsg;
 #else
                         c->secAction = &service_loadpdu;
 #endif
@@ -1131,15 +1124,8 @@ int service_actresp(int connindex) {
                 testtype      = DSTEST_TEXT;
                 c->rttMinimum = INITIAL_MIN_DELAY;
                 c->rttSample  = INITIAL_MIN_DELAY;
-#ifdef HAVE_GRO
-                var = 1;
-                if (setsockopt(c->fd, IPPROTO_UDP, UDP_GRO, &var, sizeof(var)) < 0) {
-                        var = sprintf(scratch, "ERROR: Failure enabling GRO (%s)\n", strerror(errno));
-                        send_proc(errConn, scratch, var);
-                        c->secAction = &service_loadpdu; // Use standard receive routine
-                } else {
-                        c->secAction = &service_grobuf;
-                }
+#ifdef HAVE_RECVMMSG
+                c->secAction = &service_recvmmsg;
 #else
                 c->secAction = &service_loadpdu;
 #endif

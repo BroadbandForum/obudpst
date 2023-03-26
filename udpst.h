@@ -158,15 +158,24 @@
 #define MAX_JPAYLOAD_SIZE (MAX_JL3_PACKET - L3DG_OVERHEAD)
 #define MAX_TPAYLOAD_SIZE (MAX_TL3_PACKET - L3DG_OVERHEAD)
 //
-// Send buffer needs to contain all datagram payloads without GSO, or all segment buffers with it
+// Send buffer needs to contain all datagram payloads when not using GSO (or all segment buffers with GSO)
 //
-#define DEF_BUFFER_SIZE  65536 // Larger than IP_MAXPACKET (even boundary)
-#define MMSG_SEGMENTS    ((MAX_BURST_SIZE / (DEF_BUFFER_SIZE / MAX_JPAYLOAD_SIZE) + 1))
-#define SND_BUFFER_SIZE  (DEF_BUFFER_SIZE * MMSG_SEGMENTS)
-#define RCV_BUFFER_SIZE  (DEF_BUFFER_SIZE * MMSG_SEGMENTS)
-#define UDP_MAX_SEGMENTS (1 << 6)
-#define GSOGRO_CMSG_LEN  (CMSG_LEN(sizeof(uint16_t)))   // Level SOL_UDP, type UDP_SEGMENT/UDP_GRO
-#define GSOGRO_CMSG_SIZE (CMSG_SPACE(sizeof(uint16_t))) // Level SOL_UDP, type UDP_SEGMENT/UDP_GRO
+#define DEF_BUFFER_SIZE 65536 // Larger than IP_MAXPACKET (with even boundary)
+#define MMSG_SEGMENTS   ((MAX_BURST_SIZE / (DEF_BUFFER_SIZE / MAX_JPAYLOAD_SIZE) + 1))
+#define SND_BUFFER_SIZE (DEF_BUFFER_SIZE * MMSG_SEGMENTS)
+#define GSO_CMSG_LEN    (CMSG_LEN(sizeof(uint16_t)))
+#define GSO_CMSG_SIZE   (CMSG_SPACE(sizeof(uint16_t)))
+#ifndef UDP_MAX_SEGMENTS
+#define UDP_MAX_SEGMENTS (1 << 6UL)
+#endif
+//
+// Receive buffer is used to read RECVMMSG_SIZE messages (of size RCV_HEADER_SIZE) when using recvmmsg()
+//   Limit: RECVMMSG_SIZE <= DEF_BUFFER_SIZE / RCV_HEADER_SIZE
+//   Suggested: RECVMMSG_SIZE >= (DEF_SOCKET_BUF * 2) / MAX_JPAYLOAD_SIZE
+//
+#define RCV_BUFFER_SIZE DEF_BUFFER_SIZE
+#define RCV_HEADER_SIZE ((((sizeof(struct loadHdr) - 1) / 4) + 1) * 4) // Enforce 32-bit boundary
+#define RECVMMSG_SIZE   256
 
 //----------------------------------------------------------------------------
 //
@@ -277,10 +286,8 @@ struct repository {
         char *defBuffer;                      // Default buffer for general I/O
         char *randData;                       // Randomized seed data
         char *sndBufRand;                     // Send buffer for randomized load PDUs
-        char *rcvDataPtr;                     // Received data pointer used with GRO
+        char *rcvDataPtr;                     // Received data pointer for load PDUs
         int rcvDataSize;                      // Received data size in default buffer
-        int rcvBlkSize[MMSG_SEGMENTS];        // Received block size with GRO
-        int rcvSegSize[MMSG_SEGMENTS];        // Received segment size with GRO
         struct sockaddr_storage remSas;       // Remote IP sockaddr storage
         socklen_t remSasLen;                  // Remote IP sockaddr storage length
         BOOL isServer;                        // Execute as server
