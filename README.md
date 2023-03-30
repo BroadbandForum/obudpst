@@ -6,7 +6,7 @@ demonstrate one approach of doing IP capacity measurements as described by:
 Related Metrics, and Measurements_, BBF TR-471,
 https://www.broadband-forum.org/technical/download/TR-471.pdf
 
-- ITU-T Recommendation Y.1540 (12/2019): _Internet protocol data communication
+- ITU-T Recommendation Y.1540 (revised 03/2023): _Internet protocol data communication
 service - IP packet transfer and availability performance parameters_,
 ITU-T Y.1540, https://www.itu.int/rec/T-REC-Y.1540-201912-I/en 
    
