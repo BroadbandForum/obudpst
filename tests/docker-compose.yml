@@ -11,6 +11,8 @@ services:
       - MAX_TESTPORT=40005
       - NETEM_COMMAND=${DOWN_NETEM_COMMAND}
       - UDPST_COMMAND=${SERVER_ARGS}
+    networks:
+      - udpst_testing
   client:
     build: 
       context: ../.
@@ -22,5 +24,12 @@ services:
         - MAX_TESTPORT=40005
         - NETEM_COMMAND=${UP_NETEM_COMMAND}
         - UDPST_COMMAND=${CLIENT_ARGS}
+    networks:
+      - udpst_testing
     depends_on: 
       - server
+networks:
+  udpst_testing:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 9000
