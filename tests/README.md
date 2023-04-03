@@ -21,7 +21,7 @@ file.  Each test case definition provides three key components:
 The server and client commands **MUST** include the appropriate flags to run as the
 expected mode. For example, the `client-cli` command flags **MUST** include `"-d"` or
 `"-d server"` to run in the client mode. Additionally the `client-cli` value **MUST**
-include `"-f -json"` if metrics are defined for a specific test case within `test_cases.yaml`
+include `"-f json"` if metrics are defined for a specific test case within `test_cases.yaml`
 
 The system running the test must provide a set of requirements, including:
 
@@ -193,7 +193,7 @@ logical AND operation is applied across multiple metrics defined within a single
 case.
 
 The context that a metric expression is evaluated in contains a `results` dictionary that
-is the loaded result of the JSON output from UDP-ST and a `test_case` dictionary that is
+is the loaded result of the JSON output from UDPST and a `test_case` dictionary that is
 the loaded test case from `test_cases.yaml`
 
 An example of the `results` dictionary is shown here:
