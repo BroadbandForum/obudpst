@@ -13,8 +13,6 @@ string. It is the responsibility of the individual creating the test cases to en
 follows the right schema. Future work might employ schema validation prior to this function
 being called.
 """
-from types import NoneType
-
 
 def getNetemOpts(case):
     if 'netem' in case.keys():
