@@ -13,6 +13,7 @@ the client and one or more server instances (i.e., distributed servers). Additio
 * Randomizing the start of load PDU generation (to better support multiple connections)
 * Enhancing socket receive processing to provide load balancing of epoll events (to better support multiple connections)
 * Adding GSO (Generic Segmentation Offload) and RecvMMsg()+Truncation performance optimizations
+* Adding optional rate limiting for server scale testing
 
 *With these changes, new fields were required in the setup and load PDUs. As a result,
 both the current and minimum protocol version needed to be bumped to 10.*

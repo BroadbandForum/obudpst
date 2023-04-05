@@ -68,6 +68,7 @@
  * Len Ciavattone          01/14/2023    Add multi-connection support
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
+ * Len Ciavattone          04/04/2023    Add optional rate limiting
  *
  */
 
@@ -1389,6 +1390,44 @@ int adjust_sending_rate(int connindex) {
                         }
                 }
         }
+#ifdef RATE_LIMITING
+        //
+        // Perform rate limiting when bandwidth management is used (-B mbps) by limiting the maximum sending rate index
+        //
+        // NOTE: This is for test purposes only and only needs to be enabled on the server. It is intended for testing
+        // speeds below the actual achievable maximum, generally as part of server scale testing. For example, simulating
+        // low-speed tests when the client and server are actually connected via high speed.
+        //
+        if (c->maxBandwidth > 0) {
+                //
+                // Enforce limit directly when index is equal to bandwidth, else find sending rate index that covers bandwidth
+                //
+                int i = c->maxBandwidth, bw = c->maxBandwidth;
+                if (c->maxBandwidth > 1000) { // If index != bandwidth
+                        struct sendingRate *sr;
+                        for (i = 1001, sr = &repo.sendingRates[i]; i < repo.maxSendingRates; i++, sr++) {
+                                bw = 0; // Simplified bandwidth calculation (random sizes ignored)
+                                if (sr->txInterval1 > 0)
+                                        bw += ((sr->udpPayload1 + L3DG_OVERHEAD) * sr->burstSize1 * 8) / sr->txInterval1;
+                                if (sr->txInterval2 > 0) {
+                                        if (sr->udpPayload2 > 0)
+                                                bw += ((sr->udpPayload2 + L3DG_OVERHEAD) * sr->burstSize2 * 8) / sr->txInterval2;
+                                        if (sr->udpAddon2 > 0)
+                                                bw += ((sr->udpAddon2 + L3DG_OVERHEAD) * 8) / sr->txInterval2;
+                                }
+                                if (bw >= c->maxBandwidth)
+                                        break;
+                        }
+                }
+                if (c->srIndex > i) // Enforce limit
+                        c->srIndex = i;
+                if (conf.verbose && c->spduSeqNo == 1) { // Generate notification once per test
+                        var = sprintf(scratch, "[%d]RATE_LIMITING: Rate adjustment limited to sending rate index %d (%d Mbps)\n",
+                                      connindex, i, bw);
+                        send_proc(errConn, scratch, var);
+                }
+        }
+#endif // RATE_LIMITING
 
         //
         // Output debug messages if configured

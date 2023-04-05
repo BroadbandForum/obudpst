@@ -432,6 +432,27 @@ will proceed normally.
 algorithm in any way. It only provides test admission control to better manage
 the server's network bandwidth.*
 
+**Rate Limiting (Optional)**
+
+To assist with server scale testing, an optional mode is available where each
+test is limited to the bandwidth requested via the bandwidth management option
+`-B mbps`. This allows tests to ramp-up normally, but limits the maximum
+sending rate index possible with the rate adjustment algorithm. This simulates
+a test limited by a client's "provisioned" speed, even though it may be
+connected to the server(s) at a much higher speed. And because the rate 
+adjustment algorithm only executes on the server, this functionality only needs
+to be enabled on the server to take effect (where a notification message is
+generated for each test that is rate limited). To enable this mode of operation
+on the server(s): 
+```
+$ cmake -D RATE_LIMITING=ON .
+```
+
+*Note: Sending rates above the high-speed threshold (1 Gbps) are much less
+granular than sending rates below it. Also, aggregate rates may end up slightly
+below requested rates due to the traffic pattern and enforced limit of the
+maximum sending rate a connection is limited to.*
+
 ## Increasing the Starting Sending Rate (Considerations)
 While the `-I index` option designates a fixed sending rate, it is also possible
 to set the starting rate with load adjustment enabled. Option `-I @index` allows

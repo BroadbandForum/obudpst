@@ -77,6 +77,7 @@ OPTION(DISABLE_INT_TIMER "Disable the timer for systems which don't provide the 
 OPTION(HAVE_SENDMMSG "Enable/Disable use of SendMMsg()" ON)
 OPTION(HAVE_RECVMMSG "Enable/Disable use of RecvMMsg()" ON)
 OPTION(HAVE_GSO "Enable/Disable use of Generic Segmentation Offload (GSO)" ON)
+OPTION(RATE_LIMITING "Enable/Disable rate limiting via bandwidth management" OFF)
 
 add_definitions(-DSYSCONFDIR=\"${CMAKE_INSTALL_PREFIX}/etc\")
 add_definitions(-DLOCALSTATEDIR=\"${CMAKE_INSTALL_PREFIX}/var/lib\")

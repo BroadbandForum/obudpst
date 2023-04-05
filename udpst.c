@@ -63,6 +63,7 @@
  *                                       clock updates based on rx packets
  * Len Ciavattone          03/04/2023    Load balance returned epoll events
  * Len Ciavattone          03/22/2023    Add optimization output to banner
+ * Len Ciavattone          04/04/2023    Add optional rate limiting to banner
  *
  */
 
@@ -240,8 +241,12 @@ int main(int argc, char **argv) {
                         var += sprintf(&scratch[var], ", Protocol Ver: %d-%d", PROTOCOL_MIN, PROTOCOL_VER);
                 else
                         var += sprintf(&scratch[var], ", Protocol Ver: %d", PROTOCOL_VER); // Client is always the latest
-                var += sprintf(&scratch[var], ", Built: " __DATE__ " " __TIME__ "\n");
-                var = write(outputfd, scratch, var);
+                var += sprintf(&scratch[var], ", Built: " __DATE__ " " __TIME__);
+#ifdef RATE_LIMITING
+                var += sprintf(&scratch[var], ", Rate Limiting via '-B mbps'");
+#endif // RATE_LIMITING
+                scratch[var++] = '\n';
+                var            = write(outputfd, scratch, var);
                 //
                 var = 0;
                 if (conf.ipv6Only)

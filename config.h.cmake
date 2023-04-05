@@ -17,5 +17,6 @@
 #cmakedefine HAVE_GSO
 #cmakedefine HAVE_RECVMMSG
 #cmakedefine DISABLE_INT_TIMER
+#cmakedefine RATE_LIMITING
 
 #endif /* CONFIG_H */
