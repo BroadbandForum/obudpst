@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2023-03-25: [UDPST 8.0.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.0.0)
+# 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.0.0)
 
 The primary new feature in this release is support for multiple connections (UDP flows) between
 the client and one or more server instances (i.e., distributed servers). Additionally,...
@@ -14,6 +14,7 @@ the client and one or more server instances (i.e., distributed servers). Additio
 * Enhancing socket receive processing to provide load balancing of epoll events (to better support multiple connections)
 * Adding GSO (Generic Segmentation Offload) and RecvMMsg()+Truncation performance optimizations
 * Adding optional rate limiting for server scale testing
+* Creation of framework to support automated functional tests via Docker containers and NetEm
 
 *With these changes, new fields were required in the setup and load PDUs. As a result,
 both the current and minimum protocol version needed to be bumped to 10.*
