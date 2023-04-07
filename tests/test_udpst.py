@@ -39,16 +39,14 @@
 # --------------------    ----------    ----------------------------------
 # UNH-IOL Team            08/19/2022    Initial creation of the CI testing
 
-import re
 import netem_parser as np
 import subprocess
-import inspect
 import json
 import os
 
-from pytest_check import check_func
 import traceback
 import pytest_check as check
+import pytest
 
 import math
 
@@ -67,7 +65,7 @@ Note, any raised exception, due to parsing json output or failed metrics,
 will cause the test case to fail and PyTest to move on to the next test
 case in the yaml configuration.
 """
-def test_udpst(testCase):
+def test_udpst(testCase, udpst_containers):
     print('Test case was: ', testCase )
 
     # Strip the test cast label from the object
@@ -164,3 +162,19 @@ Check if the actual value is within a plus/minus delta of a reference value.
 """
 def within_percent(actual_value, reference_value, percent_delta):
     return math.fabs((actual_value - reference_value) / reference_value) <= percent_delta / 100.0
+
+"""
+Pytest fixture, which is used to so we can ensure we clean up containers and images
+at the conclusion of the test session.  This ensures future sessions rebuild new
+container images and we don't test stale code.
+"""
+@pytest.fixture(scope='session')
+def udpst_containers():
+    project_name = "udpst-testing"
+    # Pre-build our containers, 
+    subprocess.Popen(["docker", "compose", "--project-name", project_name, "build"]).wait()
+    yield project_name
+    print("\nTesting Finished, cleaning up after test run.\n")
+    subprocess.Popen(["docker", "compose", "--project-name", project_name, "rm", "-f"]).wait()
+    subprocess.Popen(["docker", "image", "rm", project_name+"_client"]).wait()
+    subprocess.Popen(["docker", "image", "rm", project_name+"_server"]).wait()
