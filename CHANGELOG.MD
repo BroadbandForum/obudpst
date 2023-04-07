@@ -1,7 +1,28 @@
-# CHANGELOG.MD for udpst 7.x.0 Releases
+# CHANGELOG.MD for udpst 8.x.x Releases
 
-*The udpst utility conforms to TR-471 and TR-471 Issue 3. The latest TR-471 specification can be found at
-https://www.broadband-forum.org/technical/download/TR-471.pdf *
+*The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
+https://www.broadband-forum.org/technical/download/TR-471.pdf*
+
+# 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.0.0)
+
+The primary new feature in this release is support for multiple connections (UDP flows) between
+the client and one or more server instances (i.e., distributed servers). Additionally,...
+* Reducing the starting sending rate (for index 0) while adding support for randomized packet sizes
+* Stopping possible attacks that prevent graceful test shutdown by manipulating STOP bits in load PDUs
+* Adding an optional '-1' (dash one) flag to the command-line to have the server cleanly exit after a single test
+* Randomizing the start of load PDU generation (to better support multiple connections)
+* Enhancing socket receive processing to provide load balancing of epoll events (to better support multiple connections)
+* Adding GSO (Generic Segmentation Offload) and RecvMMsg()+Truncation performance optimizations
+* Adding optional rate limiting for server scale testing
+* Creation of framework to support automated functional tests via Docker containers and NetEm
+
+*With these changes, new fields were required in the setup and load PDUs. As a result,
+both the current and minimum protocol version needed to be bumped to 10.*
+
+# CHANGELOG.MD for udpst 7.x.x Releases
+
+*The udpst utility conforms to TR-471 (Issue 3). The latest TR-471 specification can be found at
+https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
 # 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.1)
 
@@ -10,8 +31,6 @@ This release has one new feature, which is a response to testing/experience on m
 * The team made the decision to change a default setting: UDPST will now Ignore Reordering (and duplication) in the Load Adjustment search algorithm. The Reordered and Duplicate packets are legitimate contributions to IP-Layer Capacity. The utility measures these metrics under all conditions, this only affects search processing in Type B and Type C algorithms.
 
 Also, this release makes several updates to documentation (reflecting the latest features implemented in the utility). 
-
-
 
 # 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.0)
 
@@ -62,7 +81,6 @@ test orgs. should consider changes to the default values.  In other words, the d
 provided as a starting point; any test campaign should consider whether one or more default 
 values need to be changed for their specific circumstances!
 
-
 ## 2021-07-16: [UDPST 7.2.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.2.0)
 
 This release will have the first features for compute environment adaptation:
@@ -90,5 +108,4 @@ This release addressed the following issues and new features:
 * Split implementation into a library and a frontend
 * Update References in README.MD file, as per maadolph#1 in github
 * Option to ignore out-of-order packets during Rate Adjustment
-
 

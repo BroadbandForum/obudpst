@@ -1,0 +1,211 @@
+---
+- case-1: 
+    client-cli: "client cli command options"
+    server-cli: "server cli command options"
+    netem: # full set of netem options, will not be a valid netem command
+      downstream:
+        limit: 1 # in packets
+        delay: 
+          params:
+            - 2 # in ms
+            - 3 # in ms, jitter (optional)
+            - 4 # in percent, correlation (optional)
+          distribution: normal # { uniform | normal | pareto |  paretonormal } (optional)
+          reorder: 
+            params:
+              - 5 # in percent (optional)
+              - 6 # in percent, correlation (optional)
+            gap: 7  # as an integer (optional) 
+        loss:
+          params: ecn # flag to use Explicit Congestion Notification
+          random: 8 # in percent 
+          state: 
+            - 9 # in percent, p13
+            - 10 # in percent, p31 (optional)
+            - 11 # in percent, p32 (optional)
+            - 12 # in percent, p23 (optional)
+            - 13 # in percent, p14 (optional)
+          gemodel:
+            - 14 # in percent, p
+            - 15 # in percent, r (optional)
+            - 16 # in percent, 1-h (optional)
+            - 17 # in percent, 1-k (optional)
+        corrupt: 
+          - 18 # in percent
+          - 19 # in percent, correlation (optional)
+        duplicate: 
+          - 20 # in percent
+          - 21 # in percent, correlation (optional)
+        rate:
+          - 22 # in bits per second
+          - 23 # in bytes (can be negative), packetoverhead (optional)
+          - 24 # as an unsigned integer, cellsize (optional)
+          - 25 # as an integer (can be negative), celloverhead (optional)
+        slot:
+          params:
+            - 26 # assume default is in us, min_delay
+            - 27 # assume default is in us, max_delay, (optional)
+          distribution: 
+            - normal # { uniform | normal | pareto |  paretonormal | custom} (optional)
+            - 28 # in ms, delay
+            - 29 # in ms, jitter
+          packets: 30 # in packets, (optional)
+          bytes: 31 # in bytes, (optional)
+      upstream: 
+        limit: 10 # in packets
+        delay:
+          params:
+            - 100 # in ms
+            - 10 # in ms, jitter (optional)
+            - 1 # in percent, correlation (optional)
+          distribution: normal # { uniform | normal | pareto |  paretonormal } (optional)
+          reorder:
+            params: 
+              - 25 # in percent
+              - 75 # in percent, correlation (optional)
+            gap: 4  # as an integer (optional) 
+        loss:
+          params: ecn # flag to use Explicit Congestion Notification
+          random: 0.1 # in percent 
+          state: 
+            - 1 # in percent, p13
+            - 5 # in percent, p31 (optional)
+            - 10 # in percent, p32 (optional)
+            - 50 # in percent, p23 (optional)
+            - 2 # in percent, p14 (optional)
+          gemodel:
+            - 1 # in percent, p
+            - 5 # in percent, r (optional)
+            - 10 # in percent, 1-h (optional)
+            - 10 # in percent, 1-k (optional)
+        corrupt: 
+          - 1 # in percent
+          - 3 # in percent, correlation (optional)
+        duplicate: 
+          - 1 # in percent
+          - 3 # in percent, correlation (optional)
+        rate:
+          - 1 # in bits per second
+          - 2 # in bytes (can be negative), packetoverhead (optional)
+          - 3 # as an unsigned integer, cellsize (optional)
+          - 5 # as an integer (can be negative), celloverhead (optional)
+        slot:
+          params:
+            - 800 # assume default is in us, min_delay
+            - 1000 # assume default is in us, max_delay, (optional)
+          distribution: 
+            - normal # { uniform | normal | pareto |  paretonormal | custom} (optional)
+            - 100 # in ms, delay
+            - 10 # in ms, jitter
+          packets: 10 # in packets, (optional)
+          bytes: 3 # in bytes, (optional)
+    metrics:
+      loss_lessthan_10: results["Output"]["Summary"]["DeliveredPercent"] > 90.0
+      rtt_range_consistent: results["Output"]["Summary"]["RTTMax"] - results["Output"]["Summary"]["RTTMin"] < 1.0
+- case-2: 
+    client-cli: "client cli command options round 2"
+    server-cli: "server cli command options round 2"
+    netem: # valid netem command will be produced
+      downstream:
+        delay:
+          params: 
+            - 100 # in ms
+        rate:
+          - 1 # assume default is in Mbits
+      upstream: 
+        delay: 
+          params:
+            - 100 # in ms
+        rate:
+          - 1 # assume default is in Mbits
+    metrics:
+      reordered_lessthan_delivered: results["Output"]["Summary"]["DeliveredPercent"] / 100 > results["Output"]["Summary"]["ReorderedRatioSummary"]
+- case-3: # will produce a valid netem command, numbers may not be sensical
+    client-cli: "client cli command options"
+    server-cli: "server cli command options"
+    netem:
+      downstream:
+        limit: 1 # in packets
+        delay: 
+          params:
+            - 2 # in ms
+            - 3 # in ms, jitter (optional)
+            - 4 # in percent, correlation (optional)
+          distribution: normal # { uniform | normal | pareto |  paretonormal } (optional)
+          reorder: 
+            params:
+              - 5 # in percent (optional)
+              - 6 # in percent, correlation (optional)
+            gap: 7  # as an integer (optional) 
+        loss:
+          state: 
+            - 9 # in percent, p13
+            - 10 # in percent, p31 (optional)
+            - 11 # in percent, p32 (optional)
+            - 12 # in percent, p23 (optional)
+            - 13 # in percent, p14 (optional)
+        corrupt: 
+          - 18 # in percent
+          - 19 # in percent, correlation (optional)
+        duplicate: 
+          - 20 # in percent
+          - 21 # in percent, correlation (optional)
+        rate:
+          - 22 # assume default is in Mbits
+          - 23 # in bytes (can be negative), packetoverhead (optional)
+          - 24 # as an unsigned integer, cellsize (optional)
+          - 25 # as an integer (can be negative), celloverhead (optional)
+        slot:
+          params:
+            - 26 # assume default is in us, min_delay
+            - 27 # assume default is in us, max_delay, (optional)
+          packets: 30 # in packets, (optional)
+          bytes: 31 # in bytes, (optional)
+      upstream: 
+        limit: 10 # in packets
+        delay:
+          params:
+            - 100 # in ms
+            - 10 # in ms, jitter (optional)
+            - 1 # in percent, correlation (optional)
+          distribution: normal # { uniform | normal | pareto |  paretonormal } (optional)
+          reorder:
+            params: 
+              - 25 # in percent
+              - 75 # in percent, correlation (optional)
+            gap: 4  # as an integer (optional) 
+        loss:
+          params: ecn # flag to use Explicit Congestion Notification 
+          gemodel:
+            - 1 # in percent, p
+            - 5 # in percent, r (optional)
+            - 10 # in percent, 1-h (optional)
+            - 10 # in percent, 1-k (optional)
+        corrupt: 
+          - 1 # in percent
+          - 3 # in percent, correlation (optional)
+        duplicate: 
+          - 1 # in percent
+          - 3 # in percent, correlation (optional)
+        rate:
+          - 1 # assume default is in Mbits
+          - 2 # in bytes (can be negative), packetoverhead (optional)
+          - 3 # as an unsigned integer, cellsize (optional)
+          - 5 # as an integer (can be negative), celloverhead (optional)
+        slot:
+          distribution: 
+            - normal # { uniform | normal | pareto |  paretonormal | custom} (optional)
+            - 100 # in ms, delay
+            - 10 # in ms, jitter
+          packets: 10 # in packets, (optional)
+          bytes: 3 # in bytes, (optional)
+- case-4: # example where netem key is not listed
+    client-cli: "client cli command options"
+    server-cli: "server cli command options"
+- case-5:
+    client-cli: "client cli command options"
+    server-cli: "server cli command options"
+    netem: # example where netem key is provided but only downstream is listed (upstream not listed)
+      downstream:
+        limit: 1 # in packets
+...

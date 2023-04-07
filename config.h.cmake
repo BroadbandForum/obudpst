@@ -14,6 +14,9 @@
 #cmakedefine HAVE_TIMEGM
 #cmakedefine HAVE_WORKING_FORK
 #cmakedefine HAVE_SENDMMSG
+#cmakedefine HAVE_GSO
+#cmakedefine HAVE_RECVMMSG
 #cmakedefine DISABLE_INT_TIMER
+#cmakedefine RATE_LIMITING
 
 #endif /* CONFIG_H */
