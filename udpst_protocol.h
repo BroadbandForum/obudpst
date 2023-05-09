@@ -43,16 +43,17 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 9 // Current protocol version between client and server
-#define PROTOCOL_MIN 8 // Minimum protocol version for backward compatibility
-#define BWMGMT_PVER  9 // Protocol version required for bandwidth management
+#define PROTOCOL_VER 10 // Current protocol version between client and server
+#define PROTOCOL_MIN 10 // Minimum protocol version for backward compatibility
+#define BWMGMT_PVER  9  // Protocol version required for bandwidth management
 
 //----------------------------------------------------------------------------
 //
 // Sending rate structure for a single index (row) of transmission parameters
 //
-#define MAX_BURST_SIZE    100 // Max datagram burst size
-#define MIN_INTERVAL_USEC 100 // Min interval/timer granularity (us)
+#define MAX_BURST_SIZE    100        // Max datagram burst size
+#define MIN_INTERVAL_USEC 100        // Min interval/timer granularity (us)
+#define SRATE_RAND_BIT    0x80000000 // Randomization bit (remaining contain max)
 struct sendingRate {
         uint32_t txInterval1; // Transmit interval (us)
         uint32_t udpPayload1; // UDP payload (bytes)
@@ -69,7 +70,7 @@ struct sendingRate {
 #define INITIAL_MIN_DELAY UINT32_MAX // Initial minimum delay (no data/value)
 struct subIntStats {
         uint32_t rxDatagrams; // Received datagrams
-        uint32_t rxBytes;     // Received bytes
+        uint64_t rxBytes;     // Received bytes
         uint32_t deltaTime;   // Time delta
         uint32_t seqErrLoss;  // Loss sum
         uint32_t seqErrOoo;   // Out-of-Order sum
@@ -90,6 +91,9 @@ struct controlHdrSR {
 #define CHSR_ID 0xACE1
         uint16_t controlId;   // Control ID
         uint16_t protocolVer; // Protocol version
+        uint8_t mcIndex;      // Multi-connection index
+        uint8_t mcCount;      // Multi-connection count
+        uint16_t mcIdent;     // Multi-connection identifier
 #define CHSR_CREQ_NONE     0
 #define CHSR_CREQ_SETUPREQ 1
 #define CHSR_CREQ_SETUPRSP 2
@@ -106,6 +110,8 @@ struct controlHdrSR {
 #define CHSR_CRSP_NOMAXBW  9
 #define CHSR_CRSP_CAPEXC   10
 #define CHSR_CRSP_BADTMTU  11
+#define CHSR_CRSP_MCINVPAR 12
+#define CHSR_CRSP_CONNFAIL 13
         uint8_t cmdResponse;   // Command response
 #define CHSR_USDIR_BIT 0x8000  // Bandwidth upstream direction bit
         uint16_t maxBandwidth; // Required bandwidth (added in v9)
@@ -187,6 +193,9 @@ struct loadHdr {
         uint32_t spduTime_nsec; // Send time in last received status PDU
         uint32_t lpduTime_sec;  // Send time of this load PDU
         uint32_t lpduTime_nsec; // Send time of this load PDU
+        //
+        uint16_t rttRespDelay; // Response delay for RTT calculation (ms)
+        uint16_t reserved1;    // (Alignment)
 };
 //----------------------------------------------------------------------------
 //

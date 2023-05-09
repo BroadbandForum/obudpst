@@ -1,24 +1,43 @@
 {
-	"IPLayerMaxConnections":	1,
+	"IPLayerMaxConnections":	24,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"7.4.0",
-		"ControlProtocolVersion":	9,
+		"SoftwareVersion":	"8.0.0",
+		"ControlProtocolVersion":	10,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"Input":	{
 		"Interface":	"",
 		"Role":	"Receiver",
-		"Host":	"test-server.com",
-		"Port":	48879,
-		"HostIPAddress":	"1.2.3.4",
-		"ClientIPAddress":	"10.0.0.226",
-		"ClientPort":	49167,
+		"Host":	"test-server1.com",
+		"HostIPAddress":	"10.0.0.1",
+		"Port":	38513,
+		"NumberOfHosts":	4,
+		"HostList":	[{
+				"Host":	"test-server1.com",
+				"HostIPAddress":	"10.0.0.1",
+				"ControlPort":	25000
+			}, {
+				"Host":	"test-server2.com",
+				"HostIPAddress":	"10.0.0.2",
+				"ControlPort":	25000
+			}, {
+				"Host":	"test-server3.com",
+				"HostIPAddress":	"10.0.0.3",
+				"ControlPort":	25000
+			}, {
+				"Host":	"test-server4.com",
+				"HostIPAddress":	"10.0.0.4",
+				"ControlPort":	25000
+			}],
+		"ClientIPAddress":	"192.168.1.192",
+		"ClientPort":	45546,
 		"JumboFramesPermitted":	1,
-		"NumberOfConnections":	1,
+		"NumberOfConnections":	4,
+		"MinNumOfConnections":	4,
 		"DSCP":	0,
 		"ProtocolVersion":	"Any",
-		"UDPPayloadMin":	35,
+		"UDPPayloadMin":	52,
 		"UDPPayloadMax":	8972,
 		"UDPPayloadDefault":	1222,
 		"UDPPayloadContent":	"zeroes",
@@ -39,7 +58,7 @@
 		"TmaxRTT":	3000,
 		"TimestampResolution":	1,
 		"SeqErrThresh":	10,
-		"ReordDupIgnoreEnable":	0,
+		"ReordDupIgnoreEnable":	1,
 		"LowerThresh":	30,
 		"UpperThresh":	90,
 		"HighSpeedDelta":	10,
@@ -48,14 +67,14 @@
 		"RateAdjAlgorithm":	"B"
 	},
 	"Output":	{
-		"BOMTime":	"2021-11-08T16:42:48.379676Z",
+		"BOMTime":	"2023-03-06T17:04:19.003175Z",
 		"TmaxUsed":	1000,
 		"TestInterval":	10,
 		"TmaxRTTUsed":	3000,
 		"TimestampResolutionUsed":	1,
-		"EOMTime":	"2021-11-08T16:42:54.383006Z",
+		"EOMTime":	"2023-03-06T17:04:27.213064Z",
 		"Status":	"Error_Other"
 	},
-	"ErrorStatus":	1,
-	"ErrorMessage":	"LOCAL WARNING: Incoming traffic has completely stopped"
+	"ErrorStatus":	-1,
+	"ErrorMessage":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 10.0.0.3:25000]"
 }

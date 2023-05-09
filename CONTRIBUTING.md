@@ -25,6 +25,6 @@ For any build considerations, please refer to the README.
 
 ## Contributor License Agreement
 
-Thank you for your interest in participating in the OB-UDPST open source project. Please print, complete, and sign the below PDF document, then scan and email a PDF file of the signed Agreement to [rmersh@broadband-forum.org](mailto:rmersh@broadband-forum.org). If necessary, send an original signed Agreement to Broadband Forum - 5177 Brandin Court - Fremont, CA 94538 - USA.
+Any company or individual interested in participating in this open source project must sign a Contributor License Agreement (more details [here](https://wiki.broadband-forum.org/pages/viewpage.action?pageId=87557395)).
 
 Download the Agreement from here: [OB-UDPST Project CLA](https://wiki.broadband-forum.org/pages/viewpage.action?pageId=95945137)

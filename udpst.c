@@ -57,6 +57,13 @@
  * Len Ciavattone          12/17/2021    Add payload randomization
  * Len Ciavattone          12/21/2021    Add traditional (1500 byte) MTU
  * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
+ * Len Ciavattone          12/29/2022    Add single test option on server
+ * Len Ciavattone          01/14/2023    Add multi-connection support
+ * Len Ciavattone          02/14/2023    Add per-server port selection and
+ *                                       clock updates based on rx packets
+ * Len Ciavattone          03/04/2023    Load balance returned epoll events
+ * Len Ciavattone          03/22/2023    Add optimization output to banner
+ * Len Ciavattone          04/04/2023    Add optional rate limiting to banner
  *
  */
 
@@ -106,23 +113,26 @@ void signal_alrm(int);
 void signal_exit(int);
 int proc_parameters(int, char **, int);
 int param_error(int, int, int);
-int json_finish(int);
+int json_finish(void);
 
 //----------------------------------------------------------------------------
 //
 // Global data
 //
-int errConn = -1, monConn = -1;            // Error and monitoring connections
-char scratch[STRING_SIZE];                 // General purpose scratch buffer
-struct configuration conf;                 // Configuration data structure
-struct repository repo;                    // Repository of global data
-struct connection *conn;                   // Connection table (array)
-static volatile sig_atomic_t sig_alrm = 0; // Interrupt indicator
-static volatile sig_atomic_t sig_exit = 0; // Interrupt indicator
-char *boolText[]                      = {"Disabled", "Enabled"};
-char *rateAdjAlgo[]                   = {"B", "C"}; // Aligned to CHTA_RA_ALGO_x
+#define ENDTEXT_BASIC "[%d]End time reached"
+#define ENDTEXT_NEWBW ENDTEXT_BASIC " (New USBW: %d, DSBW: %d)\n"
+int errConn = -1, monConn = -1, aggConn = -1; // Error, monitoring, and aggregate
+char scratch[STRING_SIZE];                    // General purpose scratch buffer
+struct configuration conf;                    // Configuration data structure
+struct repository repo;                       // Repository of global data
+struct connection *conn;                      // Connection table (array)
+static volatile sig_atomic_t sig_alrm = 0;    // Interrupt indicator
+static volatile sig_atomic_t sig_exit = 0;    // Interrupt indicator
+struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
+char *boolText[]    = {"Disabled", "Enabled"};
+char *rateAdjAlgo[] = {"B", "C"}; // Aligned to CHTA_RA_ALGO_x
 //
-cJSON *json_top = NULL, *json_output = NULL;
+cJSON *json_top = NULL, *json_output = NULL, *json_siArray = NULL;
 char json_errbuf[STRING_SIZE];
 
 //----------------------------------------------------------------------------
@@ -133,11 +143,10 @@ char json_errbuf[STRING_SIZE];
 //
 int main(int argc, char **argv) {
         pid_t pid;
-        int i, j, var, var2, readyfds, pristatus, secstatus, fd = -1;
+        int i, j, var, var2, readyfds, fdpass, pristatus, secstatus;
         int appstatus = 0, outputfd = STDOUT_FILENO, logfilefd = -1;
         struct itimerval itime;
         struct sigaction saction;
-        struct epoll_event epoll_events[MAX_EPOLL_EVENTS];
         struct stat statbuf;
 
         //
@@ -232,8 +241,12 @@ int main(int argc, char **argv) {
                         var += sprintf(&scratch[var], ", Protocol Ver: %d-%d", PROTOCOL_MIN, PROTOCOL_VER);
                 else
                         var += sprintf(&scratch[var], ", Protocol Ver: %d", PROTOCOL_VER); // Client is always the latest
-                var += sprintf(&scratch[var], ", Built: " __DATE__ " " __TIME__ "\n");
-                var = write(outputfd, scratch, var);
+                var += sprintf(&scratch[var], ", Built: " __DATE__ " " __TIME__);
+#ifdef RATE_LIMITING
+                var += sprintf(&scratch[var], ", Rate Limiting via '-B mbps'");
+#endif // RATE_LIMITING
+                scratch[var++] = '\n';
+                var            = write(outputfd, scratch, var);
                 //
                 var = 0;
                 if (conf.ipv6Only)
@@ -254,19 +267,25 @@ int main(int argc, char **argv) {
                 var += sprintf(&scratch[var], ", Authentication: Available");
 #else
                 var += sprintf(&scratch[var], ", Authentication: Unavailable");
-#endif
+#endif // AUTH_KEY_ENABLE
+                var += sprintf(&scratch[var], ", Optimizations:");
 #ifdef HAVE_SENDMMSG
-                var += sprintf(&scratch[var], ", SendMMsg(): Available\n");
-#else
-                var += sprintf(&scratch[var], ", SendMMsg(): Unavailable\n");
-#endif
-                var = write(outputfd, scratch, var);
+                var += sprintf(&scratch[var], " SendMMsg()");
+#ifdef HAVE_GSO
+                var += sprintf(&scratch[var], "+GSO");
+#endif // HAVE_GSO
+#endif // HAVE_SENDMMSG
+#ifdef HAVE_RECVMMSG
+                var += sprintf(&scratch[var], " RecvMMsg()+Trunc");
+#endif // HAVE_RECVMMSG
+                scratch[var++] = '\n';
+                var            = write(outputfd, scratch, var);
         } else {
                 //
                 // Add initial items to top-level object
                 //
                 if (!conf.jsonBrief) {
-                        cJSON_AddNumberToObject(json_top, "IPLayerMaxConnections", 1);
+                        cJSON_AddNumberToObject(json_top, "IPLayerMaxConnections", MAX_MC_COUNT);
                         cJSON_AddNumberToObject(json_top, "IPLayerMaxIncrementalResult", MAX_TESTINT_TIME / MIN_SUBINT_PERIOD);
                         cJSON *json_supported = cJSON_CreateObject();
                         cJSON_AddStringToObject(json_supported, "SoftwareVersion", SOFTWARE_VER);
@@ -281,17 +300,17 @@ int main(int argc, char **argv) {
         //
         repo.sendingRates = calloc(1, MAX_SENDING_RATES * sizeof(struct sendingRate));
         repo.sndBuffer    = calloc(1, SND_BUFFER_SIZE);
-        repo.defBuffer    = calloc(1, DEF_BUFFER_SIZE);
+        repo.defBuffer    = calloc(1, RCV_BUFFER_SIZE);
         repo.randData     = malloc(MAX_JPAYLOAD_SIZE);
         repo.sndBufRand   = malloc(SND_BUFFER_SIZE);
-        conn              = malloc(MAX_CONNECTIONS * sizeof(struct connection));
+        conn              = malloc(conf.maxConnections * sizeof(struct connection));
         if (repo.sendingRates == NULL || repo.sndBuffer == NULL || repo.defBuffer == NULL || repo.randData == NULL ||
             repo.sndBufRand == NULL || conn == NULL) {
                 var = sprintf(scratch, "ERROR: Memory allocation(s) failed\n");
                 var = write(outputfd, scratch, var);
                 return -1;
         }
-        for (i = 0; i < MAX_CONNECTIONS; i++)
+        for (i = 0; i < conf.maxConnections; i++)
                 init_conn(i, FALSE);
         for (i = 0; i < MAX_JPAYLOAD_SIZE / sizeof(int); i++)
                 ((int *) repo.randData)[i] = random();
@@ -423,13 +442,15 @@ int main(int argc, char **argv) {
                 errConn = new_conn(var, NULL, 0, var2, &recv_proc, &null_action);
                 if (conf.verbose)
                         monConn = errConn;
+                if (!repo.isServer)
+                        aggConn = errConn; // Use initial connection as aggregate connection
         }
 
         //
-        // If specified, validate server IP or resolve name into IP
+        // If specified, validate server IP addresses or resolve names into IP addresses
         //
-        if (repo.serverName != NULL) {
-                if ((var = sock_mgmt(-1, repo.serverName, 0, repo.serverIp, SMA_LOOKUP)) != 0) {
+        for (i = 0; i < repo.serverCount; i++) {
+                if ((var = sock_mgmt(-1, repo.server[i].name, 0, repo.server[i].ip, SMA_LOOKUP)) != 0) {
                         send_proc(errConn, scratch, var);
                         appstatus = -1;
                         if (!repo.isServer && conf.jsonOutput) {
@@ -437,42 +458,48 @@ int main(int argc, char **argv) {
                         } else {
                                 sig_exit = 1;
                         }
+                        break;
                 }
         }
 
         //
         // If server, create a connection for control port to process inbound setup requests,
-        // else create a connection for client testing and send setup request to server
+        // else create connections for client testing and send setup requests to server(s)
         //
         if (appstatus == 0) {
                 if (repo.isServer) {
-                        if ((i = new_conn(-1, repo.serverIp, conf.controlPort, T_UDP, &recv_proc, &service_setupreq)) < 0) {
+                        if ((i = new_conn(-1, repo.server[0].ip, repo.server[0].port, T_UDP, &recv_proc, &service_setupreq)) < 0) {
                                 appstatus = -1;
-                                if (!repo.isServer && conf.jsonOutput) {
-                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
-                                } else {
-                                        sig_exit = 1;
-                                }
-                        } else if (monConn >= 0) {
+                                sig_exit  = 1;
+                        } else if (conf.verbose) {
                                 var =
                                     sprintf(scratch, "[%d]Awaiting setup requests on %s:%d\n", i, conn[i].locAddr, conn[i].locPort);
                                 send_proc(monConn, scratch, var);
                         }
+                        if (conf.oneTest)
+                                appstatus = -1; // Default to hard error, require explicit end time status success
                 } else {
-                        if ((i = new_conn(-1, NULL, 0, T_UDP, &recv_proc, &service_setupresp)) < 0) {
-                                appstatus = -1;
-                                if (!repo.isServer && conf.jsonOutput) {
-                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
-                                } else {
-                                        sig_exit = 1;
+                        var2 = 0; // Server index (distribute connections across servers)
+                        for (j = 0; j < conf.maxConnCount; j++) {
+                                if ((i = new_conn(-1, NULL, 0, T_UDP, &recv_proc, &service_setupresp)) < 0) {
+                                        appstatus = -1;
+                                        if (conf.jsonOutput) {
+                                                tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                                        } else {
+                                                sig_exit = 1;
+                                        }
+                                        break;
+                                } else if (send_setupreq(i, j, var2) < 0) {
+                                        appstatus = -1;
+                                        if (conf.jsonOutput) {
+                                                tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
+                                        } else {
+                                                sig_exit = 1;
+                                        }
+                                        break;
                                 }
-                        } else if (send_setupreq(i) < 0) {
-                                appstatus = -1;
-                                if (!repo.isServer && conf.jsonOutput) {
-                                        tspeccpy(&conn[errConn].endTime, &repo.systemClock); // Schedule immediate exit
-                                } else {
-                                        sig_exit = 1;
-                                }
+                                if (++var2 >= repo.serverCount) // Step to next server and restart list when needed
+                                        var2 = 0;
                         }
                 }
         }
@@ -496,40 +523,57 @@ int main(int argc, char **argv) {
                 // Process FD(s)
                 //
                 if (readyfds > 0) {
-                        //
-                        // Update local copy of system time clock
-                        //
-                        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
+                        fdpass = 0;
+                        do {
+                                //
+                                // Do single read (up to RECVMMSG_SIZE) from each ready FD
+                                //
+                                var2 = 0; // Track if any data is read on this pass
+                                for (j = 0; j < readyfds; j++) {
+                                        //
+                                        // Extract connection from user data
+                                        //
+                                        i = (int) epoll_events[j].data.u32;
+                                        if (i < 0 || i > repo.maxConnIndex) {
+                                                if (fdpass == 0) {
+                                                        var = sprintf(scratch, "ERROR: Invalid epoll_wait user data %d\n", i);
+                                                        send_proc(errConn, scratch, var);
+                                                }
+                                                continue;
+                                        } else if (conn[i].fd < 0) {
+                                                if (fdpass == 0) {
+                                                        var = sprintf(scratch, "[%d]ERROR: Invalid fd (%d) from epoll_wait\n", i,
+                                                                      conn[i].fd);
+                                                        send_proc(errConn, scratch, var);
+                                                }
+                                                continue;
+                                        }
 
-                        //
-                        // Step through ready FD(s)
-                        //
-                        for (j = 0; j < readyfds; j++) {
-                                //
-                                // Extract connection from user data
-                                //
-                                i = (int) epoll_events[j].data.u32;
-                                if (i < 0 || i > repo.maxConnIndex) {
-                                        var = sprintf(scratch, "ERROR: Invalid epoll_wait user data %d\n", i);
-                                        send_proc(errConn, scratch, var);
-                                        continue;
-                                } else if ((fd = conn[i].fd) < 0) {
-                                        var = sprintf(scratch, "[%d]ERROR: Invalid fd %d from epoll_wait\n", i, fd);
-                                        send_proc(errConn, scratch, var);
-                                        continue;
-                                }
+                                        //
+                                        // Set connection as data ready on first pass, else check if all data has been read
+                                        //
+                                        if (fdpass == 0) {
+                                                conn[i].dataReady = TRUE;
+                                        } else if (!conn[i].dataReady) {
+                                                continue; // Nothing to do for this connection
+                                        }
 
-                                //
-                                // Call connection action routines
-                                //
-                                do {
+                                        //
+                                        // Update local copy of system time clock
+                                        //
+                                        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
+
                                         //
                                         // Execute primary and secondary actions
                                         //
                                         secstatus = 0;
                                         pristatus = (conn[i].priAction)(i);
-                                        if (pristatus > 0)
+                                        if (pristatus > 0) {
+                                                var2++; // Indicate data was read on this pass
                                                 secstatus = (conn[i].secAction)(i);
+                                        } else if (pristatus == 0) {
+                                                conn[i].dataReady = FALSE; // Indicate all data has been read from this connection
+                                        }
 
                                         //
                                         // Check for close/cleanup request
@@ -537,14 +581,13 @@ int main(int argc, char **argv) {
                                         if ((pristatus < 0) || (secstatus < 0)) {
                                                 init_conn(i, TRUE);
                                         }
-                                } while (pristatus > 0 && secstatus == 0); // Process until empty
-
-                                //
-                                // Check for exit
-                                //
+                                        if (sig_exit)
+                                                break;
+                                }
+                                fdpass++;
                                 if (sig_exit)
                                         break;
-                        }
+                        } while (var2 > 0 && sig_alrm == 0); // Do another pass if any data was read AND alarm hasn't fired
                 }
 
                 //
@@ -570,33 +613,46 @@ int main(int argc, char **argv) {
                                 //
                                 if (tspecisset(&conn[i].endTime)) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].endTime, >)) {
-                                                if (monConn >= 0) {
-                                                        var = sprintf(scratch, "[%d]End time reached\n", i);
-                                                }
                                                 if (repo.isServer) {
-                                                        // Adjust current upstream/downstream bandwidth
-                                                        if (conn[i].testType == TEST_TYPE_US) {
-                                                                if ((repo.usBandwidth -= conn[i].maxBandwidth) < 0)
-                                                                        repo.usBandwidth = 0;
-                                                        } else {
-                                                                if ((repo.dsBandwidth -= conn[i].maxBandwidth) < 0)
-                                                                        repo.dsBandwidth = 0;
+                                                        if (conf.maxBandwidth > 0) {
+                                                                // Adjust current upstream/downstream bandwidth
+                                                                if (conn[i].testType == TEST_TYPE_US) {
+                                                                        if ((repo.usBandwidth -= conn[i].maxBandwidth) < 0)
+                                                                                repo.usBandwidth = 0;
+                                                                } else {
+                                                                        if ((repo.dsBandwidth -= conn[i].maxBandwidth) < 0)
+                                                                                repo.dsBandwidth = 0;
+                                                                }
+                                                                if (conf.verbose) {
+                                                                        var = sprintf(scratch, ENDTEXT_NEWBW, i, repo.usBandwidth,
+                                                                                      repo.dsBandwidth);
+                                                                        send_proc(monConn, scratch, var);
+                                                                }
+                                                        } else if (conf.verbose) {
+                                                                var = sprintf(scratch, ENDTEXT_BASIC "\n", i);
+                                                                send_proc(monConn, scratch, var);
                                                         }
-                                                        if (monConn >= 0) { // Add new bandwidth values for tracking
-                                                                var += sprintf(&scratch[var - 1], " (New USBW: %d, DSBW: %d)\n",
-                                                                               repo.usBandwidth, repo.dsBandwidth);
+                                                        if (conf.oneTest) { // Shutdown server after one test
+                                                                appstatus = repo.endTimeStatus;
+                                                                sig_exit  = 1;
                                                         }
                                                 } else {
-                                                        // Finalize JSON processing
-                                                        if (conf.jsonOutput) {
-                                                                appstatus = json_finish(i);
-                                                        } else {
-                                                                appstatus = repo.endTimeStatus;
+                                                        if (i == aggConn) {
+                                                                if (conf.jsonOutput) {
+                                                                        appstatus = json_finish(); // Finalize JSON processing
+                                                                } else {
+                                                                        appstatus = repo.endTimeStatus;
+                                                                }
+                                                                sig_exit = 1;
+                                                        } else if (conn[i].testAction == TEST_ACT_TEST) {
+                                                                // Decrement active test count if closed while active
+                                                                if (--repo.actConnCount < 0)
+                                                                        repo.actConnCount = 0;
                                                         }
-                                                        sig_exit = 1;
-                                                }
-                                                if (monConn >= 0) {
-                                                        send_proc(monConn, scratch, var);
+                                                        if (conf.verbose) {
+                                                                var = sprintf(scratch, ENDTEXT_BASIC "\n", i);
+                                                                send_proc(monConn, scratch, var);
+                                                        }
                                                 }
                                                 init_conn(i, TRUE);
                                                 continue;
@@ -612,20 +668,27 @@ int main(int argc, char **argv) {
                                 //
                                 // Process timer action routines using elapsed time
                                 //
+                                var2 = 0;
                                 if (tspecisset(&conn[i].timer1Thresh)) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].timer1Thresh, >)) {
                                                 (conn[i].timer1Action)(i);
+                                                var2++;
                                         }
                                 }
                                 if (tspecisset(&conn[i].timer2Thresh)) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].timer2Thresh, >)) {
                                                 (conn[i].timer2Action)(i);
+                                                var2++;
                                         }
                                 }
                                 if (tspecisset(&conn[i].timer3Thresh)) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].timer3Thresh, >)) {
                                                 (conn[i].timer3Action)(i);
+                                                var2++;
                                         }
+                                }
+                                if (var2 > 0) { // Update local copy of system time clock if work was done
+                                        clock_gettime(CLOCK_REALTIME, &repo.systemClock);
                                 }
                         }
                 }
@@ -638,6 +701,8 @@ int main(int argc, char **argv) {
                 close(logfilefd);
         if (repo.epollFD >= 0)
                 close(repo.epollFD);
+        if (repo.intfFD >= 0)
+                close(repo.intfFD);
 
         //
         // Cleanup and free memory
@@ -697,8 +762,8 @@ void signal_exit(int signal) {
 // Process command-line parameters
 //
 int proc_parameters(int argc, char **argv, int fd) {
-        int i, var, value;
-        char *lbuf, *optstring = "ud46xevsf:jTDXSB:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
+        int i, j, var, value;
+        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSB:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -707,10 +772,11 @@ int proc_parameters(int argc, char **argv, int fd) {
         memset(&repo, 0, sizeof(repo));
 
         //
-        // Parse direction parameters
+        // Parse direction and port number parameters
         //
-        value  = opterr;
-        opterr = 0;
+        value            = opterr;
+        opterr           = 0;
+        conf.controlPort = DEF_CONTROL_PORT;
         while ((i = getopt(argc, argv, optstring)) != -1) {
                 switch (i) {
                 case 'u':
@@ -719,18 +785,62 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 'd':
                         conf.dsTesting = TRUE;
                         break;
+                case 'p':
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_CONTROL_PORT, MAX_CONTROL_PORT)) > 0) {
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.controlPort = value;
+                        break;
                 }
         }
 
         //
-        // Save hostname/IP of server or IP of local interface on server
+        // Save hostname/IP of servers or IP of local interface on server (allow port number suffix)
         //
-        if ((optind + 1) == argc) {
-                repo.serverName = argv[optind];
-        } else if ((optind + 1) < argc) {
-                var = sprintf(scratch, "ERROR: Unexpected parameter %s\n", argv[optind + 1]);
-                var = write(fd, scratch, var);
-                return -1;
+        repo.server[0].name  = NULL;
+        repo.server[0].ip[0] = '\0';
+        repo.server[0].port  = conf.controlPort;
+        for (i = 0, j = optind; j < argc; i++, j++) {
+                if (repo.serverCount >= MAX_MC_COUNT) {
+                        var = sprintf(scratch, "ERROR: Server count exceeds maximum (%d)\n", MAX_MC_COUNT);
+                        var = write(fd, scratch, var);
+                        return -1;
+                }
+                //
+                // Parse IP address/port as: <IPv4>, <IPv4>:<port>, <IPv6>, or [<IPv6>]:<port> (see RFC5952)
+                //
+                var = 0; // A value of one indicates IP address has port suffix (anything else means no port suffix)
+                if (*argv[j] == '[') {
+                        argv[j]++; // Adjust base pointer past '['
+                        if ((lbuf = strchr(argv[j], ']')) != NULL)
+                                *lbuf++ = '\0'; // Remove trailing ']' and step to expected ':'
+                        if (lbuf == NULL || *lbuf != ':') {
+                                var = sprintf(scratch, "ERROR: Invalid format for IPv6 address with port number\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        var++;
+                } else if ((lbuf = strchr(argv[j], ':')) != NULL) {
+                        var++;
+                        if (strchr(lbuf + 1, ':') != NULL) // Check for second ':'
+                                var++;
+                }
+                value = conf.controlPort;
+                if (var == 1) { // Port suffix present
+                        if (*lbuf == ':') {
+                                *lbuf++ = '\0';       // Remove ':' and step to port number
+                                value   = atoi(lbuf); // Convert to numeric
+                                if ((var = param_error(value, MIN_CONTROL_PORT, MAX_CONTROL_PORT)) > 0) {
+                                        var = write(fd, scratch, var);
+                                        return -1;
+                                }
+                        }
+                }
+                repo.server[i].name = argv[j];
+                repo.server[i].port = value;
+                repo.serverCount++;
         }
 
         //
@@ -742,7 +852,12 @@ int proc_parameters(int argc, char **argv, int fd) {
                 return -1;
         } else if (!conf.usTesting && !conf.dsTesting) {
                 repo.isServer = TRUE;
-        } else if (repo.serverName == NULL) {
+                if (repo.serverCount > 1) {
+                        var = sprintf(scratch, "ERROR: Server only allows one local bind address or hostname\n");
+                        var = write(fd, scratch, var);
+                        return -1;
+                }
+        } else if (repo.serverCount == 0) {
                 var = sprintf(scratch, "ERROR: Server hostname or IP address required when client\n");
                 var = write(fd, scratch, var);
                 return -1;
@@ -751,7 +866,14 @@ int proc_parameters(int argc, char **argv, int fd) {
         //
         // Continue to initialize non-zero configuration data
         //
+        if (!repo.isServer) {
+                conf.maxConnections = MAX_CLIENT_CONN;
+        } else {
+                conf.maxConnections = MAX_SERVER_CONN;
+        }
         conf.addrFamily   = AF_UNSPEC;
+        conf.minConnCount = DEF_MC_COUNT;
+        conf.maxConnCount = DEF_MC_COUNT;
         conf.errSuppress  = TRUE;
         conf.jumboStatus  = DEF_JUMBO_STATUS;
         conf.rateAdjAlgo  = DEF_RA_ALGO;
@@ -769,7 +891,6 @@ int proc_parameters(int argc, char **argv, int fd) {
                 conf.testIntTime = MAX_TESTINT_TIME;
         }
         conf.subIntPeriod   = DEF_SUBINT_PERIOD;
-        conf.controlPort    = DEF_CONTROL_PORT;
         conf.sockSndBuf     = DEF_SOCKET_BUF;
         conf.sockRcvBuf     = DEF_SOCKET_BUF;
         conf.lowThresh      = DEF_LOW_THRESH;
@@ -785,6 +906,7 @@ int proc_parameters(int argc, char **argv, int fd) {
         repo.epollFD       = -1;           // No file descriptor
         repo.maxConnIndex  = -1;           // No connections allocated
         repo.endTimeStatus = STATUS_ERROR; // Default to hard error, require explicit success
+        repo.intfFD        = -1;           // No file descriptor
 
         //
         // Parse remaining parameters
@@ -801,6 +923,37 @@ int proc_parameters(int argc, char **argv, int fd) {
                         conf.addrFamily = AF_INET6;
                         conf.ipv6Only   = TRUE;
                         break;
+                case 'C':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Multi-connection count only set by client\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        if ((lbuf = strchr(optarg, '-')) != NULL)
+                                *lbuf = '\0';
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_MC_COUNT, MAX_MC_COUNT)) > 0) {
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.minConnCount = value;
+                        if (lbuf != NULL) {
+                                value = atoi(++lbuf);
+                                if ((var = param_error(value, MIN_MC_COUNT, MAX_MC_COUNT)) > 0) {
+                                        var = write(fd, scratch, var);
+                                        return -1;
+                                }
+                        } else { // No max specified
+                                if (value < repo.serverCount)
+                                        value = repo.serverCount;
+                        }
+                        if (value < repo.serverCount) {
+                                var = sprintf(scratch, "ERROR: Maximum multi-connection count must be >= server count\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.maxConnCount = value;
+                        break;
                 case 'x':
                         if (!repo.isServer) {
                                 var = sprintf(scratch, "ERROR: Execution as daemon only valid when server\n");
@@ -808,6 +961,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 return -1;
                         }
                         conf.isDaemon = TRUE;
+                        break;
+                case '1':
+                        if (!repo.isServer) {
+                                var = sprintf(scratch, "ERROR: One test execution only valid when server\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.oneTest = TRUE;
                         break;
                 case 'e':
                         conf.errSuppress = FALSE;
@@ -952,14 +1113,6 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 return -1;
                         }
                         conf.subIntPeriod = value;
-                        break;
-                case 'p':
-                        value = atoi(optarg);
-                        if ((var = param_error(value, MIN_CONTROL_PORT, MAX_CONTROL_PORT)) > 0) {
-                                var = write(fd, scratch, var);
-                                return -1;
-                        }
-                        conf.controlPort = value;
                         break;
                 case 'A':
                         if (repo.isServer) {
@@ -1108,41 +1261,43 @@ int proc_parameters(int argc, char **argv, int fd) {
                         break;
                 case '?':
                         var = sprintf(scratch,
-                                      "%s\nUsage: %s [option]... [server]\n\n"
-                                      "Specify '-u' or '-d' to test as a client (a server parameter is then required),\n"
-                                      "else run as a server and await client test requests.\n\n"
+                                      "%s\nUsage: %s [option]... [server[:<port>]]...\n\n"
+                                      "Specify '-u' or '-d' to test as a client (server parameter(s) required), else\n"
+                                      "run as a server and await client test requests (server parameter optional).\n\n"
                                       "Options:\n"
                                       "(c)    -u|-d        Test %s OR %s as client\n"
                                       "       -4           Use only IPv4 address family (AF_INET)\n"
                                       "       -6           Use only IPv6 address family (AF_INET6)\n"
+                                      "(c)    -C cnt[-max] Multi-connection count [Default %d per server]\n"
                                       "(s)    -x           Execute server as background (daemon) process\n"
+                                      "(s)    -1           Server exits after one test execution\n"
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n"
                                       "       -v           Enable verbose output messaging\n"
                                       "       -s           Summary/Max output only (no sub-interval output)\n"
                                       "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
-                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
-                                      "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
-                                      "       -D           Enable debug output messaging (requires '-v')\n",
-                                      SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT);
+                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n",
+                                      SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
+                                      "       -D           Enable debug output messaging (requires '-v')\n"
                                       "(m)    -X           Randomize datagram payload (else zeroes)\n"
                                       "       -S           Show server sending rate table and exit\n"
                                       "       -B mbps      Max bandwidth required by client OR available to server\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
                                       "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
-                                      "(c)    -R           Ignore Out-of-Order/Duplicate datagrams\n"
+                                      "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"
                                       "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
-                                      "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n"
-                                      "(c)    -P period    Sub-interval period in seconds [Default %d]\n"
-                                      "       -p port      Port number used for control [Default %d]\n",
+                                      "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n",
                                       AUTH_KEY_SIZE, DEF_IPTOS_BYTE, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME,
-                                      MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT);
+                                      MAX_TESTINT_TIME);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(c)    -P period    Sub-interval period in seconds [Default %d]\n"
+                                      "       -p port      Default port number used for control [Default %d]\n"
                                       "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
                                       "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n"
                                       "(c)    -L delvar    Low delay variation threshold in ms [Default %d]\n"
@@ -1151,17 +1306,19 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -c thresh    Congestion slow adjustment threshold [Default %d]\n"
                                       "(c)    -h delta     High-speed (row adjustment) delta [Default %d]\n"
                                       "(c)    -q seqerr    Sequence error threshold [Default %d]\n"
-                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n"
-                                      "(c)    -M           Use local interface rate to determine maximum\n"
-                                      "(s)    -l logfile   Log file name when executing as daemon\n"
-                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n",
-                                      rateAdjAlgo[CHTA_RA_ALGO_MIN], rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO],
-                                      DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
-                                      DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX);
+                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n",
+                                      DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
+                                      rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO], DEF_LOW_THRESH, DEF_UPPER_THRESH,
+                                      DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA, DEF_SEQ_ERR_TH);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(c)    -M           Use local interface rate to determine maximum\n"
+                                      "(s)    -l logfile   Log file name when executing as daemon\n"
+                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n"
                                       "Parameters:\n"
-                                      "      server       Hostname/IP of server (or local interface IP if server)\n\n"
+                                      "   server[:<port>]  Hostname/IP of server OR local interface IP if server\n"
+                                      "                    - Optional port number overrides configured control port\n"
+                                      "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n"
                                       "Notes:\n"
                                       "(c) = Used only by client.\n"
                                       "(s) = Used only by server.\n"
@@ -1171,7 +1328,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "      requests that exceed server maximum are automatically coerced down.\n"
                                       "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n"
                                       "(i) = Static OR starting (with '%c' prefix) sending rate index.\n",
-                                      SRIDX_ISSTART_PREFIX);
+                                      DEF_LOGFILE_MAX, SRIDX_ISSTART_PREFIX);
                         var = write(fd, scratch, var);
                         return -1;
                 }
@@ -1220,6 +1377,16 @@ int proc_parameters(int argc, char **argv, int fd) {
                 var = write(fd, scratch, var);
                 return -1;
         }
+        if (conf.minConnCount > conf.maxConnCount) {
+                var = sprintf(scratch, "ERROR: Minimum connection count > maximum connection count\n");
+                var = write(fd, scratch, var);
+                return -1;
+        }
+        if (conf.minConnCount == DEF_MC_COUNT && conf.maxConnCount == DEF_MC_COUNT) {
+                // If connection counts not specified bump default to cover provided servers
+                if (repo.serverCount > DEF_MC_COUNT)
+                        conf.minConnCount = conf.maxConnCount = repo.serverCount;
+        }
         return 0;
 }
 //----------------------------------------------------------------------------
@@ -1240,8 +1407,7 @@ int param_error(int param, int min, int max) {
 //
 // Finish JSON processing and output
 //
-int json_finish(int connindex) {
-        register struct connection *c = &conn[connindex];
+int json_finish() {
         int var;
         char *json_string = NULL;
 
@@ -1275,7 +1441,7 @@ int json_finish(int connindex) {
         //
         // NOTE: When stdout is not redirected to a file, JSON may appear clipped due to non-blocking console writes
         //
-        json_string     = cJSON_PrintBuffered(json_top, 16384, conf.jsonFormatted); // Size covers likely default test options
+        json_string     = cJSON_PrintBuffered(json_top, 32768, conf.jsonFormatted); // Size covers likely default test options
         var             = strlen(json_string);
         conf.jsonOutput = FALSE; // IMPORTANT: Disable JSON formatting prior to final send_proc() call
         send_proc(errConn, json_string, var);
@@ -1283,7 +1449,6 @@ int json_finish(int connindex) {
         //
         free(json_string);
         cJSON_Delete(json_top);
-        c->json_siArray = NULL;
 
         return repo.endTimeStatus;
 }

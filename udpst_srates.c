@@ -44,6 +44,7 @@
  *                                       sizes with non-jumbo sizes.
  * Len Ciavattone          12/21/2021    Add traditional (1500 byte) MTU
  * Len Ciavattone          04/21/2022    Increase sending rates to 40 Gbps
+ * Len Ciavattone          12/26/2022    Add random payload size support
  *
  */
 
@@ -126,8 +127,9 @@ int def_sending_rates(void) {
                                 sr->udpAddon2   = 0;
                         }
                         if (k == 0 && i == 0) {
-                                sr->txInterval2 = BASE_SEND_TIMER2;
-                                sr->udpAddon2   = MIN_PAYLOAD_SIZE;
+                                sr->txInterval2 = 50000;
+                                sr->udpAddon2   = payload;       // Set maximum value
+                                sr->udpAddon2 |= SRATE_RAND_BIT; // Set randomization bit
                         } else if (!conf.traditionalMTU && k == kmax) {
                                 break;
                         }
@@ -217,8 +219,9 @@ int def_sending_rates(void) {
 // Display sending rate table parameters for each index
 //
 void show_sending_rates(int fd) {
-        int i, var, payload1, payload2, addon, ipv6add;
-        char ipver[8];
+        int i, j, var, payload, addon, ipv6add, min, avg;
+        BOOL bvar, randpayload;
+        char buf[16];
         double dvar, dvar2;
         struct sendingRate *sr;
 
@@ -227,42 +230,89 @@ void show_sending_rates(int fd) {
         //
         if (conf.ipv6Only) {
                 ipv6add = IPV6_ADDSIZE;
-                strcpy(ipver, "IPv6");
+                strcpy(buf, "IPv6");
         } else {
                 ipv6add = 0;
-                strcpy(ipver, "IPv4");
+                strcpy(buf, "IPv4");
         }
-        var = sprintf(scratch, "Sending Rate Table for %s (Dual Transmitters, Referenced by Index)...\n", ipver);
+        var = sprintf(scratch, "Sending Rate Table for %s (Dual Transmitters, Referenced by Index)...\n", buf);
         var = write(fd, scratch, var);
-        var = sprintf(scratch, "%s) %s %s %s  + %s %s %s %s = %s\n", "Index", "TxInt(us)", "Payload", "Burst", "TxInt(us)",
+        var = sprintf(scratch, "%s) %s %s %s  + %s %s %s   %s  = %s\n", "Index", "TxInt(us)", "Payload", "Burst", "TxInt(us)",
                       "Payload", "Burst", "Add-On", "Mbps(L3/IP)");
         var = write(fd, scratch, var);
 
         //
         // Output each row
         //
+        min = (int) MIN_PAYLOAD_SIZE - ipv6add; // Minimum payload size
         for (i = 0, sr = repo.sendingRates; i < repo.maxSendingRates; i++, sr++) {
-                dvar = dvar2 = 0;
-                payload1 = payload2 = addon = 0;
-                if (sr->burstSize1 > 0) {
-                        dvar     = (double) ((USECINSEC / sr->txInterval1) * sr->burstSize1);
-                        payload1 = (int) sr->udpPayload1 - ipv6add;
-                        dvar *= (double) (payload1 + L3DG_OVERHEAD + ipv6add);
+                dvar = 0;
+                bvar = FALSE; // Is randomization in use
+                //
+                // Process all three send options
+                //
+                for (j = 0; j < 3; j++) {
+                        dvar2       = 0;
+                        payload     = 0;
+                        randpayload = FALSE;
+                        if (j == 0) { // Transmitter 1
+                                if (sr->burstSize1 > 0) {
+                                        dvar2   = (double) ((USECINSEC / sr->txInterval1) * sr->burstSize1);
+                                        payload = (int) (sr->udpPayload1 & ~SRATE_RAND_BIT) - ipv6add;
+                                        if (sr->udpPayload1 & SRATE_RAND_BIT)
+                                                randpayload = TRUE;
+                                }
+                        } else if (j == 1) { // Transmitter 2
+                                if (sr->burstSize2 > 0) {
+                                        dvar2   = (double) ((USECINSEC / sr->txInterval2) * sr->burstSize2);
+                                        payload = (int) (sr->udpPayload2 & ~SRATE_RAND_BIT) - ipv6add;
+                                        if (sr->udpPayload2 & SRATE_RAND_BIT)
+                                                randpayload = TRUE;
+                                }
+                        } else { // Add-on (used with transmitter 2)
+                                if (sr->udpAddon2 > 0) {
+                                        dvar2   = (double) (USECINSEC / sr->txInterval2);
+                                        payload = (int) (sr->udpAddon2 & ~SRATE_RAND_BIT) - ipv6add;
+                                        if (sr->udpAddon2 & SRATE_RAND_BIT)
+                                                randpayload = TRUE;
+                                }
+                        }
+                        //
+                        // Calculate bytes/sec for this send option and add to total
+                        //
+                        avg = payload; // Init average to static value or maximum if SRATE_RAND_BIT set
+                        if (randpayload) {
+                                bvar = TRUE;
+                                avg  = (min + payload) / 2; // Calculate average
+                        }
+                        dvar += dvar2 * (double) (avg + L3DG_OVERHEAD + ipv6add);
+                        //
+                        // Accummulate row text
+                        //
+                        if (randpayload) {
+                                sprintf(buf, "%d-%d", min, payload);
+                        } else {
+                                sprintf(buf, "%d", payload);
+                        }
+                        if (j == 0) {
+                                var = sprintf(scratch, "%5d) %8u  %7s %5u  ", i, sr->txInterval1, buf, sr->burstSize1);
+                        } else if (j == 1) {
+                                var += sprintf(&scratch[var], "+ %8u  %7s %5u  ", sr->txInterval2, buf, sr->burstSize2);
+                        } else {
+                                var += sprintf(&scratch[var], "%7s ", buf);
+                        }
                 }
-                if (sr->burstSize2 > 0) {
-                        dvar2    = (double) ((USECINSEC / sr->txInterval2) * sr->burstSize2);
-                        payload2 = (int) sr->udpPayload2 - ipv6add;
-                        dvar2 *= (double) (payload2 + L3DG_OVERHEAD + ipv6add);
-                }
-                if (sr->udpAddon2 > 0) {
-                        addon = (int) sr->udpAddon2 - ipv6add;
-                        dvar2 += (double) ((USECINSEC / sr->txInterval2) * (addon + L3DG_OVERHEAD + ipv6add));
-                }
-                dvar += dvar2;
+
+                //
+                // Aggregate sending rate
+                //
                 dvar *= 8;       // Convert to bits/sec
                 dvar /= 1000000; // Convert to Mbps
-                var = sprintf(scratch, "%5d) %8u  %7d %5u  + %8u  %7d %5u %5d  = %10.2f\n", i, sr->txInterval1, payload1,
-                              sr->burstSize1, sr->txInterval2, payload2, sr->burstSize2, addon, dvar);
+                if (bvar)
+                        scratch[var++] = '~';
+                else
+                        scratch[var++] = ' ';
+                var += sprintf(&scratch[var], "= %10.2f\n", dvar); // Finalize row text
                 var = write(fd, scratch, var);
         }
         if (!conf.jumboStatus) {

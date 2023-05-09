@@ -63,6 +63,12 @@
  * Len Ciavattone          01/08/2022    Check burstsize >1 if forcing to 1
  * Len Ciavattone          02/02/2022    Add rate adj. algo. selection
  * Al Morton               04/12/2022    Type C algoithm, Multiply and Retry
+ * Len Ciavattone          12/26/2022    Add random payload size support
+ * Len Ciavattone          12/29/2022    Add single test option on server
+ * Len Ciavattone          01/14/2023    Add multi-connection support
+ * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
+ * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
+ * Len Ciavattone          04/04/2023    Add optional rate limiting
  *
  */
 
@@ -83,6 +89,8 @@
 #include <unistd.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <netinet/ip.h>  // For GSO support
+#include <netinet/udp.h> // For GSO support
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
 #include <openssl/x509.h>
@@ -106,7 +114,6 @@
 //
 int send_loadpdu(int, int);
 int adjust_sending_rate(int);
-int proc_subinterval(int, BOOL);
 int output_currate(int);
 int output_maxrate(int);
 double get_rate(int, struct subIntStats *, int);
@@ -116,19 +123,21 @@ int receive_trunc(int, int, int);
 #endif
 void sis_copy(struct subIntStats *, struct subIntStats *, BOOL);
 void output_warning(int, int);
-double upd_intf_stats(int, BOOL);
+double upd_intf_stats(BOOL);
+void output_minimum(int);
+void output_debug(int);
 
 //----------------------------------------------------------------------------
 //
 // External data
 //
-extern int errConn, monConn;
+extern int errConn, monConn, aggConn;
 extern char scratch[STRING_SIZE];
 extern struct configuration conf;
 extern struct repository repo;
 extern struct connection *conn;
 //
-extern cJSON *json_top, *json_output;
+extern cJSON *json_top, *json_output, *json_siArray;
 extern char json_errbuf[STRING_SIZE];
 
 //----------------------------------------------------------------------------
@@ -142,12 +151,13 @@ extern char json_errbuf[STRING_SIZE];
 #define LOSSRATIO_TEXT   "LossRatio: %.2E, "
 #define DELIVERED_TEXT   "Delivered(%%): %6.2f, "
 #define SUMMARY_TEXT     "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f%s\n"
-#define MINIMUM_TEXT     "One-Way Delay(ms): %d [w/clock difference], Round-Trip Time(ms): %u\n"
+#define MINIMUM_TEXT     "Minimum One-Way Delay(ms): %d [w/clock diff], Round-Trip Time(ms): %u"
+#define MINIMUM_FINAL    MINIMUM_TEXT ", Active Connections: %d\n"
 #define DEBUG_STATS      "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
 #define CLIENT_DEBUG     "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
 #define SERVER_DEBUG     "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
-#define MINIMUM_DEBUG    "[%d]DEBUG Minimum " MINIMUM_TEXT
 static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
+static int mmsgDataSize[RECVMMSG_SIZE]; // Received data size of each message
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -155,7 +165,7 @@ static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 //
 // Populate the static part of the our message header
 //
-static void _populate_header(struct loadHdr *lHdr, struct connection *c) {
+static void _populate_header(struct loadHdr *lHdr, struct connection *c, unsigned int rttRespDelay) {
         lHdr->loadId     = htons(LOAD_ID);
         lHdr->testAction = (uint8_t) c->testAction;
         lHdr->rxStopped  = (uint8_t) c->rxStoppedLoc;
@@ -166,6 +176,8 @@ static void _populate_header(struct loadHdr *lHdr, struct connection *c) {
         lHdr->spduTime_nsec = htonl((uint32_t) c->spduTime.tv_nsec);
         lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
+        lHdr->rttRespDelay  = htons((uint16_t) rttRespDelay);
+        lHdr->reserved1     = 0;
 }
 //
 // Randomize payload of datagram (via single call of random())
@@ -208,17 +220,152 @@ static void _randomize_payload(char *buffer, unsigned int length) {
 }
 
 #if defined(HAVE_SENDMMSG)
+#if defined(HAVE_GSO)
+//
+// Send a burst of messages using GSO (Generic Segmentation Offload)
+//
+static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
+        char *sndbuf, *nextsndbuf, cmsgbuf[GSO_CMSG_SIZE * MMSG_SEGMENTS] = {0};
+        unsigned int uvar, rttrd = 0, totalsize;
+        int i, j, var;
+        struct cmsghdr *cmsg;
+        struct mmsghdr mmsg[MMSG_SEGMENTS];
+        struct iovec iov[MMSG_SEGMENTS];
+        struct timespec tspecvar;
+
+        //
+        // Calculate RTT response delay
+        //
+        if (tspecisset(&c->pduRxTime)) {
+                tspecminus(&repo.systemClock, &c->pduRxTime, &tspecvar);
+                rttrd = (unsigned int) tspecmsec(&tspecvar);
+        }
+
+        //
+        // Prepare send structures
+        //
+        memset(mmsg, 0, sizeof(mmsg));
+        if (c->randPayload) {
+                sndbuf = repo.sndBufRand;
+        } else {
+                sndbuf = repo.sndBuffer;
+        }
+        j    = 0; // Message count
+        cmsg = (struct cmsghdr *) cmsgbuf;
+        while (totalburst > 0) {
+                //
+                // Fill send buffer until GSO limit or burst completion
+                //
+                totalsize  = 0;
+                nextsndbuf = sndbuf;
+                for (i = 0; i < totalburst; i++) {
+                        if (i < burstsize)
+                                uvar = payload;
+                        else
+                                uvar = addon;
+                        //
+                        // Check for GSO limits
+                        //
+                        if (i >= UDP_MAX_SEGMENTS) // Segment limit
+                                break;
+                        if (totalsize + uvar > IP_MAXPACKET) // Size limit
+                                break;
+                        //
+                        // Build load PDU (including corresponding control message on first one)
+                        //
+                        struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
+                        _populate_header(lHdr, c, rttrd);
+                        lHdr->lpduSeqNo  = htonl((uint32_t) ++c->lpduSeqNo);
+                        lHdr->udpPayload = htons((uint16_t) uvar);
+                        if (c->randPayload) {
+                                _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
+                        }
+                        if (i == 0) {
+                                cmsg->cmsg_len                  = GSO_CMSG_LEN;
+                                cmsg->cmsg_level                = SOL_UDP;
+                                cmsg->cmsg_type                 = UDP_SEGMENT;
+                                *((uint16_t *) CMSG_DATA(cmsg)) = (uint16_t) uvar;
+                        }
+                        totalsize += uvar;
+                        nextsndbuf += payload;
+                }
+                totalburst -= i;
+                if (burstsize > 0)
+                        burstsize -= i;
+
+                //
+                // Setup message structure for buffer
+                //
+                iov[j].iov_base                = (void *) sndbuf;
+                iov[j].iov_len                 = (size_t) totalsize;
+                mmsg[j].msg_hdr.msg_iov        = &iov[j];
+                mmsg[j].msg_hdr.msg_iovlen     = 1;
+                mmsg[j].msg_hdr.msg_control    = cmsg;
+                mmsg[j].msg_hdr.msg_controllen = GSO_CMSG_SIZE;
+                j++;
+
+                //
+                // Advance to next send buffer
+                //
+                sndbuf += DEF_BUFFER_SIZE;
+                cmsg = (struct cmsghdr *) ((char *) cmsg + GSO_CMSG_SIZE);
+        }
+
+        //
+        // Send complete burst with single system call
+        //
+        // NOTE: Certain error conditions are expected when overloading an interface
+        //
+        var = sendmmsg(c->fd, mmsg, j, 0);
+        if (var == -1 && errno == EINVAL) { // Flag GSO incompatibility
+                var = sprintf(scratch, "ERROR: GSO incompatible with IP fragmentation (disable jumbo sizes or increase MTU)\n");
+                send_proc(errConn, scratch, var);
+                tspeccpy(&c->endTime, &repo.systemClock); // End testing
+                return;
+        }
+        if (!conf.errSuppress) {
+                if (var < 0) {
+                        //
+                        // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
+                        //
+                        if ((var = socket_error(connindex, errno, "SENDMMSG+GSO")) > 0)
+                                send_proc(errConn, scratch, var);
+
+                } else if (var < j) {
+                        //
+                        // Not all messages sent indicates the send buffer is full
+                        //
+                        var = sprintf(scratch, "[%d]SENDMMSG+GSO INCOMPLETE: Only %d out of %d sent\n", connindex, var, j);
+                        send_proc(errConn, scratch, var);
+                }
+        }
+}
+#endif // HAVE_GSO
+
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
 //
 static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
         static struct mmsghdr mmsg[MAX_BURST_SIZE]; // Static array
         static struct iovec iov[MAX_BURST_SIZE];    // Static array
-        struct connection *c = &conn[connindex];
-        unsigned int uvar;
+        unsigned int uvar, rttrd = 0;
         char *nextsndbuf;
         int i, var;
+        struct timespec tspecvar;
 
+        //
+        // Calculate RTT response delay
+        //
+        if (tspecisset(&c->pduRxTime)) {
+                tspecminus(&repo.systemClock, &c->pduRxTime, &tspecvar);
+                rttrd = (unsigned int) tspecmsec(&tspecvar);
+        }
+
+        //
+        // Prepare send structures
+        //
         memset(mmsg, 0, totalburst * sizeof(struct mmsghdr));
         if (c->randPayload) {
                 nextsndbuf = repo.sndBufRand;
@@ -227,7 +374,7 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
         }
         for (i = 0; i < totalburst; i++) {
                 struct loadHdr *lHdr = (struct loadHdr *) nextsndbuf;
-                _populate_header(lHdr, c);
+                _populate_header(lHdr, c, rttrd);
                 lHdr->lpduSeqNo = htonl((uint32_t) ++c->lpduSeqNo);
                 if (i < burstsize)
                         uvar = payload;
@@ -271,26 +418,38 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 }
         }
 }
-#endif /* HAVE_SENDMMSG */
+#endif // HAVE_SENDMMSG
 
 //
 // Send a burst of messages using the slower but more widely available sendmsg syscall
 //
 static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigned int payload, unsigned int addon) {
+        register struct connection *c = &conn[connindex];
         struct msghdr msg;
         struct iovec iov;
-        struct connection *c = &conn[connindex];
-        unsigned int uvar;
+        unsigned int uvar, rttrd = 0;
         int i;
         struct loadHdr *lHdr;
+        struct timespec tspecvar;
 
+        //
+        // Calculate RTT response delay
+        //
+        if (tspecisset(&c->pduRxTime)) {
+                tspecminus(&repo.systemClock, &c->pduRxTime, &tspecvar);
+                rttrd = (unsigned int) tspecmsec(&tspecvar);
+        }
+
+        //
+        // Prepare send structures
+        //
         memset((void *) &msg, 0, sizeof(struct msghdr));
         if (c->randPayload) {
                 lHdr = (struct loadHdr *) repo.sndBufRand;
         } else {
                 lHdr = (struct loadHdr *) repo.sndBuffer;
         }
-        _populate_header(lHdr, c);
+        _populate_header(lHdr, c, rttrd);
 
         for (i = 0; i < totalburst; i++) {
                 int var;
@@ -323,13 +482,14 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                                 //
                                 // An error of EAGAIN (Resource temporarily unavailable) indicates the send buffer is full
                                 //
-                                if ((var = socket_error(connindex, errno, "SENDMMSG")) > 0)
+                                if ((var = socket_error(connindex, errno, "SENDMSG")) > 0)
                                         send_proc(errConn, scratch, var);
                         }
                 }
         }
 }
 
+//
 // Send load PDUs via periodic timers for transmitters 1 & 2
 //
 int send1_loadpdu(int connindex) {
@@ -340,8 +500,9 @@ int send2_loadpdu(int connindex) {
 }
 int send_loadpdu(int connindex, int transmitter) {
         register struct connection *c = &conn[connindex];
-        int burstsize, totalburst, txintpri, txintalt;
-        unsigned int payload, addon;
+        int var, burstsize, totalburst, txintpri, txintalt;
+        unsigned int uvar, payload, addon;
+        BOOL randpayload;
         struct timespec tspecvar, *tspecpri, *tspecalt;
         struct sendingRate *sr;
 
@@ -357,14 +518,19 @@ int send_loadpdu(int connindex, int transmitter) {
         //
         // Select transmitter specifics
         //
+        randpayload = FALSE;
         if (transmitter == 1) {
-                payload   = (unsigned int) sr->udpPayload1;
+                payload = (unsigned int) (sr->udpPayload1 & ~SRATE_RAND_BIT);
+                if (sr->udpPayload1 & SRATE_RAND_BIT)
+                        randpayload = TRUE;
                 burstsize = (int) sr->burstSize1;
                 addon     = 0;
         } else {
-                payload   = (unsigned int) sr->udpPayload2;
+                payload = (unsigned int) (sr->udpPayload2 & ~SRATE_RAND_BIT);
+                if (sr->udpPayload2 & SRATE_RAND_BIT)
+                        randpayload = TRUE;
                 burstsize = (int) sr->burstSize2;
-                addon     = (unsigned int) sr->udpAddon2;
+                addon     = (unsigned int) (sr->udpAddon2 & ~SRATE_RAND_BIT);
         }
 
         //
@@ -378,13 +544,27 @@ int send_loadpdu(int connindex, int transmitter) {
         }
 
         //
+        // If designated as random, use stored size as max when calculating size
+        //
+        var = MIN_PAYLOAD_SIZE;
+        if (c->ipProtocol == IPPROTO_IPV6) {
+                var -= IPV6_ADDSIZE;
+        }
+        if (payload > 0 && randpayload) {
+                payload = getuniform(var, payload);
+        }
+        if (addon > 0 && (sr->udpAddon2 & SRATE_RAND_BIT)) {
+                addon = getuniform(var, addon);
+        }
+
+        //
         // Handle test stop in progress
         //
         if (c->testAction != TEST_ACT_TEST) {
                 if (burstsize > 1)
                         burstsize = 1; // Reduce load w/min burst size
                 if (repo.isServer) {
-                        if (monConn >= 0 && c->testAction == TEST_ACT_STOP1) {
+                        if (conf.verbose && c->testAction == TEST_ACT_STOP1) {
                                 int var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
                                 send_proc(monConn, scratch, var);
                         }
@@ -394,10 +574,10 @@ int send_loadpdu(int connindex, int transmitter) {
                         // The PDU sent in this pass will confirm the test stop back to the server,
                         // schedule an immediate/subsequent test end
                         //
-                        if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
-                                repo.endTimeStatus = STATUS_SUCCESS;
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
+                if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
+                        repo.endTimeStatus = STATUS_SUCCESS;
         }
 
         //
@@ -438,8 +618,8 @@ int send_loadpdu(int connindex, int transmitter) {
         //
         // Initialize interface stats on first PDU if sysfs FD is valid
         //
-        if (c->lpduSeqNo == 0 && c->intfFD >= 0) {
-                upd_intf_stats(connindex, TRUE);
+        if (repo.intfFD >= 0 && !tspecisset(&repo.intfTime)) {
+                upd_intf_stats(TRUE);
         }
 
         //
@@ -474,10 +654,14 @@ int send_loadpdu(int connindex, int transmitter) {
                 totalburst++;
 
 #if defined(HAVE_SENDMMSG)
+#if defined(HAVE_GSO)
+        _sendmmsg_gso(connindex, totalburst, burstsize, payload, addon);
+#else
         _sendmmsg_burst(connindex, totalburst, burstsize, payload, addon);
+#endif // HAVE_GSO
 #else
         _sendmsg_burst(connindex, totalburst, burstsize, payload, addon);
-#endif /* HAVE_SENDMMSG */
+#endif // HAVE_SENDMMSG
 
         return 0;
 }
@@ -489,8 +673,8 @@ int service_loadpdu(int connindex) {
         register struct connection *c = &conn[connindex];
         int i, delta, var;
         BOOL bvar, firstpdu = FALSE;
-        unsigned int uvar, seqno;
-        struct loadHdr *lHdr = (struct loadHdr *) repo.defBuffer;
+        unsigned int uvar, seqno, rttrd;
+        struct loadHdr *lHdr = (struct loadHdr *) repo.rcvDataPtr;
         struct timespec tspecvar, tspecdelta;
 
         //
@@ -509,10 +693,6 @@ int service_loadpdu(int connindex) {
                         // If client is confirming stop, end test
                         //
                         if (lHdr->testAction != TEST_ACT_TEST) {
-                                if (conf.verbose && c->endTime.tv_sec != repo.systemClock.tv_sec &&
-                                    c->endTime.tv_nsec != repo.systemClock.tv_nsec) {
-                                        output_maxrate(connindex);
-                                }
                                 tspeccpy(&c->endTime, &repo.systemClock);
                                 return 0;
                         }
@@ -521,8 +701,7 @@ int service_loadpdu(int connindex) {
                         // On first pass, finalize testing
                         //
                         if (c->testAction == TEST_ACT_TEST) {
-                                output_maxrate(connindex);
-                                if (monConn >= 0) {
+                                if (conf.verbose) {
                                         var = sprintf(scratch, "[%d]Test stop received\n", connindex);
                                         send_proc(monConn, scratch, var);
                                 }
@@ -568,11 +747,11 @@ int service_loadpdu(int connindex) {
         }
 
         //
-        // Update traffic stats (use size specified in PDU, actual receive was truncated)
+        // Update traffic stats (use size specified in PDU, actual receive may have been truncated)
         //
         uvar = (unsigned int) ntohs(lHdr->udpPayload);
         c->sisAct.rxDatagrams++;
-        c->sisAct.rxBytes += (uint32_t) uvar;
+        c->sisAct.rxBytes += (uint64_t) uvar;
         c->tiRxDatagrams++;
         c->tiRxBytes += uvar;
 
@@ -646,6 +825,14 @@ int service_loadpdu(int connindex) {
                 tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
                 uvar = (unsigned int) tspecmsec(&tspecdelta);
                 //
+                // Adjust RTT based on delay between when status PDU was received and load PDU sent
+                //
+                if ((rttrd = (unsigned int) ntohs(lHdr->rttRespDelay)) <= uvar) {
+                        uvar -= rttrd;
+                } else if (rttrd == uvar + 1) { // Allow for rounding adjustment on either end
+                        uvar = 0;
+                }
+                //
                 // Check for new minimum
                 //
                 if (uvar < c->rttMinimum) {
@@ -710,7 +897,6 @@ int service_loadpdu(int connindex) {
 int send_statuspdu(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        unsigned int dvmin, dvavg;
         struct timespec tspecvar;
         struct sendingRate *sr;
         struct statusHdr *sHdr = (struct statusHdr *) repo.defBuffer;
@@ -721,7 +907,7 @@ int send_statuspdu(int connindex) {
         if (c->testAction != TEST_ACT_TEST) {
                 tspecclear(&c->timer1Thresh); // Stop subsequent status messages
                 if (repo.isServer) {
-                        if (monConn >= 0 && c->testAction == TEST_ACT_STOP1) {
+                        if (conf.verbose && c->testAction == TEST_ACT_STOP1) {
                                 var = sprintf(scratch, "[%d]Sending test stop\n", connindex);
                                 send_proc(monConn, scratch, var);
                         }
@@ -731,10 +917,10 @@ int send_statuspdu(int connindex) {
                         // The PDU sent in this pass will confirm the test stop back to the server,
                         // schedule an immediate/subsequent test end
                         //
-                        if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
-                                repo.endTimeStatus = STATUS_SUCCESS;
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
+                if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
+                        repo.endTimeStatus = STATUS_SUCCESS;
         } else {
                 tspecvar.tv_sec  = 0;
                 tspecvar.tv_nsec = (long) (c->trialInt * NSECINMSEC);
@@ -744,7 +930,7 @@ int send_statuspdu(int connindex) {
                 // Only continue if some data has been received (initial load PDUs could still be in transit)
                 //
                 if (c->lpduSeqNo == 0) {
-                        if (monConn >= 0) {
+                        if (conf.verbose) {
                                 var = sprintf(scratch, "[%d]Skipping status transmission, awaiting initial load PDUs...\n",
                                               connindex);
                                 send_proc(monConn, scratch, var);
@@ -780,8 +966,8 @@ int send_statuspdu(int connindex) {
         //
         // Initialize interface stats on first PDU if sysfs FD is valid
         //
-        if (c->spduSeqNo == 0 && c->intfFD >= 0) {
-                upd_intf_stats(connindex, TRUE);
+        if (repo.intfFD >= 0 && !tspecisset(&repo.intfTime)) {
+                upd_intf_stats(TRUE);
         }
 
         //
@@ -845,26 +1031,17 @@ int send_statuspdu(int connindex) {
         sHdr->spduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
         if (!repo.isServer) {
                 //
-                // Output debug messages if configured
+                // Output verbose/debug messages if configured
                 //
-                if (monConn >= 0 && conf.debug && c->testAction == TEST_ACT_TEST) {
+                if (conf.verbose && c->testAction == TEST_ACT_TEST) {
                         if (c->delayMinUpd && c->rttMinimum != INITIAL_MIN_DELAY) {
-                                var = sprintf(scratch, MINIMUM_DEBUG, connindex, c->clockDeltaMin, c->rttMinimum);
-                                send_proc(monConn, scratch, var);
+                                output_minimum(connindex);
                         }
-                        dvmin = dvavg = 0;
-                        if (c->delayVarCnt > 0) {
-                                dvmin = c->delayVarMin;
-                                dvavg = c->delayVarSum / c->delayVarCnt;
-                        }
-                        var = -1;
-                        if (c->rttSample != INITIAL_MIN_DELAY)
-                                var = (int) c->rttSample;
-                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
-                                      c->delayVarMax, var, get_rate(connindex, NULL, L3DG_OVERHEAD));
-                        send_proc(monConn, scratch, var);
+                        if (conf.debug)
+                                output_debug(connindex);
                 }
         }
+
         //
         // Initialize values after copying to status message
         //
@@ -905,8 +1082,16 @@ int send_statuspdu(int connindex) {
                 //
                 tspecminus(&repo.systemClock, &c->subIntClock, &tspecvar);
                 var = (c->subIntPeriod * MSECINSEC) - (c->trialInt / 2);
-                if ((int) tspecmsec(&tspecvar) > var)
+                if ((int) tspecmsec(&tspecvar) > var) {
+                        if (!repo.isServer && (c->subIntCount > conn[aggConn].subIntCount)) {
+                                //
+                                // Process aggregate connection if this one has started the next sub-interval. This can
+                                // happen when active connections fail during a test.
+                                //
+                                output_currate(aggConn);
+                        }
                         proc_subinterval(connindex, FALSE);
+                }
         }
         return 0;
 }
@@ -916,9 +1101,9 @@ int send_statuspdu(int connindex) {
 //
 int service_statuspdu(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
+        int var, var2;
         BOOL bvar;
-        unsigned int uvar, seqno, dvmin, dvavg;
+        unsigned int uvar, seqno;
         struct statusHdr *sHdr = (struct statusHdr *) repo.defBuffer;
         struct timespec tspecvar;
 
@@ -938,9 +1123,6 @@ int service_statuspdu(int connindex) {
                         // If client is confirming stop, end test
                         //
                         if (sHdr->testAction != TEST_ACT_TEST) {
-                                if (conf.verbose) {
-                                        output_maxrate(connindex);
-                                }
                                 tspeccpy(&c->endTime, &repo.systemClock);
                                 return 0;
                         }
@@ -949,12 +1131,11 @@ int service_statuspdu(int connindex) {
                         // On first pass, finalize testing
                         //
                         if (c->testAction == TEST_ACT_TEST) {
-                                output_maxrate(connindex);
-                                if (monConn >= 0) {
+                                if (conf.verbose) {
                                         var = sprintf(scratch, "[%d]Test stop received\n", connindex);
                                         send_proc(monConn, scratch, var);
                                 }
-                                c->testAction = (unsigned int) sHdr->testAction;
+                                c->testAction = (int) sHdr->testAction;
                         }
                         return 0;
                 }
@@ -1041,24 +1222,14 @@ int service_statuspdu(int connindex) {
                 sr_copy(&c->srStruct, &sHdr->srStruct, FALSE);
 
                 //
-                // Output debug messages if configured
+                // Output verbose/debug messages if configured
                 //
-                if (monConn >= 0 && conf.debug && c->testAction == TEST_ACT_TEST) {
+                if (conf.verbose && c->testAction == TEST_ACT_TEST) {
                         if (c->delayMinUpd && c->rttMinimum != INITIAL_MIN_DELAY) {
-                                var = sprintf(scratch, MINIMUM_DEBUG, connindex, c->clockDeltaMin, c->rttMinimum);
-                                send_proc(monConn, scratch, var);
+                                output_minimum(connindex);
                         }
-                        dvmin = dvavg = 0;
-                        if (c->delayVarCnt > 0) {
-                                dvmin = c->delayVarMin;
-                                dvavg = c->delayVarSum / c->delayVarCnt;
-                        }
-                        var = -1;
-                        if (c->rttSample != INITIAL_MIN_DELAY)
-                                var = (int) c->rttSample;
-                        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
-                                      c->delayVarMax, var, get_rate(connindex, NULL, L3DG_OVERHEAD));
-                        send_proc(monConn, scratch, var);
+                        if (conf.debug)
+                                output_debug(connindex);
                 }
         } else {
                 //
@@ -1075,11 +1246,20 @@ int service_statuspdu(int connindex) {
         if (uvar != c->subIntSeqNo) {
                 c->subIntSeqNo = uvar; // Save it to detect updated stats
                 sis_copy(&c->sisSav, &sHdr->sisSav, FALSE);
-                if (c->testAction == TEST_ACT_TEST && (!repo.isServer || conf.verbose)) {
-                        //
-                        // Process and output the latest rate info indicated by receiver
-                        //
-                        output_currate(connindex);
+                //
+                // Process and output the latest rate info indicated by receiver
+                //
+                if (c->testAction == TEST_ACT_TEST) {
+                        if (!repo.isServer || conf.verbose) {
+                                if (!repo.isServer && (c->subIntCount > conn[aggConn].subIntCount)) {
+                                        //
+                                        // Process aggregate connection if this one has started the next sub-interval. This can
+                                        // happen when active connections fail during a test.
+                                        //
+                                        output_currate(aggConn);
+                                }
+                                output_currate(connindex);
+                        }
                 }
         }
         return 0;
@@ -1210,11 +1390,49 @@ int adjust_sending_rate(int connindex) {
                         }
                 }
         }
+#ifdef RATE_LIMITING
+        //
+        // Perform rate limiting when bandwidth management is used (-B mbps) by limiting the maximum sending rate index
+        //
+        // NOTE: This is for test purposes only and only needs to be enabled on the server. It is intended for testing
+        // speeds below the actual achievable maximum, generally as part of server scale testing. For example, simulating
+        // low-speed tests when the client and server are actually connected via high speed.
+        //
+        if (c->maxBandwidth > 0) {
+                //
+                // Enforce limit directly when index is equal to bandwidth, else find sending rate index that covers bandwidth
+                //
+                int i = c->maxBandwidth, bw = c->maxBandwidth;
+                if (c->maxBandwidth > 1000) { // If index != bandwidth
+                        struct sendingRate *sr;
+                        for (i = 1001, sr = &repo.sendingRates[i]; i < repo.maxSendingRates; i++, sr++) {
+                                bw = 0; // Simplified bandwidth calculation (random sizes ignored)
+                                if (sr->txInterval1 > 0)
+                                        bw += ((sr->udpPayload1 + L3DG_OVERHEAD) * sr->burstSize1 * 8) / sr->txInterval1;
+                                if (sr->txInterval2 > 0) {
+                                        if (sr->udpPayload2 > 0)
+                                                bw += ((sr->udpPayload2 + L3DG_OVERHEAD) * sr->burstSize2 * 8) / sr->txInterval2;
+                                        if (sr->udpAddon2 > 0)
+                                                bw += ((sr->udpAddon2 + L3DG_OVERHEAD) * 8) / sr->txInterval2;
+                                }
+                                if (bw >= c->maxBandwidth)
+                                        break;
+                        }
+                }
+                if (c->srIndex > i) // Enforce limit
+                        c->srIndex = i;
+                if (conf.verbose && c->spduSeqNo == 1) { // Generate notification once per test
+                        var = sprintf(scratch, "[%d]RATE_LIMITING: Rate adjustment limited to sending rate index %d (%d Mbps)\n",
+                                      connindex, i, bw);
+                        send_proc(errConn, scratch, var);
+                }
+        }
+#endif // RATE_LIMITING
 
         //
-        // Display debug info if needed
+        // Output debug messages if configured
         //
-        if (monConn >= 0 && conf.debug && c->testAction == TEST_ACT_TEST) {
+        if (conf.verbose && conf.debug && c->testAction == TEST_ACT_TEST) {
                 var = -1;
                 if (c->rttSample != INITIAL_MIN_DELAY)
                         var = (int) c->rttSample;
@@ -1234,46 +1452,93 @@ int proc_subinterval(int connindex, BOOL initialize) {
         int var;
 
         //
-        // If requested, initialize active sub-interval statistics and exit
+        // If not doing initialization
         //
-        if (initialize) {
-                memset(&c->sisAct, 0, sizeof(struct subIntStats));
-                c->sisAct.delayVarMin = INITIAL_MIN_DELAY;
-                c->sisAct.rttMinimum  = INITIAL_MIN_DELAY;
-                tspeccpy(&c->subIntClock, &repo.systemClock);
-                c->accumTime = 0;
-                if (monConn >= 0) {
-                        var = sprintf(scratch, "[%d]Sub-Interval statistics initialized...\n", connindex);
-                        send_proc(monConn, scratch, var);
+        if (!initialize) {
+                //
+                // Finalize active statistics for this sub-interval and save them
+                //
+                c->subIntSeqNo++; // Indicate updated stats
+                tspecminus(&repo.systemClock, &c->subIntClock, &tspecvar);
+                c->sisAct.deltaTime = (uint32_t) tspecusec(&tspecvar); // Measured sub-interval time
+                c->accumTime += (unsigned int) tspecmsec(&tspecvar);
+                c->sisAct.accumTime = (uint32_t) c->accumTime;
+                memcpy(&c->sisSav, &c->sisAct, sizeof(struct subIntStats));
+
+                //
+                // Process and output our latest rate info as receiver
+                //
+                if (c->testAction == TEST_ACT_TEST) {
+                        if (!repo.isServer || conf.verbose) {
+                                output_currate(connindex);
+                        }
                 }
-                return 0;
         }
 
         //
-        // Finalize active statistics for this sub-interval and save them
-        //
-        c->subIntSeqNo++; // Indicate updated stats
-        tspecminus(&repo.systemClock, &c->subIntClock, &tspecvar);
-        c->sisAct.deltaTime = (uint32_t) tspecusec(&tspecvar); // Measured sub-interval time
-        c->accumTime += (unsigned int) tspecmsec(&tspecvar);
-        c->sisAct.accumTime = (uint32_t) c->accumTime;
-        memcpy(&c->sisSav, &c->sisAct, sizeof(struct subIntStats));
-
-        //
-        // Output the current rate if test is still active
-        //
-        if (c->testAction == TEST_ACT_TEST && (!repo.isServer || conf.verbose)) {
-                output_currate(connindex);
-        }
-
-        //
-        // Re-initialize active sub-interval statistics after saving
+        // (Re)initialize active sub-interval statistics after saving
         //
         memset(&c->sisAct, 0, sizeof(struct subIntStats));
         c->sisAct.delayVarMin = INITIAL_MIN_DELAY;
         c->sisAct.rttMinimum  = INITIAL_MIN_DELAY;
         tspeccpy(&c->subIntClock, &repo.systemClock);
+        if (initialize)
+                c->accumTime = 0;
 
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
+// Aggregate query processing
+//
+int agg_query_proc(int connindex) {
+        register struct connection *a = &conn[connindex];
+        int var;
+        struct timespec tspecvar;
+
+        //
+        // Query aggregate connection and overall state of testing
+        //
+        if (repo.actConnCount < conf.minConnCount) { // Active test count is below minimum
+                if (!conf.jsonOutput) {
+                        // Do not overwrite any previous error in json error buffer if json configured
+                        var = sprintf(scratch, "ERROR: Minimum required connections (%d) unavailable\n", conf.minConnCount);
+                        send_proc(errConn, scratch, var);
+                }
+                repo.endTimeStatus = STATUS_ERROR;        // Force status to error
+                tspeccpy(&a->endTime, &repo.systemClock); // Trigger process shutdown
+
+        } else if (repo.maxConnIndex == aggConn) { // All test connections finished/failed (only aggregate exists)
+                //
+                // Process aggregate connection for the final sub-interval if some connections haven't been
+                // accounted for. This can happen when active connections fail during the last sub-interval.
+                //
+                if (repo.sisConnCount > 0) {
+                        output_currate(connindex);
+                }
+                //
+                // Output maximums and end testing
+                //
+                if (repo.testSum.sampleCount > 0) {
+                        output_maxrate(connindex);
+                }
+                tspeccpy(&a->endTime, &repo.systemClock); // Trigger process shutdown
+        } else {
+                //
+                // Reset aggregate query timer
+                //
+                tspecvar.tv_sec  = 0;
+                tspecvar.tv_nsec = AGG_QUERY_TIME * NSECINMSEC;
+                tspecplus(&repo.systemClock, &tspecvar, &a->timer1Thresh);
+
+                //
+                // Process aggregate sub-interval stats if all active connections have done so individually. This is the
+                // normal method by which the aggregate is processed (when no connections have failed).
+                //
+                if (repo.sisConnCount == repo.actConnCount) {
+                        output_currate(connindex);
+                }
+        }
         return 0;
 }
 //----------------------------------------------------------------------------
@@ -1281,41 +1546,115 @@ int proc_subinterval(int connindex, BOOL initialize) {
 // Output sampled data rate and summary statistics
 //
 int output_currate(int connindex) {
-        register struct connection *c = &conn[connindex];
+        register struct connection *c = &conn[connindex], *a;
         int i, var, sec;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, mbps, sent, delivered = 0.0, intfmbps = 0.0;
         char connid[8], intfrate[16];
-        struct testSummary *ts = &c->testSum;
+        struct testSummary *ts = &repo.testSum;
 
         //
-        // Perform rate calculations and check if maximum so far
-        // ------------------------------------------------------------------------
+        // Do not allow sub-interval accumulated time to exceed test time
         //
-        i = 0; // Initialize to single maximum or first bimodal maximum
+        sec = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
+        if (sec > conf.testIntTime)
+                return 0;
+
+        //
+        // Increment sub-interval count and obtain sub-interval rate info
+        //
         c->subIntCount++;
-        if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount) {
-                i++; // Adjust to save as second bimodal maximum
-        }
-        var  = 0; // Calculate sub-interval & interface rates and check for max
-        mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
-        if (c->intfFD >= 0) {
-                intfmbps = upd_intf_stats(connindex, FALSE);
-        }
-        if (!conf.intfForMax) {
-                if (mbps > c->rateMax[i])
-                        var = 1;
+        if (connindex != aggConn) {
+                mbps = get_rate(connindex, &c->sisSav, L3DG_OVERHEAD);
+                if (!repo.isServer) {
+                        //
+                        // Accumulate all rate types into aggregates
+                        //
+                        repo.siAggRateL3 += mbps;
+                        repo.siAggRateL2 += get_rate(connindex, &c->sisSav, L2DG_OVERHEAD);
+                        repo.siAggRateL1 += get_rate(connindex, &c->sisSav, L1DG_OVERHEAD);
+                        repo.siAggRateL0 += get_rate(connindex, &c->sisSav, L0DG_OVERHEAD);
+                }
+                //
+                // Obtain interface rate at first non-aggregate sub-interval
+                //
+                if (repo.intfFD >= 0 && repo.sisConnCount == 0) {
+                        repo.intfMbps = upd_intf_stats(FALSE); // Save for subsequent use by aggregate connection
+                }
+                repo.sisConnCount++; // Increment connection count for this sub-interval
         } else {
-                if (intfmbps > c->intfMax[i])
-                        var = 1;
+                mbps              = repo.siAggRateL3; // Previously accumulated aggregate
+                intfmbps          = repo.intfMbps;    // Previously obtained interface rate
+                repo.sisConnCount = 0;                // Reset counter for next sub-interval
         }
-        if (var) { // If new max save sub-interval stats, time, and rates
-                memcpy(&c->sisMax[i], &c->sisSav, sizeof(struct subIntStats));
-                tspeccpy(&c->timeOfMax[i], &repo.systemClock);
-                c->rateMax[i] = mbps;
-                c->intfMax[i] = intfmbps;
+
+        //
+        // Check if aggregate maximum so far
+        //
+        if (connindex == aggConn) {
+                i = 0; // Initialize to single maximum or first bimodal maximum
+                if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount) {
+                        i++; // Adjust to save as second bimodal maximum
+                }
+                var = 0;
+                if (!conf.intfForMax) {
+                        if (mbps > repo.rateMaxL3[i]) // Use test traffic for maximum
+                                var = 1;
+                } else {
+                        if (intfmbps > repo.intfMax[i]) // Use interface traffic for maximum
+                                var = 1;
+                }
+                //
+                // If new max save sub-interval time, stats, and rates
+                //
+                if (var) {
+                        tspeccpy(&repo.timeOfMax[i], &repo.systemClock);
+                        repo.actConnections[i] = repo.actConnCount;
+                        memcpy(&repo.sisMax[i], &c->sisSav, sizeof(struct subIntStats));
+                        repo.rateMaxL3[i] = mbps;
+                        repo.rateMaxL2[i] = repo.siAggRateL2;
+                        repo.rateMaxL1[i] = repo.siAggRateL1;
+                        repo.rateMaxL0[i] = repo.siAggRateL0;
+                        repo.intfMax[i]   = intfmbps;
+                }
         }
-        // ------------------------------------------------------------------------
+
+        //
+        // Merge non-aggregate connection stats into aggregate connection
+        //
+        if (connindex != aggConn && !repo.isServer) {
+                a = &conn[aggConn]; // Aggregate connection pointer
+                if (repo.sisConnCount == 1 && a->subIntCount == 0) {
+                        // Initialize if first non-aggregate connection AND prior to first aggregate sub-interval
+                        a->clockDeltaMin      = c->clockDeltaMin;
+                        a->rttMinimum         = c->rttMinimum;
+                        a->sisSav.delayVarMin = INITIAL_MIN_DELAY;
+                        a->sisSav.rttMinimum  = INITIAL_MIN_DELAY;
+                } else {
+                        if (c->clockDeltaMin < a->clockDeltaMin)
+                                a->clockDeltaMin = c->clockDeltaMin;
+                        if (c->rttMinimum < a->rttMinimum)
+                                a->rttMinimum = c->rttMinimum;
+                }
+                a->sisSav.rxDatagrams += c->sisSav.rxDatagrams;
+                a->sisSav.rxBytes += c->sisSav.rxBytes;
+                a->sisSav.deltaTime += c->sisSav.deltaTime;
+                a->sisSav.seqErrLoss += c->sisSav.seqErrLoss;
+                a->sisSav.seqErrOoo += c->sisSav.seqErrOoo;
+                a->sisSav.seqErrDup += c->sisSav.seqErrDup;
+                if (c->sisSav.delayVarMin < a->sisSav.delayVarMin)
+                        a->sisSav.delayVarMin = c->sisSav.delayVarMin;
+                a->sisSav.delayVarSum += c->sisSav.delayVarSum;
+                a->sisSav.delayVarCnt += c->sisSav.delayVarCnt;
+                if (c->sisSav.delayVarMax > a->sisSav.delayVarMax)
+                        a->sisSav.delayVarMax = c->sisSav.delayVarMax;
+                if (c->sisSav.rttMinimum < a->sisSav.rttMinimum)
+                        a->sisSav.rttMinimum = c->sisSav.rttMinimum;
+                if (c->sisSav.rttMaximum > a->sisSav.rttMaximum)
+                        a->sisSav.rttMaximum = c->sisSav.rttMaximum;
+                //
+                a->sisSav.accumTime = c->sisSav.accumTime; // Use accumulated time of last test connection processed
+        }
 
         //
         // Output sampled rate info
@@ -1340,13 +1679,30 @@ int output_currate(int connindex) {
                 rttmin = (unsigned int) c->sisSav.rttMinimum;
         }
         if (!conf.summaryOnly) {
-                sec = (int) ((c->sisSav.accumTime / 100) + 5) / 10;
-                if (conf.jsonOutput) {
+                if (!conf.jsonOutput && (conf.verbose || connindex == aggConn)) {
+                        i = 3;
+                        if (c->subIntCount > 9)
+                                i--;
+                        strcpy(scratch2, "%sSub-Interval[%d](sec): %*d, ");
+                        if (!conf.showLossRatio) {
+                                strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+                        } else {
+                                strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                        }
+                        *intfrate = '\0';
+                        if (repo.intfFD >= 0 && connindex == aggConn) { // Append interface rate to L3/IP rate
+                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", intfmbps);
+                        }
+                        var = sprintf(scratch, scratch2, connid, c->subIntCount, i, sec, delivered, c->sisSav.seqErrLoss,
+                                      c->sisSav.seqErrOoo, c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin,
+                                      c->sisSav.rttMaximum, mbps, intfrate);
+                        send_proc(errConn, scratch, var);
+                } else if (conf.jsonOutput && connindex == aggConn) {
                         //
                         // Create JSON sub-interval array if needed
                         //
-                        if (c->json_siArray == NULL) {
-                                c->json_siArray = cJSON_CreateArray();
+                        if (json_siArray == NULL) {
+                                json_siArray = cJSON_CreateArray();
                         }
                         //
                         // Create sub-interval object and add items to it
@@ -1357,6 +1713,7 @@ int output_currate(int connindex) {
                         //
                         create_timestamp(&repo.systemClock);
                         cJSON_AddStringToObject(json_subint, "TimeOfSubInterval", scratch);
+                        cJSON_AddNumberToObject(json_subint, "ActiveConnections", repo.actConnCount);
                         //
                         if (sent > 0.0) {
                                 dvar = ((double) c->sisSav.rxDatagrams * 100.0) / sent;
@@ -1401,69 +1758,55 @@ int output_currate(int connindex) {
                         //
                         // Add sub-interval object to sub-interval array
                         //
-                        cJSON_AddItemToArray(c->json_siArray, json_subint);
-                } else {
-                        i = 1; // Determine required width of accumulated time field
-                        if (c->testIntTime > 999)
-                                i = 7;
-                        else if (c->testIntTime > 99)
-                                i = 5;
-                        else if (c->testIntTime > 9)
-                                i = 3;
-                        if (c->subIntCount > 999)
-                                i -= 3;
-                        else if (c->subIntCount > 99)
-                                i -= 2;
-                        else if (c->subIntCount > 9)
-                                i -= 1;
-                        strcpy(scratch2,
-                               "%sSub-Interval[%d](sec): %*d, "); // Use variable-width accumulated time for text alignment
-                        if (!conf.showLossRatio) {
-                                strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
-                        } else {
-                                strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
-                        }
-                        *intfrate = '\0';
-                        if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
-                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", intfmbps);
-                        }
-                        var = sprintf(scratch, scratch2, connid, c->subIntCount, i, sec, delivered, c->sisSav.seqErrLoss,
-                                      c->sisSav.seqErrOoo, c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin,
-                                      c->sisSav.rttMaximum, mbps, intfrate);
-                        send_proc(errConn, scratch, var);
+                        cJSON_AddItemToArray(json_siArray, json_subint);
                 }
         }
 
         //
-        // Accumulate overall test summary statistics
+        // Final processing for aggregate connection
         //
-        if (ts->sampleCount == 0) {
-                ts->delayVarMin = dvmin;
-                ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
-                ts->delayVarSum = dvavg;
+        if (connindex == aggConn) {
                 //
-                ts->rttMinimum = rttmin;
-                ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
-        } else {
-                if (dvmin < ts->delayVarMin)
+                // Accumulate overall test summary statistics
+                //
+                if (ts->sampleCount == 0) {
                         ts->delayVarMin = dvmin;
-                if (c->sisSav.delayVarMax > (uint32_t) ts->delayVarMax)
                         ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
-                ts->delayVarSum += dvavg;
-                //
-                if (rttmin < ts->rttMinimum)
+                        ts->delayVarSum = dvavg;
+                        //
                         ts->rttMinimum = rttmin;
-                if (c->sisSav.rttMaximum > (uint32_t) ts->rttMaximum)
                         ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
-        }
-        ts->rxDatagrams += (unsigned int) c->sisSav.rxDatagrams;
-        ts->seqErrLoss += (unsigned int) c->sisSav.seqErrLoss;
-        ts->seqErrOoo += (unsigned int) c->sisSav.seqErrOoo;
-        ts->seqErrDup += (unsigned int) c->sisSav.seqErrDup;
-        ts->rateSumL3 += (double) mbps;
-        ts->rateSumIntf += (double) intfmbps;
-        ts->sampleCount++;
+                } else {
+                        if (dvmin < ts->delayVarMin)
+                                ts->delayVarMin = dvmin;
+                        if (c->sisSav.delayVarMax > (uint32_t) ts->delayVarMax)
+                                ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
+                        ts->delayVarSum += dvavg;
+                        //
+                        if (rttmin < ts->rttMinimum)
+                                ts->rttMinimum = rttmin;
+                        if (c->sisSav.rttMaximum > (uint32_t) ts->rttMaximum)
+                                ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
+                }
+                ts->rxDatagrams += (unsigned int) c->sisSav.rxDatagrams;
+                ts->seqErrLoss += (unsigned int) c->sisSav.seqErrLoss;
+                ts->seqErrOoo += (unsigned int) c->sisSav.seqErrOoo;
+                ts->seqErrDup += (unsigned int) c->sisSav.seqErrDup;
+                ts->rateSumL3 += (double) mbps;
+                ts->rateSumIntf += (double) intfmbps;
+                ts->sampleCount++;
 
+                //
+                // Re-initialize stats for next sub-interval
+                //
+                memset(&c->sisSav, 0, sizeof(struct subIntStats));
+                c->sisSav.delayVarMin = INITIAL_MIN_DELAY;
+                c->sisSav.rttMinimum  = INITIAL_MIN_DELAY;
+                repo.siAggRateL3      = 0.0;
+                repo.siAggRateL2      = 0.0;
+                repo.siAggRateL1      = 0.0;
+                repo.siAggRateL0      = 0.0;
+        }
         return 0;
 }
 //----------------------------------------------------------------------------
@@ -1476,7 +1819,7 @@ int output_maxrate(int connindex) {
         int i, sibegin, siend, var;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, sent, delivered = 0.0;
-        struct testSummary *ts = &c->testSum;
+        struct testSummary *ts = &repo.testSum;
         cJSON *json_summary    = NULL;
         cJSON *json_modalArray = NULL;
 
@@ -1495,8 +1838,8 @@ int output_maxrate(int connindex) {
                 //
                 // If it exists add JSON sub-interval array to output object
                 //
-                if (c->json_siArray != NULL) {
-                        cJSON_AddItemToObject(json_output, "IncrementalResult", c->json_siArray);
+                if (json_siArray != NULL) {
+                        cJSON_AddItemToObject(json_output, "IncrementalResult", json_siArray);
                 }
         }
 
@@ -1521,7 +1864,7 @@ int output_maxrate(int connindex) {
                         strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
                 }
                 *intfrate = '\0';
-                if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
+                if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
                         snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
                 }
                 var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
@@ -1534,6 +1877,7 @@ int output_maxrate(int connindex) {
                 //
                 json_summary = cJSON_CreateObject();
                 //
+                cJSON_AddNumberToObject(json_summary, "ActiveConnections", repo.actConnCount);
                 if (sent > 0.0) {
                         dvar = ((double) ts->rxDatagrams * 100.0) / sent;
                         cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", dvar, 2);
@@ -1580,8 +1924,8 @@ int output_maxrate(int connindex) {
         if (c->rttMinimum != INITIAL_MIN_DELAY)
                 rttmin = c->rttMinimum;
         if (!conf.jsonOutput) {
-                strcpy(scratch2, "%s%s Minimum " MINIMUM_TEXT);
-                var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, rttmin);
+                strcpy(scratch2, "%s%s " MINIMUM_FINAL);
+                var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, rttmin, repo.actConnCount);
                 send_proc(errConn, scratch, var);
         } else {
                 //
@@ -1612,15 +1956,13 @@ int output_maxrate(int connindex) {
                                 sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
                         }
                         *intfrate = '\0';
-                        if (c->intfFD >= 0) { // Append interface rate to L3/IP rate
-                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", c->intfMax[i]);
+                        if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
+                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", repo.intfMax[i]);
                         }
                         strcpy(scratch2,
                                "%s%s %s Mbps(L3/IP): %.2f%s, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-                        var = sprintf(
-                            scratch, scratch2, connid, testtype, maxtext, get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD),
-                            intfrate, get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD),
-                            get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD), get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD));
+                        var = sprintf(scratch, scratch2, connid, testtype, maxtext, repo.rateMaxL3[i], intfrate, repo.rateMaxL2[i],
+                                      repo.rateMaxL1[i], repo.rateMaxL0[i]);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (conf.bimodalCount == 0) {
@@ -1636,18 +1978,19 @@ int output_maxrate(int connindex) {
                         cJSON_AddNumberToObject(json_atmax, "Mode", i + 1);
                         cJSON_AddNumberToObject(json_atmax, "Intervals", var);
                         //
-                        create_timestamp(&c->timeOfMax[i]);
+                        create_timestamp(&repo.timeOfMax[i]);
                         cJSON_AddStringToObject(json_atmax, "TimeOfMax", scratch);
+                        cJSON_AddNumberToObject(json_atmax, "ActiveConnections", repo.actConnections[i]);
                         //
-                        sent = (double) c->sisMax[i].rxDatagrams + (double) c->sisMax[i].seqErrLoss;
+                        sent = (double) repo.sisMax[i].rxDatagrams + (double) repo.sisMax[i].seqErrLoss;
                         if (sent > 0.0) {
-                                dvar = ((double) c->sisMax[i].rxDatagrams * 100.0) / sent;
+                                dvar = ((double) repo.sisMax[i].rxDatagrams * 100.0) / sent;
                                 cJSON_AddNumberPToObject(json_atmax, "DeliveredPercent", dvar, 2);
-                                dvar = (double) c->sisMax[i].seqErrLoss / sent;
+                                dvar = (double) repo.sisMax[i].seqErrLoss / sent;
                                 cJSON_AddNumberPToObject(json_atmax, "LossRatioAtMax", dvar, 9);
-                                dvar = (double) c->sisMax[i].seqErrOoo / sent;
+                                dvar = (double) repo.sisMax[i].seqErrOoo / sent;
                                 cJSON_AddNumberPToObject(json_atmax, "ReorderedRatioAtMax", dvar, 9);
-                                dvar = (double) c->sisMax[i].seqErrDup / sent;
+                                dvar = (double) repo.sisMax[i].seqErrDup / sent;
                                 cJSON_AddNumberPToObject(json_atmax, "ReplicatedRatioAtMax", dvar, 9);
                         } else {
                                 cJSON_AddNumberPToObject(json_atmax, "DeliveredPercent", 0.0, 2);
@@ -1655,44 +1998,40 @@ int output_maxrate(int connindex) {
                                 cJSON_AddNumberPToObject(json_atmax, "ReorderedRatioAtMax", 0.0, 9);
                                 cJSON_AddNumberPToObject(json_atmax, "ReplicatedRatioAtMax", 0.0, 9);
                         }
-                        cJSON_AddNumberToObject(json_atmax, "LossCount", c->sisMax[i].seqErrLoss);
-                        cJSON_AddNumberToObject(json_atmax, "ReorderedCount", c->sisMax[i].seqErrOoo);
-                        cJSON_AddNumberToObject(json_atmax, "ReplicatedCount", c->sisMax[i].seqErrDup);
+                        cJSON_AddNumberToObject(json_atmax, "LossCount", repo.sisMax[i].seqErrLoss);
+                        cJSON_AddNumberToObject(json_atmax, "ReorderedCount", repo.sisMax[i].seqErrOoo);
+                        cJSON_AddNumberToObject(json_atmax, "ReplicatedCount", repo.sisMax[i].seqErrDup);
                         //
                         dvmin = dvavg = 0;
-                        if (c->sisMax[i].delayVarCnt > 0) {
-                                dvmin = (unsigned int) c->sisMax[i].delayVarMin;
-                                dvavg = (unsigned int) (c->sisMax[i].delayVarSum / c->sisMax[i].delayVarCnt);
+                        if (repo.sisMax[i].delayVarCnt > 0) {
+                                dvmin = (unsigned int) repo.sisMax[i].delayVarMin;
+                                dvavg = (unsigned int) (repo.sisMax[i].delayVarSum / repo.sisMax[i].delayVarCnt);
                         }
                         dvar = (double) dvmin / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "PDVMin", dvar, -9);
                         dvar = (double) dvavg / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "PDVAvg", dvar, -9);
-                        dvar = (double) c->sisMax[i].delayVarMax / 1000.0;
+                        dvar = (double) repo.sisMax[i].delayVarMax / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "PDVMax", dvar, -9);
-                        dvar = (double) (c->sisMax[i].delayVarMax - dvmin) / 1000.0;
+                        dvar = (double) (repo.sisMax[i].delayVarMax - dvmin) / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "PDVRangeAtMax", dvar, -9);
                         //
                         rttmin = 0;
-                        if (c->sisMax[i].rttMinimum != INITIAL_MIN_DELAY) {
-                                rttmin = (unsigned int) c->sisMax[i].rttMinimum;
+                        if (repo.sisMax[i].rttMinimum != INITIAL_MIN_DELAY) {
+                                rttmin = (unsigned int) repo.sisMax[i].rttMinimum;
                         }
                         dvar = (double) rttmin / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTMin", dvar, -9);
-                        dvar = (double) c->sisMax[i].rttMaximum / 1000.0;
+                        dvar = (double) repo.sisMax[i].rttMaximum / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTMax", dvar, -9);
-                        dvar = (double) (c->sisMax[i].rttMaximum - rttmin) / 1000.0;
+                        dvar = (double) (repo.sisMax[i].rttMaximum - rttmin) / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTRangeAtMax", dvar, -9);
                         //
-                        cJSON_AddNumberPToObject(json_atmax, "MaxIPLayerCapacity",
-                                                 get_rate(connindex, &c->sisMax[i], L3DG_OVERHEAD), 2);
-                        cJSON_AddNumberPToObject(json_atmax, "InterfaceEthMbps", c->intfMax[i], 2);
-                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityNoFCS",
-                                                 get_rate(connindex, &c->sisMax[i], L2DG_OVERHEAD), 2);
-                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCS",
-                                                 get_rate(connindex, &c->sisMax[i], L1DG_OVERHEAD), 2);
-                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCSVLAN",
-                                                 get_rate(connindex, &c->sisMax[i], L0DG_OVERHEAD), 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxIPLayerCapacity", repo.rateMaxL3[i], 2);
+                        cJSON_AddNumberPToObject(json_atmax, "InterfaceEthMbps", repo.intfMax[i], 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityNoFCS", repo.rateMaxL2[i], 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCS", repo.rateMaxL1[i], 2);
+                        cJSON_AddNumberPToObject(json_atmax, "MaxETHCapacityWithFCSVLAN", repo.rateMaxL0[i], 2);
                         //
                         dvar = ((double) c->clockDeltaMin + (double) dvmin) / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "MinOnewayDelayAtMax", dvar, -9);
@@ -1729,7 +2068,8 @@ int output_maxrate(int connindex) {
 //
 double get_rate(int connindex, struct subIntStats *sis, int overhead) {
         register struct connection *c = &conn[connindex];
-        unsigned int delta, dgrams, bytes;
+        unsigned int delta, dgrams;
+        unsigned long long bytes;
         double mbps = 0.0;
 
         if (c->ipProtocol == IPPROTO_IPV6)
@@ -1738,11 +2078,11 @@ double get_rate(int connindex, struct subIntStats *sis, int overhead) {
         if (sis == NULL) {
                 delta  = c->tiDeltaTime;
                 dgrams = c->tiRxDatagrams;
-                bytes  = c->tiRxBytes;
+                bytes  = (unsigned long long) c->tiRxBytes;
         } else {
                 delta  = (unsigned int) sis->deltaTime;
                 dgrams = (unsigned int) sis->rxDatagrams;
-                bytes  = (unsigned int) sis->rxBytes;
+                bytes  = (unsigned long long) sis->rxBytes;
         }
         if (delta > 0) {
                 mbps = (double) dgrams;
@@ -1774,27 +2114,77 @@ int stop_test(int connindex) {
 }
 //----------------------------------------------------------------------------
 //
+// Service recvmmsg() data buffers for load PDUs
+//
+int service_recvmmsg(int connindex) {
+        int i;
+
+        repo.rcvDataPtr = repo.defBuffer;
+        for (i = 0; i < RECVMMSG_SIZE; i++) {
+                if (mmsgDataSize[i] == 0)
+                        break;
+                repo.rcvDataSize = mmsgDataSize[i];
+                service_loadpdu(connindex);
+                repo.rcvDataPtr += RCV_HEADER_SIZE;
+        }
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
 // Generic connection receive processor
 //
 int recv_proc(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var, recvsize;
+        static struct mmsghdr mmsg[RECVMMSG_SIZE]; // Static array
+        static struct iovec iov[RECVMMSG_SIZE];    // Static array
+        char *rcvbuf;
+        int i, var, recvsize;
+        struct msghdr *msg;
 
         //
-        // Specify receive buffer size (minimize for load PDUs to reduce overhead of memory copy)
+        // Specify receive buffer size (truncate load PDUs to reduce overhead of memory copy)
         //
-        if (c->secAction == &service_loadpdu) {
-                recvsize = sizeof(struct loadHdr);
+        if (c->secAction == &service_recvmmsg || c->secAction == &service_loadpdu) {
+                recvsize = RCV_HEADER_SIZE;
         } else {
                 recvsize = DEF_BUFFER_SIZE;
         }
+        repo.rcvDataPtr = repo.defBuffer; // Default to start of general I/O buffer
 
         //
         // Issue read
         //
         if (c->subType == SOCK_STREAM || c->connected) {
-                repo.rcvDataSize = recv(c->fd, repo.defBuffer, recvsize, 0);
-
+                //
+                // Process based on secondary action routine
+                //
+                if (c->secAction == &service_recvmmsg) {
+                        //
+                        // Prepare message structures
+                        //
+                        memset(mmsg, 0, sizeof(mmsg));
+                        rcvbuf = repo.defBuffer;
+                        for (i = 0; i < RECVMMSG_SIZE; i++) {
+                                iov[i].iov_base            = rcvbuf;
+                                iov[i].iov_len             = recvsize;
+                                mmsg[i].msg_hdr.msg_iov    = &iov[i];
+                                mmsg[i].msg_hdr.msg_iovlen = 1;
+                                //
+                                rcvbuf += recvsize;  // Next buffer
+                                mmsgDataSize[i] = 0; // Initialize as empty
+                        }
+#ifdef HAVE_RECVMMSG
+                        //
+                        // Perform read and process messages
+                        //
+                        repo.rcvDataSize = recvmmsg(c->fd, mmsg, RECVMMSG_SIZE, MSG_TRUNC, NULL); // Returns number of messages
+                        for (i = 0; i < repo.rcvDataSize; i++) {
+                                mmsgDataSize[i] = (int) mmsg[i].msg_len; // Save actual received length (although truncated)
+                        }
+#endif
+                } else {
+                        repo.rcvDataSize = recv(c->fd, repo.defBuffer, recvsize, 0);
+                }
         } else if (c->subType == SOCK_DGRAM) {
                 repo.remSasLen   = sizeof(repo.remSas);
                 repo.rcvDataSize = recvfrom(c->fd, repo.defBuffer, recvsize, 0, (struct sockaddr *) &repo.remSas, &repo.remSasLen);
@@ -1807,15 +2197,15 @@ int recv_proc(int connindex) {
         //
         if (repo.rcvDataSize < 0) {
                 repo.rcvDataSize = 0;
-                if ((var = receive_trunc(errno, recvsize, sizeof(struct loadHdr))) > 0) {
+                if ((var = receive_trunc(errno, recvsize, RCV_HEADER_SIZE)) > 0) {
                         repo.rcvDataSize = var;
-                } else if ((var = socket_error(connindex, errno, "RECV/RECVFROM")) > 0) {
+                } else if ((var = socket_error(connindex, errno, "RECVMMSG/RECV/RECVFROM")) > 0) {
                         if (!conf.errSuppress) {
                                 send_proc(errConn, scratch, var);
                         }
                 }
         } else if ((repo.rcvDataSize == 0) && (c->subType == SOCK_STREAM)) {
-                if (monConn >= 0) {
+                if (conf.verbose) {
                         var = sprintf(scratch, "[%d]Connection was closed\n", connindex);
                         send_proc(monConn, scratch, var);
                 }
@@ -1971,7 +2361,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
         //
         if (hton) {
                 sisnet->rxDatagrams = htonl(sishost->rxDatagrams);
-                sisnet->rxBytes     = htonl(sishost->rxBytes);
+                sisnet->rxBytes     = (uint64_t) htonll(sishost->rxBytes);
                 sisnet->deltaTime   = htonl(sishost->deltaTime);
                 sisnet->seqErrLoss  = htonl(sishost->seqErrLoss);
                 sisnet->seqErrOoo   = htonl(sishost->seqErrOoo);
@@ -1985,7 +2375,7 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sisnet->accumTime   = htonl(sishost->accumTime);
         } else {
                 sishost->rxDatagrams = ntohl(sisnet->rxDatagrams);
-                sishost->rxBytes     = ntohl(sisnet->rxBytes);
+                sishost->rxBytes     = (uint64_t) ntohll(sisnet->rxBytes);
                 sishost->deltaTime   = ntohl(sisnet->deltaTime);
                 sishost->seqErrLoss  = ntohl(sisnet->seqErrLoss);
                 sishost->seqErrOoo   = ntohl(sisnet->seqErrOoo);
@@ -2014,24 +2404,31 @@ void output_warning(int connindex, int type) {
                 if (conf.verbose)
                         sprintf(connid, "[%d]", connindex);
 
-                var = 0;
-                if (type == WARN_LOC_STATUS || type == WARN_LOC_STOPPED) {
-                        strcpy(location, "LOCAL");
-                } else {
-                        strcpy(location, "REMOTE");
-                }
+                var       = 0;
+                *location = '\0';
                 switch (type) {
                 case WARN_LOC_STATUS:
+                        strcpy(location, "LOCAL");
                 case WARN_REM_STATUS:
-                        var = sprintf(scratch, "%s%s WARNING: Incoming status feedback messages lost (%d)\n", connid, location,
+                        if (*location == '\0')
+                                strcpy(location, "REMOTE");
+                        var = sprintf(scratch, "%s%s WARNING: Incoming status feedback messages lost (%d)", connid, location,
                                       c->spduSeqErr);
                         break;
                 case WARN_LOC_STOPPED:
+                        strcpy(location, "LOCAL");
                 case WARN_REM_STOPPED:
-                        var = sprintf(scratch, "%s%s WARNING: Incoming traffic has completely stopped\n", connid, location);
+                        if (*location == '\0')
+                                strcpy(location, "REMOTE");
+                        var = sprintf(scratch, "%s%s WARNING: Incoming traffic has completely stopped", connid, location);
                         break;
                 }
                 if (var > 0) {
+                        if (!repo.isServer) {
+                                var += sprintf(&scratch[var], " [Server %s:%d]", repo.server[c->serverIndex].ip,
+                                               repo.server[c->serverIndex].port);
+                        }
+                        scratch[var++] = '\n';
                         send_proc(errConn, scratch, var);
                         repo.endTimeStatus = STATUS_WARNING;
                 }
@@ -2056,8 +2453,7 @@ int create_timestamp(struct timespec *tspecvar) {
 //
 // Update interface statistics via sysfs
 //
-double upd_intf_stats(int connindex, BOOL initialize) {
-        register struct connection *c = &conn[connindex];
+double upd_intf_stats(BOOL initialize) {
         int var;
         unsigned long intfbytes; // Use unsigned long to support 64-bit counters with 64-bit OS
         double mbps = 0.0;
@@ -2065,28 +2461,73 @@ double upd_intf_stats(int connindex, BOOL initialize) {
         char buffer[32];
 
         if (!initialize) {
-                lseek(c->intfFD, 0, SEEK_SET); // Reset position to read new value
+                lseek(repo.intfFD, 0, SEEK_SET); // Reset position to read new value
         }
-        if ((var = (int) read(c->intfFD, buffer, sizeof(buffer))) > 0) {
+        if ((var = (int) read(repo.intfFD, buffer, sizeof(buffer))) > 0) {
                 buffer[var] = '\0';
                 if ((intfbytes = strtoul(buffer, NULL, 10)) > 0) {
                         if (!initialize) {
-                                if (tspecisset(&c->intfTime)) {
-                                        tspecminus(&repo.systemClock, &c->intfTime, &tspecvar);
-                                        if (intfbytes >= c->intfBytes) {
-                                                mbps = (double) (intfbytes - c->intfBytes);
+                                if (tspecisset(&repo.intfTime)) {
+                                        tspecminus(&repo.systemClock, &repo.intfTime, &tspecvar);
+                                        if (intfbytes >= repo.intfBytes) {
+                                                mbps = (double) (intfbytes - repo.intfBytes);
                                         } else {
                                                 // Counter wrapped
-                                                mbps = (double) ((ULONG_MAX - c->intfBytes) + intfbytes + 1);
+                                                mbps = (double) ((ULONG_MAX - repo.intfBytes) + intfbytes + 1);
                                         }
                                         mbps *= 8.0;
                                         mbps /= (double) tspecusec(&tspecvar);
                                 }
                         }
-                        c->intfBytes = intfbytes;                  // Save current value
-                        tspeccpy(&c->intfTime, &repo.systemClock); // Save current time
+                        repo.intfBytes = intfbytes;                  // Save current value
+                        tspeccpy(&repo.intfTime, &repo.systemClock); // Save current time
                 }
         }
         return mbps;
+}
+//----------------------------------------------------------------------------
+//
+// Return a uniformly distributed random number between min and max
+//
+int getuniform(int min, int max) {
+        int rvar = (int) random(); // Obtain random value (0 - RAND_MAX)
+
+        return (rvar % (max - min + 1)) + min;
+}
+//----------------------------------------------------------------------------
+//
+// Output minimum message
+//
+void output_minimum(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+
+        var = sprintf(scratch, "[%d]" MINIMUM_TEXT "\n", connindex, c->clockDeltaMin, c->rttMinimum);
+        send_proc(monConn, scratch, var);
+
+        return;
+}
+//----------------------------------------------------------------------------
+//
+// Output debug message
+//
+void output_debug(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        unsigned int dvmin, dvavg;
+
+        dvmin = dvavg = 0;
+        if (c->delayVarCnt > 0) {
+                dvmin = c->delayVarMin;
+                dvavg = c->delayVarSum / c->delayVarCnt;
+        }
+        var = -1;
+        if (c->rttSample != INITIAL_MIN_DELAY)
+                var = (int) c->rttSample;
+        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg, c->delayVarMax,
+                      var, get_rate(connindex, NULL, L3DG_OVERHEAD));
+        send_proc(monConn, scratch, var);
+
+        return;
 }
 //----------------------------------------------------------------------------

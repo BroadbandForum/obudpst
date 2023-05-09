@@ -1,11 +1,12 @@
 Name:           udpst
-Version:        7.5.0
-Release:        2%{?dist}
+Version:        8.0.0
+Release:        1%{?dist}
 Summary:        Open Broadband-UDP Speed Test
 Group:          Development/Libraries
 License:        BSD 3-Clause
 URL:            https://github.com/BroadbandForum/obudpst
-#git archive --format=tar.gz -o udpst-7.1.0.tar.gz --prefix=udpst-7.1.0/ main
+#git stash create
+#git archive --format=tar.gz -o udpst-8.0.0.tar.gz --prefix=udpst-8.0.0/ {stash_id}
 Source0:        udpst-%{version}.tar.gz
 BuildRequires:  cmake3
 BuildRequires:  make
