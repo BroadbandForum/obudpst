@@ -61,6 +61,9 @@ systemctl status  udpst --lines=0
 %attr(0644,root,root) %{_unitdir}/%{name}.service
 
 %changelog
+* Tue May 09 2023 Michael R. Davis <mrdvt92@yahoo.com> - 8.0.0-1
+- Upstream update
+
 * Fri Jun 03 2022 Michael R. Davis <mrdvt92@yahoo.com> - 7.5.0-2
 - Added pandoc man file
 
