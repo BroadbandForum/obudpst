@@ -251,6 +251,7 @@ struct configuration {
         char intfName[IFNAMSIZ + 1];     // Local interface for supplemental stats
         int logFileMax;                  // Maximum log file size
         char *logFile;                   // Name of log file
+        char *outputFile;                // Name of output (export) file
 };
 //----------------------------------------------------------------------------
 //
@@ -355,6 +356,7 @@ struct connection {
         int locPort;                     // Local port
         char remAddr[INET6_ADDR_STRLEN]; // Remote IP address as string
         int remPort;                     // Remote port
+        FILE *outputFPtr;                // Output file pointer
         //
         int srIndex;                 // Sending rate index
         struct sendingRate srStruct; // Sending rate structure

@@ -680,3 +680,70 @@ $ cmake -D DISABLE_INT_TIMER=ON .
 *Note: Because of the increased CPU utilization, this option is not recommended
 for standard server operation.*
 
+## Output (Export) of Received Load Traffic Metadata
+To allow for advanced post-analysis of received load traffic during testing, it
+is now possible to specify an output file (via the `-O file` option) to capture
+datagram metadata as CSV text. However, it must be stressed that due to the
+significant number of file writes, this capability is NOT intended for
+large-scale usage or production environments. In fact, on hosts with slower
+filesystems (e.g., SD card devices) it may cause udpst test traffic loss. In
+such cases it would be beneficial to utilize a memory filesystem such as
+`/dev/shm` for the output file while a test is running. Also, because this
+function is only performed at the load receiver, it can only be used on the
+client with downstream testing. When used at the server, only upstream testing
+produces an output file. For multi-connection testing in either case, one file
+is created for each connection. 
+
+**File Naming**
+
+The provided file name can contain a number of conversion specifications to
+allow for dynamic file name creation. The following are introduced by a '#'
+character:
+- #i - Multi-connection index (0,1,2,...)
+- #c - Multi-connection count (the total requested/attempted)
+- #I - Multi-connection ID (random value common to each connection of a test)
+- #l - Local IP address of data connection
+- #r - Remote IP address of data connection
+- #s - Source port of data connection
+- #d - Destination port of data connection
+- #M - Mode of operation ('S' = Server, 'C' = Client)
+- #D - Direction of test ('U' = Upstream, 'D' = Downstream)
+- #H - Server host name (or IP) specified on command-line
+- #p - Control port used for test setup
+
+In addition to the above, all conversion specifications supported by strftime()
+(and introduced by a '%' character) can also be utilized - see strftime() man
+page for details. For example, an output file specified as
+`-O udpst_%F_%H%M%S_#M_#D_#i-#c_#I.csv` would produce a file name similar to
+`udpst_2023-05-30_152402_S_U_0-3_23831.csv`.
+
+**File Format**
+
+The CSV output file will contain the following columns:
+- SeqNo : The sequence number of the datagram as assigned by the sender.
+Datagrams are listed in the order they are received.
+- PayLoad : The payload size of the datagram in bytes.
+- SrcTxTime : The source transmit timestamp of the datagram (based on the
+sender's clock).
+- DstRxTime : The destination receive timestamp of the datagram (based on the
+receiver's clock).
+- OWD : The one-way delay of the datagram if the sender's and receiver's clocks
+are sufficiently synchronized, else it merely reflects the difference in the
+clocks (and could be negative). This value is in milliseconds.
+- RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
+measurements and carried from the load receiver to the load sender in the
+periodic status feedback messages.
+- RTTRxTime : The receive timestamp used for RTT measurements and carried from
+the load sender back to the load receiver in the very next load PDU sent.
+- RTTRespDelay : The RTT response delay includes the time from when the status
+feedback message was received and the very next load PDU was sent (i.e., the
+turn-around time in the load sender). This value is in milliseconds.
+- RTT : The resulting "network" RTT when the RTT response delay is subtracted
+from the difference between the RTT transmit and receive times. This value is
+in milliseconds.
+
+*Because RTT measurements are only periodically sampled (as part of each status
+feedback message), those columns will be empty most of the time. Also, all
+timestamps are based on the local system time zone and utilize microsecond
+resolution.*
+

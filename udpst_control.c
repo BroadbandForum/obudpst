@@ -61,6 +61,7 @@
  * Len Ciavattone          03/05/2023    Fix server setup error messages
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
+ * Len Ciavattone          05/24/2023    Add data output (export) capability
  *
  */
 
@@ -105,6 +106,7 @@ int service_actreq(int);
 int service_actresp(int);
 int sock_connect(int);
 int connected(int);
+int open_outputfile(int);
 
 //----------------------------------------------------------------------------
 //
@@ -131,7 +133,7 @@ extern cJSON *json_top, *json_output;
 #define RAND_TEXT   "random"
 #define TESTHDR_LINE1 \
         "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n"
-#define TESTHDR_LINE2 "    SendRate Index: %s, Cong. Thresh: %d, High-Speed Delta: %d, SeqError Thresh: %d, Algo: %s, Conn: %d, "
+#define TESTHDR_LINE2 "  ID: %d, SR Index: %s, Cong. Thresh: %d, HS Delta: %d, SeqErr Thresh: %d, Algo: %s, Conn: %d, "
 static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d%s\n";
 static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d%s\n";
 
@@ -164,6 +166,8 @@ void init_conn(int connindex, BOOL cleanup) {
 #endif
                         close(c->fd);
                 }
+                if (c->outputFPtr != NULL)
+                        fclose(c->outputFPtr);
         }
 
         //
@@ -698,8 +702,7 @@ int service_setupresp(int connindex) {
 int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8], payload[8];
-        char addrstr[INET6_ADDR_STRLEN], portstr[8], intflabel[IFNAMSIZ + 8];
+        char addrstr[INET6_ADDR_STRLEN], portstr[8], *testtype;
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -986,6 +989,15 @@ int service_actreq(int connindex) {
         }
 
         //
+        // Open output file if specified for upstream tests
+        //
+        if (conf.outputFile != NULL && cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
+                if ((var = open_outputfile(connindex)) > 0) {
+                        send_proc(errConn, scratch, var); // Output error message
+                }
+        }
+
+        //
         // Update end time (used as watchdog) in case client goes quiet
         //
         tspecvar.tv_sec  = TIMEOUT_NOTRAFFIC;
@@ -1173,8 +1185,9 @@ int service_actresp(int connindex) {
                 }
                 if (!conf.jsonOutput) {
                         var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                                      c->trialInt, boolText[c->ignoreOooDup], payload, sritext, c->slowAdjThresh, c->highSpeedDelta,
-                                      c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->mcCount, c->ipTosByte, intflabel);
+                                      c->trialInt, boolText[c->ignoreOooDup], payload, c->mcIdent, sritext, c->slowAdjThresh,
+                                      c->highSpeedDelta, c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->mcCount, c->ipTosByte,
+                                      intflabel);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (!conf.jsonBrief) {
@@ -1191,6 +1204,7 @@ int service_actresp(int connindex) {
                                 } else {
                                         cJSON_AddStringToObject(json_input, "Role", "Receiver");
                                 }
+                                cJSON_AddNumberToObject(json_input, "ID", c->mcIdent);
                                 cJSON_AddStringToObject(json_input, "Host", repo.server[0].name);
                                 cJSON_AddStringToObject(json_input, "HostIPAddress", repo.server[0].ip);
                                 cJSON_AddNumberToObject(json_input, "Port", c->remPort);
@@ -1294,6 +1308,15 @@ int service_actresp(int connindex) {
                         cJSON_AddNumberToObject(json_output, "TestInterval", c->testIntTime);
                         cJSON_AddNumberToObject(json_output, "TmaxRTTUsed", TIMEOUT_NOTRAFFIC * MSECINSEC);
                         cJSON_AddNumberToObject(json_output, "TimestampResolutionUsed", 1);
+                }
+        }
+
+        //
+        // Open output file if specified for downstream test
+        //
+        if (conf.outputFile != NULL && cHdrTA->cmdRequest == CHTA_CREQ_TESTACTDS) {
+                if ((var = open_outputfile(connindex)) > 0) {
+                        send_proc(errConn, scratch, var); // Output error message
                 }
         }
 
@@ -1705,6 +1728,107 @@ int connected(int connindex) {
         } else {
                 c->ipProtocol = IPPROTO_IP;
         }
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
+// Open output (export) data file
+//
+int open_outputfile(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        char *lbuffer, *chr, fname[STRING_SIZE];
+
+        if (*conf.outputFile == '\0') {
+                return sprintf(scratch, "ERROR: Output file not defined\n");
+        }
+
+        //
+        // Replace special conversion specification options (#i,#c,...)
+        //
+        var     = 0;
+        lbuffer = conf.outputFile;
+        while (*lbuffer) {
+                if (*lbuffer == '#') {
+                        chr = lbuffer + 1;
+                        if (*chr == 'i') { // Multi-Connection index
+                                var += sprintf(&scratch[var], "%d", c->mcIndex);
+                                lbuffer++;
+                        } else if (*chr == 'c') { // Multi-Connection count
+                                var += sprintf(&scratch[var], "%d", c->mcCount);
+                                lbuffer++;
+                        } else if (*chr == 'I') { // Multi-Connection identifier
+                                var += sprintf(&scratch[var], "%d", c->mcIdent);
+                                lbuffer++;
+                        } else if (*chr == 'l') { // Local IP
+                                var += sprintf(&scratch[var], "%s", c->locAddr);
+                                lbuffer++;
+                        } else if (*chr == 'r') { // Remote IP
+                                var += sprintf(&scratch[var], "%s", c->remAddr);
+                                lbuffer++;
+                        } else if (*chr == 's') { // Source port
+                                var += sprintf(&scratch[var], "%d", c->remPort);
+                                lbuffer++;
+                        } else if (*chr == 'd') { // Destination port
+                                var += sprintf(&scratch[var], "%d", c->locPort);
+                                lbuffer++;
+                        } else if (*chr == 'M') { // Mode
+                                if (repo.isServer)
+                                        scratch[var++] = 'S'; // Server
+                                else
+                                        scratch[var++] = 'C'; // Client
+                                lbuffer++;
+                        } else if (*chr == 'D') { // Direction
+                                if (repo.isServer)
+                                        scratch[var++] = 'U'; // Upstream
+                                else
+                                        scratch[var++] = 'D'; // Downstream
+                                lbuffer++;
+                        } else if (*chr == 'H') { // Host name (or IP) specified for server
+                                if (repo.isServer) {
+                                        if (repo.server[0].name == NULL)
+                                                var += sprintf(&scratch[var], "%s", "InAddrAny");
+                                        else
+                                                var += sprintf(&scratch[var], "%s", repo.server[0].name);
+                                } else {
+                                        var += sprintf(&scratch[var], "%s", repo.server[c->serverIndex].name);
+                                }
+                                lbuffer++;
+                        } else if (*chr == 'p') { // Control port
+                                if (repo.isServer)
+                                        var += sprintf(&scratch[var], "%d", repo.server[0].port);
+                                else
+                                        var += sprintf(&scratch[var], "%d", repo.server[c->serverIndex].port);
+                                lbuffer++;
+                        } else {
+                                scratch[var++] = *lbuffer; // Copy character if conversion option not found
+                        }
+                } else {
+                        scratch[var++] = *lbuffer; // Copy non-conversion character
+                }
+                lbuffer++;
+        }
+        scratch[var] = '\0';
+
+        //
+        // Replace date/time conversion specifications with current values
+        //
+        if (strftime(fname, sizeof(fname), scratch, localtime(&repo.systemClock.tv_sec)) == 0) {
+                return sprintf(scratch, "ERROR: Output file name length exceeds maximum\n");
+        }
+
+        //
+        // Open output file
+        //
+        if ((c->outputFPtr = fopen(fname, "w")) == NULL) {
+                return sprintf(scratch, "FOPEN ERROR: <%.*s> %s\n", NAME_MAX, fname, strerror(errno));
+        }
+
+        //
+        // Initialize with header
+        //
+        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,RTTTxTime,RTTRxTime,RTTRespDelay,RTT\n", c->outputFPtr);
+
         return 0;
 }
 //----------------------------------------------------------------------------

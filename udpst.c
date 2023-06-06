@@ -64,6 +64,7 @@
  * Len Ciavattone          03/04/2023    Load balance returned epoll events
  * Len Ciavattone          03/22/2023    Add optimization output to banner
  * Len Ciavattone          04/04/2023    Add optional rate limiting to banner
+ * Len Ciavattone          05/24/2023    Add data output (export) capability
  *
  */
 
@@ -763,7 +764,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, j, var, value;
-        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSB:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -1013,6 +1014,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                         break;
                 case 'S':
                         conf.showSendingRates = TRUE;
+                        break;
+                case 'O':
+                        if (conf.usTesting && !repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Client output file only valid for downstream testing\n");
+                                var = write(fd, scratch, var);
+                                return -1;
+                        }
+                        conf.outputFile = optarg;
                         break;
                 case 'B':
                         if (repo.isServer) {
@@ -1283,6 +1292,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "       -D           Enable debug output messaging (requires '-v')\n"
                                       "(m)    -X           Randomize datagram payload (else zeroes)\n"
                                       "       -S           Show server sending rate table and exit\n"
+                                      "       -O file      Output (export) file of received load metadata\n"
                                       "       -B mbps      Max bandwidth required by client OR available to server\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
                                       "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"

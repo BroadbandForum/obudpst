@@ -69,6 +69,7 @@
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  * Len Ciavattone          04/04/2023    Add optional rate limiting
+ * Len Ciavattone          05/24/2023    Add data output (export) capability
  *
  */
 
@@ -673,9 +674,10 @@ int service_loadpdu(int connindex) {
         register struct connection *c = &conn[connindex];
         int i, delta, var;
         BOOL bvar, firstpdu = FALSE;
-        unsigned int uvar, seqno, rttrd;
+        unsigned int uvar, seqno, rttrd, payload;
         struct loadHdr *lHdr = (struct loadHdr *) repo.rcvDataPtr;
         struct timespec tspecvar, tspecdelta;
+        char *nulloutput = ",,,,\n";
 
         //
         // Verify PDU
@@ -749,11 +751,11 @@ int service_loadpdu(int connindex) {
         //
         // Update traffic stats (use size specified in PDU, actual receive may have been truncated)
         //
-        uvar = (unsigned int) ntohs(lHdr->udpPayload);
+        payload = (unsigned int) ntohs(lHdr->udpPayload);
         c->sisAct.rxDatagrams++;
-        c->sisAct.rxBytes += (uint64_t) uvar;
+        c->sisAct.rxBytes += (uint64_t) payload;
         c->tiRxDatagrams++;
-        c->tiRxBytes += uvar;
+        c->tiRxBytes += payload;
 
         //
         // Check sequence number for loss, also reordering/duplication (end processing if so)
@@ -811,7 +813,21 @@ int service_loadpdu(int connindex) {
                 c->lpduHistBuf[c->lpduHistIdx] = seqno;                                // Save sequence number in history buffer
                 c->lpduHistIdx                 = ++c->lpduHistIdx & LPDU_HISTORY_MASK; // Update history buffer index
         }
+        //
+        // Calculate one-way clock delta (used again further down)
+        //
+        tspecvar.tv_sec  = (time_t) ntohl(lHdr->lpduTime_sec);
+        tspecvar.tv_nsec = (long) ntohl(lHdr->lpduTime_nsec);
+        tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
+        delta = (int) tspecmsec(&tspecdelta);
+        if (c->outputFPtr != NULL) { // Start output data with one-way values
+                fprintf(c->outputFPtr, "%u,%u,%ld.%06ld,%ld.%06ld,%d", seqno, payload, tspecvar.tv_sec,
+                        tspecvar.tv_nsec / NSECINUSEC, repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, delta);
+        }
         if (var > 0) {
+                if (c->outputFPtr != NULL) { // Finalize output data with null entries
+                        fputs(nulloutput, c->outputFPtr);
+                }
                 return 0; // No further processing for non-increasing sequence numbers
         }
 
@@ -832,6 +848,10 @@ int service_loadpdu(int connindex) {
                 } else if (rttrd == uvar + 1) { // Allow for rounding adjustment on either end
                         uvar = 0;
                 }
+                if (c->outputFPtr != NULL) { // Finalize output data with RTT values
+                        fprintf(c->outputFPtr, ",%ld.%06ld,%ld.%06ld,%u,%u\n", tspecvar.tv_sec, tspecvar.tv_nsec / NSECINUSEC,
+                                repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, rttrd, uvar);
+                }
                 //
                 // Check for new minimum
                 //
@@ -848,15 +868,15 @@ int service_loadpdu(int connindex) {
                 if (c->rttSample > (unsigned int) c->sisAct.rttMaximum)
                         c->sisAct.rttMaximum = (uint32_t) c->rttSample;
                 tspeccpy(&c->spduTime, &tspecvar); // Save to detect updated value
+        } else {
+                if (c->outputFPtr != NULL) { // Finalize output data with null entries
+                        fputs(nulloutput, c->outputFPtr);
+                }
         }
 
         //
-        // Calculate one-way clock delta and delay variation for this load PDU
+        // Process one-way clock delta (calculated above) and delay variation for this load PDU
         //
-        tspecvar.tv_sec  = (time_t) ntohl(lHdr->lpduTime_sec);
-        tspecvar.tv_nsec = (long) ntohl(lHdr->lpduTime_nsec);
-        tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
-        delta = (int) tspecmsec(&tspecdelta);
         if (firstpdu) {
                 c->clockDeltaMin = delta;
                 c->delayMinUpd   = TRUE;
