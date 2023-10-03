@@ -14,7 +14,7 @@
 #define HAVE_TIMEGM
 #define HAVE_WORKING_FORK
 #define HAVE_SENDMMSG
-#define HAVE_GSO
+/* #define HAVE_GSO */
 #define HAVE_RECVMMSG
 /* #undef DISABLE_INT_TIMER */
 /* #undef RATE_LIMITING */
