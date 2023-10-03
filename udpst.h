@@ -64,16 +64,41 @@
 #define WARNING_MSG_LIMIT 10                 // Warning message limit (per connection)
 #define WARNING_NOTRAFFIC 1                  // Receive traffic stopped warning threshold (sec)
 #define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 2)
-#define STATUS_SUCCESS    0  // Success (test completed without incident)
-#define STATUS_WARNING    1  // Warning or soft error (test runs but with anomaly)
-#define STATUS_ERROR      -1 // Failure or hard error (test designated as failure)
+//
+// General status and status base values for warning and error ranges (ErrorStatus)
+//   See udpst_protocol.h for CHSR_CRSP_XXXX and CHTA_CRSP_XXXX values
+//
+#define STATUS_SUCCESS      0   // Success (test completed without incident)
+#define STATUS_WARNBASE     1   // Warnings and soft errors
+#define STATUS_WARNMAX      49  // Warning and soft error maximum
+#define STATUS_CONF_ERRBASE 50  // Configuration errors
+#define STATUS_INIT_ERRBASE 75  // Initialization errors
+#define CHSR_CRSP_ERRBASE   100 // Setup request errors (offset by CHSR_CRSP_XXXX)
+#define CHTA_CRSP_ERRBASE   150 // Test activation errors (offset by CHTA_CRSP_XXXX)
+#define STATUS_CONN_ERRBASE 200 // Connection errors
+#define STATUS_ERROR        255 // General or unspecified error
+// Warnings (offset of STATUS_WARNBASE)
+#define WARN_SRV_TIMEOUT 0 // Server response timeout
+#define WARN_LOC_STATUS  1 // Locally received status messages lost
+#define WARN_REM_STATUS  2 // Remotely received status messages lost
+#define WARN_LOC_STOPPED 3 // Locally received traffic has stopped
+#define WARN_REM_STOPPED 4 // Remotely received traffic has stopped
+// Configuration errors (offset of STATUS_CONF_ERRBASE)
+#define ERROR_CONF_GENERIC 0 // Generic configuration issue
+// Initialization errors (offset of STATUS_INIT_ERRBASE)
+#define ERROR_INIT_GENERIC 0 // Generic configuration issue
+// Connection errors (offset of STATUS_CONN_ERRBASE)
+#define ERROR_CONN_MIN 0 // Minimum connections unavailable
+//
 // Alternative for INET6_ADDRSTRLEN (allows for '%' and textual Zone ID)
+//
 #define INET6_ADDR_STRLEN (INET6_ADDRSTRLEN + 1 + IFNAMSIZ)
-
+//
 // DISABLE_INT_TIMER disables the interval timer when compiling for client
 // devices that are unable to support the required clock resolution. Because
 // this results in high CPU utilization, it is not recommended for standard
 // server operation.
+//
 #ifndef DISABLE_INT_TIMER
 #define SEND_TIMER_ADJ 75 // Data send timer adjustment (us)
 #else

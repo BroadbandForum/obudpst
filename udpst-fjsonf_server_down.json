@@ -2,10 +2,11 @@
 	"IPLayerMaxConnections":	24,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"8.0.0",
+		"SoftwareVersion":	"8.1.0",
 		"ControlProtocolVersion":	10,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
-	"ErrorStatus":	-1,
-	"ErrorMessage":	"ERROR: Timeout awaiting response from server 10.0.0.1:25000"
+	"ErrorStatus":	200,
+	"ErrorMessage":	"ERROR: Minimum required connections (4) unavailable",
+	"ErrorMessage2":	"WARNING: Timeout awaiting response from server 10.0.0.4:25000"
 }

@@ -2,13 +2,14 @@
 	"IPLayerMaxConnections":	24,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"8.0.0",
+		"SoftwareVersion":	"8.1.0",
 		"ControlProtocolVersion":	10,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"Input":	{
 		"Interface":	"",
 		"Role":	"Receiver",
+		"ID":	11342,
 		"Host":	"test-server1.com",
 		"HostIPAddress":	"10.0.0.1",
 		"Port":	38513,
@@ -75,6 +76,7 @@
 		"EOMTime":	"2023-03-06T17:04:27.213064Z",
 		"Status":	"Error_Other"
 	},
-	"ErrorStatus":	-1,
-	"ErrorMessage":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 10.0.0.3:25000]"
+	"ErrorStatus":	200,
+	"ErrorMessage":	"ERROR: Minimum required connections (4) unavailable",
+	"ErrorMessage2":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 10.0.0.3:25000]"
 }

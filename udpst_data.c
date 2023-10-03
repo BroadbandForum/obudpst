@@ -70,6 +70,7 @@
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  * Len Ciavattone          04/04/2023    Add optional rate limiting
  * Len Ciavattone          05/24/2023    Add data output (export) capability
+ * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  *
  */
 
@@ -139,24 +140,20 @@ extern struct repository repo;
 extern struct connection *conn;
 //
 extern cJSON *json_top, *json_output, *json_siArray;
-extern char json_errbuf[STRING_SIZE];
+extern char json_errbuf[STRING_SIZE], json_errbuf2[STRING_SIZE];
 
 //----------------------------------------------------------------------------
 //
 // Global data
 //
-#define WARN_LOC_STATUS  0 // Locally received status messages lost
-#define WARN_REM_STATUS  1 // Remotely received status messages lost
-#define WARN_LOC_STOPPED 2 // Locally received traffic has stopped
-#define WARN_REM_STOPPED 3 // Remotely received traffic has stopped
-#define LOSSRATIO_TEXT   "LossRatio: %.2E, "
-#define DELIVERED_TEXT   "Delivered(%%): %6.2f, "
-#define SUMMARY_TEXT     "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f%s\n"
-#define MINIMUM_TEXT     "Minimum One-Way Delay(ms): %d [w/clock diff], Round-Trip Time(ms): %u"
-#define MINIMUM_FINAL    MINIMUM_TEXT ", Active Connections: %d\n"
-#define DEBUG_STATS      "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
-#define CLIENT_DEBUG     "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
-#define SERVER_DEBUG     "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
+#define LOSSRATIO_TEXT "LossRatio: %.2E, "
+#define DELIVERED_TEXT "Delivered(%%): %6.2f, "
+#define SUMMARY_TEXT   "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u-%u, Mbps(L3/IP): %.2f%s\n"
+#define MINIMUM_TEXT   "Minimum One-Way Delay(ms): %d [w/clock diff], Round-Trip Time(ms): %u"
+#define MINIMUM_FINAL  MINIMUM_TEXT ", Active Connections: %d\n"
+#define DEBUG_STATS    "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
+#define CLIENT_DEBUG   "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
+#define SERVER_DEBUG   "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
 static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 static int mmsgDataSize[RECVMMSG_SIZE]; // Received data size of each message
 
@@ -502,7 +499,7 @@ int send2_loadpdu(int connindex) {
 int send_loadpdu(int connindex, int transmitter) {
         register struct connection *c = &conn[connindex];
         int var, burstsize, totalburst, txintpri, txintalt;
-        unsigned int uvar, payload, addon;
+        unsigned int payload, addon;
         BOOL randpayload;
         struct timespec tspecvar, *tspecpri, *tspecalt;
         struct sendingRate *sr;
@@ -577,8 +574,8 @@ int send_loadpdu(int connindex, int transmitter) {
                         //
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
-                if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
-                        repo.endTimeStatus = STATUS_SUCCESS;
+                if (repo.endTimeStatus > STATUS_WARNMAX)     // Declare success, but retain warnings
+                        repo.endTimeStatus = STATUS_SUCCESS; // ErrorStatus
         }
 
         //
@@ -821,8 +818,9 @@ int service_loadpdu(int connindex) {
         tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
         delta = (int) tspecmsec(&tspecdelta);
         if (c->outputFPtr != NULL) { // Start output data with one-way values
-                fprintf(c->outputFPtr, "%u,%u,%ld.%06ld,%ld.%06ld,%d", seqno, payload, tspecvar.tv_sec,
-                        tspecvar.tv_nsec / NSECINUSEC, repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, delta);
+                fprintf(c->outputFPtr, "%u,%u,%ld.%06ld,%ld.%06ld,%d", seqno, payload, (long) tspecvar.tv_sec,
+                        tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC,
+                        delta);
         }
         if (var > 0) {
                 if (c->outputFPtr != NULL) { // Finalize output data with null entries
@@ -849,8 +847,9 @@ int service_loadpdu(int connindex) {
                         uvar = 0;
                 }
                 if (c->outputFPtr != NULL) { // Finalize output data with RTT values
-                        fprintf(c->outputFPtr, ",%ld.%06ld,%ld.%06ld,%u,%u\n", tspecvar.tv_sec, tspecvar.tv_nsec / NSECINUSEC,
-                                repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, rttrd, uvar);
+                        fprintf(c->outputFPtr, ",%ld.%06ld,%ld.%06ld,%u,%u\n", (long) tspecvar.tv_sec,
+                                tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec,
+                                repo.systemClock.tv_nsec / NSECINUSEC, rttrd, uvar);
                 }
                 //
                 // Check for new minimum
@@ -939,8 +938,8 @@ int send_statuspdu(int connindex) {
                         //
                         tspeccpy(&c->endTime, &repo.systemClock);
                 }
-                if (repo.endTimeStatus < STATUS_WARNING) // If no explicit warnings, declare success
-                        repo.endTimeStatus = STATUS_SUCCESS;
+                if (repo.endTimeStatus > STATUS_WARNMAX)     // Declare success, but retain warnings
+                        repo.endTimeStatus = STATUS_SUCCESS; // ErrorStatus
         } else {
                 tspecvar.tv_sec  = 0;
                 tspecvar.tv_nsec = (long) (c->trialInt * NSECINMSEC);
@@ -1121,7 +1120,7 @@ int send_statuspdu(int connindex) {
 //
 int service_statuspdu(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var, var2;
+        int var;
         BOOL bvar;
         unsigned int uvar, seqno;
         struct statusHdr *sHdr = (struct statusHdr *) repo.defBuffer;
@@ -1469,7 +1468,6 @@ int adjust_sending_rate(int connindex) {
 int proc_subinterval(int connindex, BOOL initialize) {
         register struct connection *c = &conn[connindex];
         struct timespec tspecvar;
-        int var;
 
         //
         // If not doing initialization
@@ -1520,13 +1518,11 @@ int agg_query_proc(int connindex) {
         // Query aggregate connection and overall state of testing
         //
         if (repo.actConnCount < conf.minConnCount) { // Active test count is below minimum
-                if (!conf.jsonOutput) {
-                        // Do not overwrite any previous error in json error buffer if json configured
-                        var = sprintf(scratch, "ERROR: Minimum required connections (%d) unavailable\n", conf.minConnCount);
-                        send_proc(errConn, scratch, var);
-                }
-                repo.endTimeStatus = STATUS_ERROR;        // Force status to error
-                tspeccpy(&a->endTime, &repo.systemClock); // Trigger process shutdown
+                var = sprintf(scratch, "ERROR: Minimum required connections (%d) unavailable\n", conf.minConnCount);
+                send_proc(errConn, scratch, var);
+                if (repo.endTimeStatus <= STATUS_WARNMAX)                          // Retain any original error
+                        repo.endTimeStatus = STATUS_CONN_ERRBASE + ERROR_CONN_MIN; // ErrorStatus
+                tspeccpy(&a->endTime, &repo.systemClock);                          // Trigger process shutdown
 
         } else if (repo.maxConnIndex == aggConn) { // All test connections finished/failed (only aggregate exists)
                 //
@@ -2159,7 +2155,6 @@ int recv_proc(int connindex) {
         static struct iovec iov[RECVMMSG_SIZE];    // Static array
         char *rcvbuf;
         int i, var, recvsize;
-        struct msghdr *msg;
 
         //
         // Specify receive buffer size (truncate load PDUs to reduce overhead of memory copy)
@@ -2243,9 +2238,12 @@ int send_proc(int connindex, char *sendbuffer, int sendsize) {
         char *buf;
 
         //
-        // If JSON is configured save error message in JSON error buffer
+        // If JSON is configured save error message in JSON error buffer(s)
         //
         if (conf.jsonOutput && c->type == T_CONSOLE && connindex == errConn) {
+                if (*json_errbuf != '\0') {
+                        strcpy(json_errbuf2, json_errbuf); // Save primary to supplementary
+                }
                 snprintf(json_errbuf, STRING_SIZE, "%s", sendbuffer);
                 //
                 buf = json_errbuf;
@@ -2450,7 +2448,7 @@ void output_warning(int connindex, int type) {
                         }
                         scratch[var++] = '\n';
                         send_proc(errConn, scratch, var);
-                        repo.endTimeStatus = STATUS_WARNING;
+                        repo.endTimeStatus = STATUS_WARNBASE + type; // ErrorStatus
                 }
         }
         return;

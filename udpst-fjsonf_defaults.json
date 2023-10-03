@@ -2,13 +2,14 @@
 	"IPLayerMaxConnections":	24,
 	"IPLayerMaxIncrementalResult":	3600,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"8.0.0",
+		"SoftwareVersion":	"8.1.0",
 		"ControlProtocolVersion":	10,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"Input":	{
 		"Interface":	"",
 		"Role":	"Receiver",
+		"ID":	15224,
 		"Host":	"test-server1.com",
 		"HostIPAddress":	"10.0.0.1",
 		"Port":	44202,
@@ -345,5 +346,6 @@
 		"Status":	"Complete"
 	},
 	"ErrorStatus":	0,
-	"ErrorMessage":	""
+	"ErrorMessage":	"",
+	"ErrorMessage2":	""
 }

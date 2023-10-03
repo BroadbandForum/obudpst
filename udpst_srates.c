@@ -219,7 +219,7 @@ int def_sending_rates(void) {
 // Display sending rate table parameters for each index
 //
 void show_sending_rates(int fd) {
-        int i, j, var, payload, addon, ipv6add, min, avg;
+        int i, j, var, payload, ipv6add, min, avg;
         BOOL bvar, randpayload;
         char buf[16];
         double dvar, dvar2;

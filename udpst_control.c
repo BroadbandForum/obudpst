@@ -62,6 +62,7 @@
  * Len Ciavattone          03/22/2023    Add GSO and GRO optimizations
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  * Len Ciavattone          05/24/2023    Add data output (export) capability
+ * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  *
  */
 
@@ -342,9 +343,10 @@ int timeout_testinit(int connindex) {
         //
         // Notify user and set immediate end time
         //
-        var = sprintf(scratch, "ERROR: Timeout awaiting response from server %s:%d\n", repo.server[c->serverIndex].ip,
+        var = sprintf(scratch, "WARNING: Timeout awaiting response from server %s:%d\n", repo.server[c->serverIndex].ip,
                       repo.server[c->serverIndex].port);
         send_proc(errConn, scratch, var);
+        repo.endTimeStatus = STATUS_WARNBASE + WARN_SRV_TIMEOUT; // ErrorStatus
         tspeccpy(&c->endTime, &repo.systemClock);
 
         return 0;
@@ -534,7 +536,7 @@ int service_setupreq(int connindex) {
 //
 int service_setupresp(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i, j, var;
+        int var;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -553,7 +555,8 @@ int service_setupresp(int connindex) {
         // Process any setup response errors
         //
         if (cHdrSR->cmdResponse != CHSR_CRSP_ACKOK) {
-                var = 0;
+                var                = 0;
+                repo.endTimeStatus = CHSR_CRSP_ERRBASE + cHdrSR->cmdResponse; // ErrorStatus
                 switch (cHdrSR->cmdResponse) {
                 case CHSR_CRSP_BADVER:
                         var = sprintf(scratch, "ERROR: Client version not accepted (%u vs. %u) by server", PROTOCOL_VER,
@@ -593,6 +596,7 @@ int service_setupresp(int connindex) {
                         var = sprintf(scratch, "ERROR: Connection allocation failure on server");
                         break;
                 default:
+                        repo.endTimeStatus = CHSR_CRSP_ERRBASE; // Unexpected values use only error base for ErrorStatus
                         var = sprintf(scratch, "ERROR: Unexpected CRSP (%u) in setup response from server", cHdrSR->cmdResponse);
                 }
                 if (var > 0) {
@@ -1044,10 +1048,12 @@ int service_actresp(int connindex) {
         // Process any test activation response errors
         //
         if (cHdrTA->cmdResponse != CHTA_CRSP_ACKOK) {
+                repo.endTimeStatus = CHTA_CRSP_ERRBASE + cHdrTA->cmdResponse; // ErrorStatus
                 if (cHdrTA->cmdResponse == CHTA_CRSP_BADPARAM) {
                         var = sprintf(scratch, "ERROR: Requested test parameter(s) rejected by server %s:%d\n",
                                       repo.server[c->serverIndex].ip, repo.server[c->serverIndex].port);
                 } else {
+                        repo.endTimeStatus = CHTA_CRSP_ERRBASE; // Unexpected values use only error base for ErrorStatus
                         var = sprintf(scratch, "ERROR: Unexpected CRSP (%u) in test activation response from server %s:%d\n",
                                       cHdrTA->cmdResponse, repo.server[c->serverIndex].ip, repo.server[c->serverIndex].port);
                 }
