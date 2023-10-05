@@ -367,11 +367,11 @@ can be combined with `-f jsonb` (omit static input fields).
 Included in the output is a numeric ErrorStatus field (which corresponds with
 the software exit status) as well as a text ErrorMessage field. As of version
 8.1.0, an additional ErrorMessage2 text field was also added to show any
-penultimate warning or error message. This was done to better convey any cause
-and effect relationship between events. If a test completes normally without
-incident the ErrorStatus will be 0 (zero) and the ErrorMessage fields will be
-empty. If a test completes, but encounters a warning or soft error, the
-ErrorStatus values for warnings will begin at 1 (one). If a test fails to
+penultimate warning or error message. This was done to better convey any
+cause-and-effect relationship between events. If a test completes normally
+without incident the ErrorStatus will be 0 (zero) and the ErrorMessage fields
+will be empty. If a test completes, but encounters a warning or soft error,
+the ErrorStatus values for warnings will begin at 1 (one). If a test fails to
 complete, the ErrorStatus values will begin at 50 (up to maximum of 255). See
 `udpst.h` for specific ErrorStatus values and ranges.
 

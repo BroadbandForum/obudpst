@@ -12,7 +12,7 @@ Also in this release, the ErrorStatus values used in the JSON output have been m
 granular (instead of just 1 for warning and -1 for error). Now, warnings are allocated values starting
 at 1 (one) - although only a handful are currently used. Error values start at 50 and can go up to a
 maximum of 255 (see udpst.h for details). Additionally, an ErrorMessage2 text field was also added to
-better communicate the cause and effect relationship between typical message pairs.
+better communicate the cause-and-effect relationship between typical message pairs.
 
 # 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.0.0)
 
