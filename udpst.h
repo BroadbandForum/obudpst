@@ -39,7 +39,9 @@
 #ifndef UDPST_H
 #define UDPST_H
 
+#ifdef __linux__
 #include "config.h"
+#endif /* __linux__ */
 #include "udpst_common.h"
 
 //----------------------------------------------------------------------------

@@ -74,8 +74,6 @@
  *
  */
 
-#include "config.h"
-
 #define UDPST_DATA
 #ifdef __linux__
 #define _GNU_SOURCE
