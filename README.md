@@ -736,8 +736,9 @@ clocks (and could be negative). This value is in milliseconds.
 - RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
 measurements and carried from the load receiver to the load sender in the
 periodic status feedback messages.
-- RTTRxTime : The receive timestamp used for RTT measurements and carried from
-the load sender back to the load receiver in the very next load PDU sent.
+- RTTRxTime : The receive timestamp (used for RTT measurements) of the load PDU
+carrying the RTTTxTime that was sent to the load sender in the last status
+feedback message.
 - RTTRespDelay : The RTT response delay includes the time from when the status
 feedback message was received and the very next load PDU was sent (i.e., the
 turn-around time in the load sender). This value is in milliseconds.
