@@ -902,7 +902,7 @@ int service_actreq(int connindex) {
                 cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
         }
         //
-        // If upstream test, send back sending rate parameters from first row of table
+        // If upstream test, send back initial sending rate transmission parameters
         //
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
                 sr_copy(sr, &cHdrTA->srStruct, TRUE);
