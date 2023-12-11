@@ -3,7 +3,12 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.1.0)
+# 2023-12-22: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
+
+This point release addresses the need to always handle interface byte counters as 64-bit values,
+regardless of the machine architecture. Several minor compiler warnings were also corrected.
+
+# 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
 The main feature in this release is the option of exporting received load traffic metadata (sequence
 numbers, timestamps,...) in CSV format. See README for feature details.
@@ -14,7 +19,7 @@ at 1 (one) - although only a handful are currently used. Error values start at 5
 maximum of 255 (see udpst.h for details). Additionally, an ErrorMessage2 text field was also added to
 better communicate the cause-and-effect relationship between typical message pairs.
 
-# 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v8.0.0)
+# 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.0.0)
 
 The primary new feature in this release is support for multiple connections (UDP flows) between
 the client and one or more server instances (i.e., distributed servers). Additionally,...
@@ -35,7 +40,7 @@ both the current and minimum protocol version needed to be bumped to 10.*
 *The udpst utility conforms to TR-471 (Issue 3). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.1)
+# 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.1)
 
 This release has one new feature, which is a response to testing/experience on mobile access:
 
@@ -43,7 +48,7 @@ This release has one new feature, which is a response to testing/experience on m
 
 Also, this release makes several updates to documentation (reflecting the latest features implemented in the utility). 
 
-# 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.5.0)
+# 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.0)
 
 This release has one major new feature, which was anticipated by the version 9 protocol:
 
@@ -53,7 +58,7 @@ This release has one major new feature, which was anticipated by the version 9 p
 * This algorithm supports a search over the full range of rates, even if the subscribed rate is >1Gbps
 * The Type B algorithm remains the default, for testing that does not benefit from "Multiply and Retry" aspects
 
-# 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.4.0)
+# 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.4.0)
 
 This release has many new features, supported by the version 9 protocol:
 
@@ -69,7 +74,7 @@ This release has many new features, supported by the version 9 protocol:
 * Backward compatibility: Servers can test with both protocol version 8 and version 9.
 * Additional JSON fields: example files have been updated (additions only)
 
-# 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.3.0)
+# 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.3.0)
 
 This release has a greatly expanded (optional) JSON-formatted version of the command-line output.
 
@@ -80,7 +85,7 @@ where names differ in small ways, or where additional names are provided in the 
 We also include measurement of Ethernet Interface traffic during a test, to help identify when customer traffic was 
 present that might cause the IP-Layer Capacity measurement to under-estimate the maximum capacity.
 
-## 2021-08-20: [UDPST 7.2.1](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.2.1)
+## 2021-08-20: [UDPST 7.2.1](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.2.1)
 
 This supplemental release incorporates results from recent testing, where two changes 
 in default parameters to protect the fast ramp-up seem prudent, and the status of default
@@ -92,7 +97,7 @@ test orgs. should consider changes to the default values.  In other words, the d
 provided as a starting point; any test campaign should consider whether one or more default 
 values need to be changed for their specific circumstances!
 
-## 2021-07-16: [UDPST 7.2.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.2.0)
+## 2021-07-16: [UDPST 7.2.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.2.0)
 
 This release will have the first features for compute environment adaptation:
 * OS limitations (detect sendmsg()-only or sendmmsg()-available)
@@ -100,7 +105,7 @@ This release will have the first features for compute environment adaptation:
 
 Also, an optional JSON-formatted version of the command-line output.
 
-## 2021-03-05: [UDPST 7.1.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.1.0)
+## 2021-03-05: [UDPST 7.1.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.1.0)
 
 This release addressed the following issues and new features: 
 * Add guards to avoid errors in inclusion files
@@ -108,7 +113,7 @@ This release addressed the following issues and new features:
 
 # CHANGELOG.MD for udpst 7.0.0 Release
 
-## 2020-12-11: [UDPST 7.0.0](https://github.com/BroadbandForum/OB-UDPST/releases/tag/v7.0.0)
+## 2020-12-11: [UDPST 7.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.0.0)
 
 This release addressed the following issues and new features: 
 * Increase accuracy of trial and sub-interval rate calculations

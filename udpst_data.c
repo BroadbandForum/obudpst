@@ -71,6 +71,7 @@
  * Len Ciavattone          04/04/2023    Add optional rate limiting
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
+ * Len Ciavattone          12/08/2023    Always handle intf counters as 64-bit
  *
  */
 
@@ -337,7 +338,7 @@ static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned
                 }
         }
 }
-#endif // HAVE_GSO
+#else
 
 //
 // Send a burst of messages using the Linux 3.0+ only sendmmsg syscall
@@ -414,7 +415,8 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 }
         }
 }
-#endif // HAVE_SENDMMSG
+#endif // HAVE_GSO
+#else
 
 //
 // Send a burst of messages using the slower but more widely available sendmsg syscall
@@ -484,6 +486,7 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                 }
         }
 }
+#endif // HAVE_SENDMMSG
 
 //
 // Send load PDUs via periodic timers for transmitters 1 & 2
@@ -805,8 +808,9 @@ int service_loadpdu(int connindex) {
                 }
         }
         if (var < 2) {
-                c->lpduHistBuf[c->lpduHistIdx] = seqno;                                // Save sequence number in history buffer
-                c->lpduHistIdx                 = ++c->lpduHistIdx & LPDU_HISTORY_MASK; // Update history buffer index
+                c->lpduHistBuf[c->lpduHistIdx] = seqno; // Save sequence number in history buffer
+                ++c->lpduHistIdx;                       // Advance history buffer index
+                c->lpduHistIdx &= LPDU_HISTORY_MASK;    // Maintain index limit
         }
         //
         // Calculate one-way clock delta (used again further down)
@@ -2471,7 +2475,7 @@ int create_timestamp(struct timespec *tspecvar) {
 //
 double upd_intf_stats(BOOL initialize) {
         int var;
-        unsigned long intfbytes; // Use unsigned long to support 64-bit counters with 64-bit OS
+        unsigned long long intfbytes; // Always handle counters as 64-bit values
         double mbps = 0.0;
         struct timespec tspecvar;
         char buffer[32];
@@ -2481,15 +2485,18 @@ double upd_intf_stats(BOOL initialize) {
         }
         if ((var = (int) read(repo.intfFD, buffer, sizeof(buffer))) > 0) {
                 buffer[var] = '\0';
-                if ((intfbytes = strtoul(buffer, NULL, 10)) > 0) {
+                if ((intfbytes = strtoull(buffer, NULL, 10)) > 0) {
                         if (!initialize) {
                                 if (tspecisset(&repo.intfTime)) {
                                         tspecminus(&repo.systemClock, &repo.intfTime, &tspecvar);
                                         if (intfbytes >= repo.intfBytes) {
                                                 mbps = (double) (intfbytes - repo.intfBytes);
-                                        } else {
-                                                // Counter wrapped
-                                                mbps = (double) ((ULONG_MAX - repo.intfBytes) + intfbytes + 1);
+                                        } else { // Counter wrapped (allow for 32 or 64-bit wrap threshold)
+                                                if (repo.intfBytes <= 4294967295ULL) {
+                                                        mbps = (double) ((4294967295ULL - repo.intfBytes) + intfbytes + 1);
+                                                } else {
+                                                        mbps = (double) ((ULLONG_MAX - repo.intfBytes) + intfbytes + 1);
+                                                }
                                         }
                                         mbps *= 8.0;
                                         mbps /= (double) tspecusec(&tspecvar);

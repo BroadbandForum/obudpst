@@ -75,6 +75,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
+#include <time.h>
 #include <netdb.h>
 #include <net/if.h>
 #include <arpa/inet.h>
@@ -359,7 +360,7 @@ int timeout_testinit(int connindex) {
 //
 int service_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i, var, pver, mbw = 0, currbw = repo.dsBandwidth, anchor = 0;
+        int i, var, pver, mbw = 0, currbw = repo.dsBandwidth;
         BOOL usbw = FALSE;
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
@@ -407,7 +408,7 @@ int service_setupreq(int connindex) {
                 cHdrSR->cmdResponse = CHSR_CRSP_MCINVPAR;
 
         } else if (((cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && !conf.jumboStatus) ||
-                   !(cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && conf.jumboStatus) {
+                   (!(cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && conf.jumboStatus)) {
                 var                 = sprintf(scratch, "ERROR: Invalid jumbo datagram option in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_BADJS;
 
@@ -706,7 +707,7 @@ int service_setupresp(int connindex) {
 int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
-        char addrstr[INET6_ADDR_STRLEN], portstr[8], *testtype;
+        char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -914,7 +915,6 @@ int service_actreq(int connindex) {
         //
         // Continue updating connection if test activation is NOT being rejected
         //
-        testtype = NULL;
         if (cHdrTA->cmdResponse == CHTA_CRSP_ACKOK) {
                 //
                 // Set connection test action as testing and initialize PDU received time
@@ -931,7 +931,6 @@ int service_actreq(int connindex) {
                         // Setup to receive load PDUs and send status PDUs
                         //
                         c->testType   = TEST_TYPE_US;
-                        testtype      = USTEST_TEXT;
                         c->rttMinimum = INITIAL_MIN_DELAY;
                         c->rttSample  = INITIAL_MIN_DELAY;
 #ifdef HAVE_RECVMMSG
@@ -952,7 +951,6 @@ int service_actreq(int connindex) {
                         // Setup to receive status PDUs and send load PDUs
                         //
                         c->testType  = TEST_TYPE_DS;
-                        testtype     = DSTEST_TEXT;
                         c->secAction = &service_statuspdu;
                         //
                         if (sr->txInterval1 > 0) {

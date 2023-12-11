@@ -335,7 +335,7 @@ struct repository {
         double siAggRateL0;                   // Sub-interval L1+VLAN aggregate rate
         struct testSummary testSum;           // Test summary statistics
         int intfFD;                           // File descriptor to read interface stats
-        unsigned long intfBytes;              // Last byte counter of interface stats
+        unsigned long long intfBytes;         // Last byte counter of interface stats
         struct timespec intfTime;             // Sample time of interface stats
         struct timespec timeOfMax[2];         // Time of maximums (bimodal)
         int actConnections[2];                // Active testing connections (bimodal)

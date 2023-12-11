@@ -151,7 +151,7 @@ load adjustment when conducting a search for the Maximum IP-Layer Capacity.
 The Type C algorithm (a.k.a. Multiply and Retry) will provide a fast rate
 increase until congestion, reaching 1 Gbps in ~1 second. The "fast" ramp-up
 will be re-tried when conditions warrant, to ensure that the Maximum IP-Layer
-Capacity has been reached. This option is activated using `-A c` (with the
+Capacity has been reached. This option is activated using `-A C` (with the
 more linear Type B algorithm remaining the default).
 
 One change to the default settings was included in Release 7.5.1. All Load
@@ -352,10 +352,10 @@ the connection which closes the socket and deallocates it.
 
 **More Info**
 
-For much more detail on the test protocol, see the ./protocol.md file. Also, an
-Internet-Draft,
+An Internet-Draft,
 https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-protocol/ describes
-Protocol Version 9 in even more detail.
+what will eventually be the official protocol version. Although fundamentally
+the same as described here, it includes accommodations for additional security.
 
 ## JSON Output
 For examples of the JSON output fields see the included sample files named
