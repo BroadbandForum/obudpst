@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
         }
         for (i = 0; i < conf.maxConnections; i++)
                 init_conn(i, FALSE);
-        for (i = 0; i < MAX_JPAYLOAD_SIZE / sizeof(int); i++)
+        for (i = 0; i < (int) (MAX_JPAYLOAD_SIZE / sizeof(int)); i++)
                 ((int *) repo.randData)[i] = random();
 
         //

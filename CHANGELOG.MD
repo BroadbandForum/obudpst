@@ -3,10 +3,13 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2023-12-22: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
+# 2024-01-26: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
 
 This point release addresses the need to always handle interface byte counters as 64-bit values,
 regardless of the machine architecture. Several minor compiler warnings were also corrected.
+When verbose is enabled, the server will now display a message when the control port receives
+a datagram that has an invalid size, ID, or format for a setup request PDU (else it will be silently
+ignored...as it was before).
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 

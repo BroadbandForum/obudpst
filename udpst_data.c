@@ -2429,6 +2429,7 @@ void output_warning(int connindex, int type) {
                 switch (type) {
                 case WARN_LOC_STATUS:
                         strcpy(location, "LOCAL");
+                        /* FALLTHROUGH */ // Eventually replace comment with [[fallthrough]];
                 case WARN_REM_STATUS:
                         if (*location == '\0')
                                 strcpy(location, "REMOTE");
@@ -2437,6 +2438,7 @@ void output_warning(int connindex, int type) {
                         break;
                 case WARN_LOC_STOPPED:
                         strcpy(location, "LOCAL");
+                        /* FALLTHROUGH */ // Eventually replace comment with [[fallthrough]];
                 case WARN_REM_STOPPED:
                         if (*location == '\0')
                                 strcpy(location, "REMOTE");

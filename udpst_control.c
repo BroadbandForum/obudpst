@@ -63,6 +63,7 @@
  * Len Ciavattone          03/25/2023    GRO replaced w/recvmmsg+truncation
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
+ * Len Ciavattone          12/18/2023    Add server msg for invalid setup req
  *
  */
 
@@ -360,7 +361,7 @@ int timeout_testinit(int connindex) {
 //
 int service_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i, var, pver, mbw = 0, currbw = repo.dsBandwidth;
+        int i = -1, var, pver, mbw = 0, currbw = repo.dsBandwidth;
         BOOL usbw = FALSE;
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
@@ -371,24 +372,31 @@ int service_setupreq(int connindex) {
 #endif
         //
         // Verify PDU
+        // Provide info on invalid or rogue datagrams when verbose enabled, else silently ignore
         //
-        if (repo.rcvDataSize < (int) CHSR_SIZE_MVER || repo.rcvDataSize > (int) CHSR_SIZE_CVER ||
-            ntohs(cHdrSR->controlId) != CHSR_ID) {
-                return 0; // Ignore bad PDU
-        }
-        if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ) {
+        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
+                    NI_NUMERICHOST | NI_NUMERICSERV);
+        if (repo.rcvDataSize < (int) CHSR_SIZE_MVER || repo.rcvDataSize > (int) CHSR_SIZE_CVER) {
+                if (conf.verbose) {
+                        var = sprintf(scratch, "[%d]Invalid size of setup request from %s:%s for protocol version(s) %d-%d\n",
+                                      connindex, addrstr, portstr, PROTOCOL_MIN, PROTOCOL_VER);
+                        send_proc(monConn, scratch, var);
+                }
                 return 0;
         }
-        if (cHdrSR->cmdResponse != CHSR_CRSP_NONE) {
+        if (ntohs(cHdrSR->controlId) != CHSR_ID || cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ ||
+            cHdrSR->cmdResponse != CHSR_CRSP_NONE) {
+                if (conf.verbose) {
+                        var = sprintf(scratch, "[%d]Invalid ID/format of setup request from %s:%s\n", connindex, addrstr, portstr);
+                        send_proc(monConn, scratch, var);
+                }
                 return 0;
         }
 
         //
         // Check specifics of setup request from client
         //
-        var = 0;
-        getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
-                    NI_NUMERICHOST | NI_NUMERICSERV);
+        var  = 0;
         pver = (int) ntohs(cHdrSR->protocolVer);
         if (pver >= BWMGMT_PVER) {
                 mbw = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
