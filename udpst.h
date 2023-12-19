@@ -161,7 +161,7 @@
 #define MIN_LOGFILE_MAX      10             //
 #define MAX_LOGFILE_MAX      1000000        //
 #define MIN_REQUIRED_BW      1              // Required OR available bandwidth (Mbps)
-#define MAX_CLIENT_BW        10000          //
+#define MAX_CLIENT_BW        INT16_MAX      // (MSb for direction [CHSR_USDIR_BIT])
 #define MAX_SERVER_BW        100000         //
 #define DEF_RA_ALGO          CHTA_RA_ALGO_B // Default rate adjustment algorithm
 
