@@ -11,6 +11,10 @@ When verbose is enabled, the server will now display a message when the control 
 a datagram that has an invalid size, ID, or format for a setup request PDU (else it will be silently
 ignored...as it was before).
 
+The maximum requestable bandwidth on the client, when using the "-B mbps" option, was increased from
+10000 to 32767. Also, the 64-bit ntohll/htonll macros were modified to accommodate big-endian
+architectures.
+
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
 The main feature in this release is the option of exporting received load traffic metadata (sequence
