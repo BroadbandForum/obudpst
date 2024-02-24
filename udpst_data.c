@@ -72,6 +72,7 @@
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          12/08/2023    Always handle intf counters as 64-bit
+ * Len Ciavattone          02/23/2024    Add status feedback loss to export
  *
  */
 
@@ -675,7 +676,7 @@ int service_loadpdu(int connindex) {
         unsigned int uvar, seqno, rttrd, payload;
         struct loadHdr *lHdr = (struct loadHdr *) repo.rcvDataPtr;
         struct timespec tspecvar, tspecdelta;
-        char *nulloutput = ",,,,\n";
+        char *nulloutput = ",,,,,\n";
 
         //
         // Verify PDU
@@ -729,19 +730,6 @@ int service_loadpdu(int connindex) {
                         if (c->warningCount < WARNING_MSG_LIMIT) {
                                 c->warningCount++;
                                 output_warning(connindex, WARN_REM_STOPPED);
-                        }
-                }
-        }
-
-        //
-        // Generate warning if peer indicates status message sequence errors
-        //
-        if ((var = (int) ntohs(lHdr->spduSeqErr)) != c->spduSeqErr) {
-                c->spduSeqErr = var;     // Save value if changed
-                if (c->spduSeqErr > 0) { // Only warn if count indicates loss
-                        if (c->warningCount < WARNING_MSG_LIMIT) {
-                                c->warningCount++;
-                                output_warning(connindex, WARN_REM_STATUS);
                         }
                 }
         }
@@ -848,10 +836,20 @@ int service_loadpdu(int connindex) {
                 } else if (rttrd == uvar + 1) { // Allow for rounding adjustment on either end
                         uvar = 0;
                 }
+                //
+                // Generate warning if peer indicates status message sequence errors
+                //
+                c->spduSeqErr = (int) ntohs(lHdr->spduSeqErr);
+                if (c->spduSeqErr > 0) { // Only warn if count indicates loss
+                        if (c->warningCount < WARNING_MSG_LIMIT) {
+                                c->warningCount++;
+                                output_warning(connindex, WARN_REM_STATUS);
+                        }
+                }
                 if (c->outputFPtr != NULL) { // Finalize output data with RTT values
-                        fprintf(c->outputFPtr, ",%ld.%06ld,%ld.%06ld,%u,%u\n", (long) tspecvar.tv_sec,
+                        fprintf(c->outputFPtr, ",%ld.%06ld,%ld.%06ld,%u,%u,%d\n", (long) tspecvar.tv_sec,
                                 tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec,
-                                repo.systemClock.tv_nsec / NSECINUSEC, rttrd, uvar);
+                                repo.systemClock.tv_nsec / NSECINUSEC, rttrd, uvar, c->spduSeqErr);
                 }
                 //
                 // Check for new minimum

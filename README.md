@@ -745,6 +745,8 @@ turn-around time in the load sender). This value is in milliseconds.
 - RTT : The resulting "network" RTT when the RTT response delay is subtracted
 from the difference between the RTT transmit and receive times. This value is
 in milliseconds.
+- StatusLoss : The count of lost status feedback messages sent from the load
+receiver to the load sender.
 
 *Because RTT measurements are only periodically sampled (as part of each status
 feedback message), those columns will be empty most of the time. Also, all

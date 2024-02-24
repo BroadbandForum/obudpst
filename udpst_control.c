@@ -64,6 +64,7 @@
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          12/18/2023    Add server msg for invalid setup req
+ * Len Ciavattone          02/23/2024    Add status feedback loss to export
  *
  */
 
@@ -1839,7 +1840,7 @@ int open_outputfile(int connindex) {
         //
         // Initialize with header
         //
-        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,RTTTxTime,RTTRxTime,RTTRespDelay,RTT\n", c->outputFPtr);
+        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n", c->outputFPtr);
 
         return 0;
 }

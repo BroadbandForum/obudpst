@@ -13,7 +13,8 @@ ignored...as it was before).
 
 The maximum requestable bandwidth on the client, when using the "-B mbps" option, was increased from
 10000 to 32767. Also, the 64-bit ntohll/htonll macros were modified to accommodate big-endian
-architectures.
+architectures and an additional column for lost status feedback messages was added to the metadata
+export.
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
