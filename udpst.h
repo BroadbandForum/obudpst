@@ -53,7 +53,7 @@
 #define DSTEST_TEXT       "Downstream"
 #define TIME_FORMAT       "%Y-%m-%d %H:%M:%S"
 #define STRING_SIZE       1024               // String buffer size
-#define AUTH_KEY_SIZE     32                 // Authentication key size
+#define AUTH_KEY_SIZE     64                 // Authentication key size
 #define HS_DELTA_BACKUP   3                  // High-speed delta backup multiplier
 #define MAX_SERVER_CONN   256                // Max server connections
 #define MAX_CLIENT_CONN   (MAX_MC_COUNT + 1) // Max client connections (plus aggregate)
@@ -258,7 +258,7 @@ struct configuration {
         int bimodalCount;                // Bimodal initial sub-interval count
         BOOL useOwDelVar;                // Use one-way delay instead of RTT
         BOOL ignoreOooDup;               // Ignore Out-of-Order/Duplicate datagrams
-        char authKey[AUTH_KEY_SIZE + 1]; // Authentication key
+        char authKey[AUTH_KEY_SIZE + 4]; // Authentication key
         int ipTosByte;                   // IP ToS byte for testing
         int srIndexConf;                 // Configured sending rate index
         BOOL srIndexIsStart;             // Configured SR index is starting point
@@ -275,7 +275,7 @@ struct configuration {
         int seqErrThresh;                // Sequence error threshold
         int maxBandwidth;                // Required OR available bandwidth
         BOOL intfForMax;                 // Local interface used for maximum
-        char intfName[IFNAMSIZ + 1];     // Local interface for supplemental stats
+        char intfName[IFNAMSIZ + 4];     // Local interface for supplemental stats
         int logFileMax;                  // Maximum log file size
         char *logFile;                   // Name of log file
         char *outputFile;                // Name of output (export) file

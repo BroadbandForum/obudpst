@@ -5,16 +5,18 @@ https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
 # 2024-01-26: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
 
-This point release addresses the need to always handle interface byte counters as 64-bit values,
-regardless of the machine architecture. Several minor compiler warnings were also corrected.
-When verbose is enabled, the server will now display a message when the control port receives
-a datagram that has an invalid size, ID, or format for a setup request PDU (else it will be silently
-ignored...as it was before).
+This release addresses the need to always handle interface byte counters as 64-bit values,
+regardless of the machine architecture. In addition,...
 
-The maximum requestable bandwidth on the client, when using the "-B mbps" option, was increased from
-10000 to 32767. Also, the 64-bit ntohll/htonll macros were modified to accommodate big-endian
-architectures and an additional column for lost status feedback messages was added to the metadata
-export.
+* Several minor compiler warnings were corrected
+* When verbose is enabled, the server will now display a message when the control port receives
+a datagram that has an invalid size, ID, or format for a setup request PDU (else it will be silently
+ignored...as it was before)
+* The maximum requestable bandwidth on the client, when using the "-B mbps" option, was increased from
+10000 to 32767
+* The 64-bit ntohll/htonll macros were modified to accommodate big-endian architectures
+* An additional column for lost status feedback messages was added to the metadata export
+* The maximum authentication key size was increase from 32 to 64
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
