@@ -65,6 +65,7 @@
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          12/18/2023    Add server msg for invalid setup req
  * Len Ciavattone          02/23/2024    Add status feedback loss to export
+ * Len Ciavattone          03/03/2024    Add multi-key support
  *
  */
 
@@ -111,6 +112,7 @@ int service_actresp(int);
 int sock_connect(int);
 int connected(int);
 int open_outputfile(int);
+BOOL validate_auth(void);
 
 //----------------------------------------------------------------------------
 //
@@ -213,6 +215,7 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         char addrstr[INET6_ADDR_STRLEN], portstr[8], intfpath[IFNAMSIZ + 64];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
 #ifdef AUTH_KEY_ENABLE
+        char *key;
         unsigned int uvar;
 #endif
         //
@@ -284,15 +287,26 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         if (conf.traditionalMTU) {
                 cHdrSR->modifierBitmap |= CHSR_TRADITIONAL_MTU;
         }
-        if (*conf.authKey == '\0') {
+        if (*conf.authKey == '\0' && conf.keyFile == NULL) {
                 cHdrSR->authMode     = AUTHMODE_NONE;
                 cHdrSR->authUnixTime = 0;
+                cHdrSR->keyId        = 0;
+                cHdrSR->reserved1    = 0;
+                cHdrSR->reserved2    = 0;
 #ifdef AUTH_KEY_ENABLE
         } else {
                 cHdrSR->authMode     = AUTHMODE_SHA256;
                 cHdrSR->authUnixTime = htonl((uint32_t) repo.systemClock.tv_sec);
-                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER,
-                     cHdrSR->authDigest, &uvar);
+                cHdrSR->keyId        = (uint8_t) conf.keyId;
+                cHdrSR->reserved1    = 0;
+                cHdrSR->reserved2    = 0;
+                if (*conf.authKey != '\0') {
+                        key = conf.authKey;
+                } else {
+                        key = repo.key[repo.keyIndex].key;
+                }
+                // HMAC creation and insertion is always last
+                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER, cHdrSR->authDigest, &uvar);
 #endif
         }
 
@@ -367,10 +381,7 @@ int service_setupreq(int connindex) {
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
-#ifdef AUTH_KEY_ENABLE
-        unsigned int uvar;
-        unsigned char digest1[AUTH_DIGEST_LENGTH], digest2[AUTH_DIGEST_LENGTH];
-#endif
+
         //
         // Verify PDU
         // Provide info on invalid or rogue datagrams when verbose enabled, else silently ignore
@@ -397,14 +408,12 @@ int service_setupreq(int connindex) {
         //
         // Check specifics of setup request from client
         //
-        var  = 0;
+        var  = 0; // Used for error indication throughout next section
         pver = (int) ntohs(cHdrSR->protocolVer);
-        if (pver >= BWMGMT_PVER) {
-                mbw = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
-                if (ntohs(cHdrSR->maxBandwidth) & CHSR_USDIR_BIT) {
-                        usbw   = TRUE; // Max bandwidth is for upstream
-                        currbw = repo.usBandwidth;
-                }
+        mbw  = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
+        if (ntohs(cHdrSR->maxBandwidth) & CHSR_USDIR_BIT) {
+                usbw   = TRUE; // Max bandwidth is for upstream
+                currbw = repo.usBandwidth;
         }
         if (pver < PROTOCOL_MIN || pver > PROTOCOL_VER) {
                 var                 = sprintf(scratch, "ERROR: Invalid version (%d) in setup request from", pver);
@@ -426,36 +435,33 @@ int service_setupreq(int connindex) {
                 var                 = sprintf(scratch, "ERROR: Invalid traditional MTU option in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_BADTMTU;
 
-        } else if (pver >= BWMGMT_PVER && conf.maxBandwidth > 0 && mbw == 0) {
+        } else if (conf.maxBandwidth > 0 && mbw == 0) {
                 var                 = sprintf(scratch, "ERROR: Required bandwidth not specified in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_NOMAXBW;
 
-        } else if (pver >= BWMGMT_PVER && conf.maxBandwidth > 0 && currbw + mbw > conf.maxBandwidth) {
+        } else if (conf.maxBandwidth > 0 && currbw + mbw > conf.maxBandwidth) {
                 var = sprintf(scratch, "ERROR: Capacity exceeded (%d.%d) by required bandwidth (%d) in setup request from",
                               cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), mbw);
                 cHdrSR->cmdResponse = CHSR_CRSP_CAPEXC;
 
-        } else if (cHdrSR->authMode != AUTHMODE_NONE && *conf.authKey == '\0') {
+        } else if (cHdrSR->authMode != AUTHMODE_NONE && *conf.authKey == '\0' && conf.keyFile == NULL) {
                 var                 = sprintf(scratch, "ERROR: Unexpected authentication in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_AUTHNC;
 #ifdef AUTH_KEY_ENABLE
-        } else if (cHdrSR->authMode == AUTHMODE_NONE && *conf.authKey != '\0') {
+#ifndef AUTH_IS_OPTIONAL
+        } else if (cHdrSR->authMode == AUTHMODE_NONE && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
                 var                 = sprintf(scratch, "ERROR: Authentication missing in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_AUTHREQ;
-
-        } else if (cHdrSR->authMode != AUTHMODE_SHA256 && *conf.authKey != '\0') {
+#endif // AUTH_IS_OPTIONAL
+        } else if (cHdrSR->authMode != AUTHMODE_NONE && cHdrSR->authMode != AUTHMODE_SHA256) {
                 var                 = sprintf(scratch, "ERROR: Invalid authentication method in setup request from");
                 cHdrSR->cmdResponse = CHSR_CRSP_AUTHINV;
 
-        } else if (cHdrSR->authMode == AUTHMODE_SHA256 && *conf.authKey != '\0') {
+        } else if (cHdrSR->authMode == AUTHMODE_SHA256 && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
                 //
                 // Validate authentication digest (leave zeroed for response) and check time window if enforced
                 //
-                memcpy(digest1, cHdrSR->authDigest, AUTH_DIGEST_LENGTH);
-                memset(cHdrSR->authDigest, 0, AUTH_DIGEST_LENGTH);
-                HMAC(EVP_sha256(), conf.authKey, strlen(conf.authKey), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER, digest2,
-                     &uvar);
-                if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH)) {
+                if (validate_auth()) {
                         var                 = sprintf(scratch, "ERROR: Authentication failure of setup request from");
                         cHdrSR->cmdResponse = CHSR_CRSP_AUTHFAIL;
 
@@ -467,12 +473,18 @@ int service_setupreq(int connindex) {
                                 cHdrSR->cmdResponse = CHSR_CRSP_AUTHTIME;
                         }
                 }
-#endif
+#endif // AUTH_KEY_ENABLE
         }
         if (cHdrSR->cmdResponse == CHSR_CRSP_NONE) {
                 if (conf.verbose) {
-                        var = sprintf(scratch, "[%d]Setup request (%d.%d, Ver: %d, MaxBW: %d) received from %s:%s\n", connindex,
-                                      (int) cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), pver, mbw, addrstr, portstr);
+                        if (pver < MULTIKEY_PVER) {
+                                var = DEF_KEY_ID; // Use default key ID for older protocol versions
+                        } else {
+                                var = (int) cHdrSR->keyId; // Else obtain key ID specified by client
+                        }
+                        var = sprintf(scratch, "[%d]Setup request (%d.%d, Ver: %d, MaxBW: %d, KeyID: %d) received from %s:%s\n",
+                                      connindex, (int) cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), pver, mbw, var, addrstr,
+                                      portstr);
                         send_proc(monConn, scratch, var);
                 }
                 //
@@ -1843,5 +1855,70 @@ int open_outputfile(int connindex) {
         fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n", c->outputFPtr);
 
         return 0;
+}
+//----------------------------------------------------------------------------
+//
+// Validate authentication of client request
+//
+BOOL validate_auth() {
+        BOOL authfail = TRUE;
+#ifdef AUTH_KEY_ENABLE
+        int i, var, pver;
+        char *key;
+        size_t hdrsize;
+        unsigned int uvar;
+        struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
+        unsigned char digest1[AUTH_DIGEST_LENGTH], digest2[AUTH_DIGEST_LENGTH];
+
+        //
+        // Determine header size based on protocol version
+        //
+        pver = (int) ntohs(cHdrSR->protocolVer);
+        if (pver < MULTIKEY_PVER) {
+                hdrsize = CHSR_SIZE_MVER; // Use minimum header size for older protocol versions
+        } else {
+                hdrsize = CHSR_SIZE_CVER; // Else use current header size
+        }
+
+        //
+        // Save off received digest and zero it in header
+        //
+        memcpy(digest1, cHdrSR->authDigest, AUTH_DIGEST_LENGTH);
+        memset(cHdrSR->authDigest, 0, AUTH_DIGEST_LENGTH);
+
+        //
+        // Attempt initial validation via key file entry if available
+        //
+        key = NULL;
+        if (conf.keyFile != NULL) {
+                if (pver < MULTIKEY_PVER) {
+                        var = DEF_KEY_ID; // Use default key ID for older protocol versions
+                } else {
+                        var = (int) cHdrSR->keyId; // Else obtain key ID specified by client
+                }
+                for (i = 0; i < repo.keyCount; i++) {
+                        if (repo.key[i].id == var) { // Find key with matching key ID
+                                key = repo.key[i].key;
+                                break;
+                        }
+                }
+        }
+        if (key != NULL) {
+                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, hdrsize, digest2, &uvar);
+                if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
+                        authfail = FALSE;
+        }
+
+        //
+        // Attempt backup validation via command-line key if key file entry was unavailable or unsuccessful
+        //
+        if (authfail == TRUE && *conf.authKey != '\0') {
+                key = conf.authKey;
+                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, hdrsize, digest2, &uvar);
+                if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
+                        authfail = FALSE;
+        }
+#endif
+        return authfail;
 }
 //----------------------------------------------------------------------------

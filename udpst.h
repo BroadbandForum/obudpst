@@ -54,6 +54,7 @@
 #define TIME_FORMAT       "%Y-%m-%d %H:%M:%S"
 #define STRING_SIZE       1024               // String buffer size
 #define AUTH_KEY_SIZE     64                 // Authentication key size
+#define MAX_KEY_ENTRIES   256                // Maximum key entries
 #define HS_DELTA_BACKUP   3                  // High-speed delta backup multiplier
 #define MAX_SERVER_CONN   256                // Max server connections
 #define MAX_CLIENT_CONN   (MAX_MC_COUNT + 1) // Max client connections (plus aggregate)
@@ -87,6 +88,7 @@
 #define WARN_REM_STOPPED 4 // Remotely received traffic has stopped
 // Configuration errors (offset of STATUS_CONF_ERRBASE)
 #define ERROR_CONF_GENERIC 0 // Generic configuration issue
+#define ERROR_CONF_KEYFILE 1 // Configuration issue with/within key file
 // Initialization errors (offset of STATUS_INIT_ERRBASE)
 #define ERROR_INIT_GENERIC 0 // Generic configuration issue
 // Connection errors (offset of STATUS_CONN_ERRBASE)
@@ -164,6 +166,9 @@
 #define MAX_CLIENT_BW        INT16_MAX      // (MSb for direction [CHSR_USDIR_BIT])
 #define MAX_SERVER_BW        100000         //
 #define DEF_RA_ALGO          CHTA_RA_ALGO_B // Default rate adjustment algorithm
+#define DEF_KEY_ID           0              // Key ID
+#define MIN_KEY_ID           0              //
+#define MAX_KEY_ID           UINT8_MAX      //
 
 //----------------------------------------------------------------------------
 //
@@ -258,7 +263,9 @@ struct configuration {
         int bimodalCount;                // Bimodal initial sub-interval count
         BOOL useOwDelVar;                // Use one-way delay instead of RTT
         BOOL ignoreOooDup;               // Ignore Out-of-Order/Duplicate datagrams
-        char authKey[AUTH_KEY_SIZE + 4]; // Authentication key
+        char authKey[AUTH_KEY_SIZE + 4]; // Authentication key (from command-line)
+        int keyId;                       // Authentication key ID
+        char *keyFile;                   // Authentication key file
         int ipTosByte;                   // IP ToS byte for testing
         int srIndexConf;                 // Configured sending rate index
         BOOL srIndexIsStart;             // Configured SR index is starting point
@@ -284,6 +291,11 @@ struct configuration {
 //
 // Repository of global variables and structures
 //
+#define KEY_ENTRY_FIELDS 2
+struct keyEntry {
+        int id;                      // Key ID
+        char key[AUTH_KEY_SIZE + 4]; // Key string
+};
 struct serverId {
         char *name;                 // Server hostname or IP address
         char ip[INET6_ADDR_STRLEN]; // Server IP address
@@ -346,6 +358,9 @@ struct repository {
         double rateMaxL0[2];                  // L1+VLAN rate maximums (bimodal)
         double intfMax[2];                    // Interface maximums (bimodal)
         double intfMbps;                      // Last interface rate obtained
+        int keyIndex;                         // Key index (used by client)
+        int keyCount;                         // Number of keys defined
+        struct keyEntry key[MAX_KEY_ENTRIES]; // Array of key entries
 };
 //----------------------------------------------------------------------------
 //

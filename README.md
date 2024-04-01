@@ -753,3 +753,54 @@ feedback message), those columns will be empty most of the time. Also, all
 timestamps are based on the local system time zone and utilize microsecond
 resolution.*
 
+## Multi-Key Authentication
+For better support of large-scale deployments with various service offerings
+and device types, multiple authentication keys are now supported. As of version
+8.2.0, and in addition to the legacy authentication key still available on the
+command-line, a key file can now be specified via `-K file` to allow up to 256
+unique authentication keys (see `udpst.keys` example file). The CSV formatted
+file expects a numeric key ID (0-255) followed by the key string (64 characters
+max). Commas, spaces, tabs, and comments (anything beginning with a '#') are
+all ignored.
+
+*Because a key ID field is now needed in the Setup Request PDU, the protocol
+version had to be bumped from 10 to 11. However, the server is backward
+compatible and will support multi-key authentication for clients using either
+version. A default key ID of zero is assumed when one is not specified or is
+unavailable (as is the case with protocol version 10).*
+
+The authentication process begins with the client using a shared key to create
+a 32-byte HMAC-SHA256 hash for the Setup Request PDU. This hash and a key ID are
+inserted in the PDU prior to transmission to the server. The key used to create
+the hash can come from the command-line via the `-a key` option OR from a key
+file specified via the `-K file` option. The key ID is specified via the
+`-y keyid` option. When a key file is being utilized, the key ID option is also
+used to determine which key in the key file will be used to create the hash.
+If the key file only contains a single entry, and a key ID was not explicitly
+specified on the command-line, that key ID and key will automatically be used.
+Otherwise, when a key ID is not explicitly specified on the command-line, or the
+Setup Request is coming from a client using the previous protocol version (10),
+a default key ID of zero is assumed.
+
+When the server receives the Setup Request, and if it is utilizing a key file,
+the included key ID will be used to select the key used to create a
+corresponding hash (for comparison and validation). An entry in the key file
+with a key ID of zero can be used for older clients using the previous protocol
+version (10). In addition to the key file, a command-line key specified via
+`-a key` can also be used for secondary/backup authentication of the client.
+That is, if the authentication via a key file key fails for any reason (key ID
+not found, hash comparison mismatch, etc.) authentication is automatically
+attempted a second time using the command-line key. This flexibility allows for
+an easier transition from the previous protocol version, clients using an older
+command-line key, or clients moving from a zero (default) key ID to a non-zero
+ID.
+
+Lastly, for clients transitioning from no authentication to authentication, a
+new compilation flag is available on the server that makes authentication
+optional.
+```
+$ cmake -D AUTH_IS_OPTIONAL=ON .
+```
+*Note: This mode of operation is considered low security and should only be
+utilized temporarily for a migration or upgrade of clients.*
+

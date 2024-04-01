@@ -66,6 +66,7 @@
  * Len Ciavattone          04/04/2023    Add optional rate limiting to banner
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
+ * Len Ciavattone          03/03/2024    Add multi-key support
  *
  */
 
@@ -113,6 +114,7 @@ void signal_alrm(int);
 void signal_exit(int);
 int proc_parameters(int, char **, int);
 int param_error(int, int, int);
+int read_keyfile(int);
 int json_finish(void);
 
 //----------------------------------------------------------------------------
@@ -121,6 +123,7 @@ int json_finish(void);
 //
 #define ENDTEXT_BASIC "[%d]End time reached"
 #define ENDTEXT_NEWBW ENDTEXT_BASIC " (New USBW: %d, DSBW: %d)\n"
+#define NOAUTH_TEXT   "ERROR: Built without authentication functionality\n"
 int errConn = -1, monConn = -1, aggConn = -1; // Error, monitoring, and aggregate
 char scratch[STRING_SIZE];                    // General purpose scratch buffer
 struct configuration conf;                    // Configuration data structure
@@ -170,6 +173,15 @@ int main(int argc, char **argv) {
         //
         if ((var = proc_parameters(argc, argv, outputfd)) != -1) {
                 return STATUS_CONF_ERRBASE + var;
+        }
+
+        //
+        // Read and store key entries if key file provided
+        //
+        if (conf.keyFile != NULL) {
+                if ((var = read_keyfile(outputfd)) != -1) {
+                        return STATUS_CONF_ERRBASE + var;
+                }
         }
 
         //
@@ -445,6 +457,20 @@ int main(int argc, char **argv) {
                         monConn = errConn;
                 if (!repo.isServer)
                         aggConn = errConn; // Use initial connection as aggregate connection
+        }
+
+        //
+        // Display key file info if needed
+        //
+        if (!sig_exit && conf.verbose && conf.keyFile != NULL) {
+                var = sprintf(scratch, "Authentication keys read from key file: %d\n", repo.keyCount);
+                send_proc(monConn, scratch, var);
+                if (conf.debug) {
+                        for (i = 0; i < repo.keyCount; i++) {
+                                var = sprintf(scratch, "  %3d,%s\n", repo.key[i].id, repo.key[i].key);
+                                send_proc(monConn, scratch, var);
+                        }
+                }
         }
 
         //
@@ -762,7 +788,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, j, var, value;
-        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:y:K:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
 
         //
         // Clear configuration and global repository data
@@ -906,6 +932,7 @@ int proc_parameters(int argc, char **argv, int fd) {
         repo.maxConnIndex  = -1;           // No connections allocated
         repo.endTimeStatus = STATUS_ERROR; // Default to unspecified error, require explicit success
         repo.intfFD        = -1;           // No file descriptor
+        repo.keyIndex      = -1;           // No key index (used when client)
 
         //
         // Parse remaining parameters
@@ -1071,7 +1098,35 @@ int proc_parameters(int argc, char **argv, int fd) {
                         strncpy(conf.authKey, optarg, AUTH_KEY_SIZE + 1);
                         conf.authKey[AUTH_KEY_SIZE] = '\0';
 #else
-                        var = sprintf(scratch, "ERROR: Built without authentication functionality\n");
+                        var = sprintf(scratch, NOAUTH_TEXT);
+                        var = write(fd, scratch, var);
+                        return ERROR_CONF_GENERIC;
+#endif
+                        break;
+                case 'y':
+#ifdef AUTH_KEY_ENABLE
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Authentication key ID only set by client\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_KEY_ID, MAX_KEY_ID)) > 0) {
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        conf.keyId = value;
+#else
+                        var = sprintf(scratch, NOAUTH_TEXT);
+                        var = write(fd, scratch, var);
+                        return ERROR_CONF_GENERIC;
+#endif
+                        break;
+                case 'K':
+#ifdef AUTH_KEY_ENABLE
+                        conf.keyFile = optarg;
+#else
+                        var = sprintf(scratch, NOAUTH_TEXT);
                         var = write(fd, scratch, var);
                         return ERROR_CONF_GENERIC;
 #endif
@@ -1297,13 +1352,14 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
                                       "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
-                                      "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n"
-                                      "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
-                                      "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n",
-                                      AUTH_KEY_SIZE, DEF_IPTOS_BYTE, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME,
-                                      MAX_TESTINT_TIME);
+                                      "(c)    -y keyid     Key ID used with authentication key [Default %d]\n"
+                                      "       -K file      Key file containing authentication keys\n"
+                                      "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n",
+                                      AUTH_KEY_SIZE, DEF_KEY_ID, DEF_IPTOS_BYTE);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
+                                      "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n"
                                       "(c)    -P period    Sub-interval period in seconds [Default %d]\n"
                                       "       -p port      Default port number used for control [Default %d]\n"
                                       "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
@@ -1315,6 +1371,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -h delta     High-speed (row adjustment) delta [Default %d]\n"
                                       "(c)    -q seqerr    Sequence error threshold [Default %d]\n"
                                       "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n",
+                                      SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME, MAX_TESTINT_TIME,
                                       DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
                                       rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO], DEF_LOW_THRESH, DEF_UPPER_THRESH,
                                       DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA, DEF_SEQ_ERR_TH);
@@ -1390,6 +1447,16 @@ int proc_parameters(int argc, char **argv, int fd) {
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }
+        if (!repo.isServer && (*conf.authKey != '\0' && conf.keyFile != NULL)) {
+                var = sprintf(scratch, "ERROR: Authentication key and key file are mutually exclusive\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
+        if (conf.keyId != DEF_KEY_ID && (*conf.authKey == '\0' && conf.keyFile == NULL)) {
+                var = sprintf(scratch, "ERROR: Authentication key ID requires authentication key or key file\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
         if (conf.minConnCount == DEF_MC_COUNT && conf.maxConnCount == DEF_MC_COUNT) {
                 // If connection counts not specified bump default to cover provided servers
                 if (repo.serverCount > DEF_MC_COUNT)
@@ -1410,6 +1477,154 @@ int param_error(int param, int min, int max) {
                 var = sprintf(scratch, "ERROR: Parameter <%d> out-of-range (%d-%d)\n", param, min, max);
         }
         return var;
+}
+//----------------------------------------------------------------------------
+//
+// Read and process key file
+//
+int read_keyfile(int fd) {
+        int i, var, value, line, status = -1;
+        FILE *f;
+        char *lbuffer, localbuffer[STRING_SIZE];
+        char *tokens[KEY_ENTRY_FIELDS], *endptr;
+
+        //
+        // Open file
+        //
+        if ((f = fopen(conf.keyFile, "r")) == NULL) {
+                var = sprintf(scratch, "FOPEN ERROR: <%.*s> %s\n", NAME_MAX, conf.keyFile, strerror(errno));
+                var = write(fd, scratch, var);
+                return ERROR_CONF_KEYFILE;
+        }
+
+        //
+        // Process entries
+        //
+        line = 0;
+        while (fgets(localbuffer, STRING_SIZE, f) != NULL) {
+                line++;
+                lbuffer = localbuffer;
+                while (*lbuffer) {
+                        // Skip blank lines and ignore comments
+                        if ((*lbuffer == '\r') || (*lbuffer == '\n') || (*lbuffer == '#')) {
+                                *lbuffer = '\0';
+                                break;
+                        }
+                        lbuffer++;
+                }
+                if (*localbuffer == '\0')
+                        continue;
+
+                //
+                // Break CSV line into tokens and check field count (ignore all tabs and spaces)
+                // Expecting: <keyid>,<key> [#<comment>]
+                //
+                lbuffer = localbuffer;
+                for (i = 0; i < KEY_ENTRY_FIELDS; i++) {
+                        if ((tokens[i] = strtok(lbuffer, ", \t")) == NULL)
+                                break;
+                        lbuffer = NULL;
+                }
+                if (i == 0)
+                        continue;
+                if (i < KEY_ENTRY_FIELDS) {
+                        var    = sprintf(scratch, "ERROR: Key file entry has insufficient field count (line %d)\n", line);
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+
+                //
+                // Validate attributes of key entry
+                //
+                endptr = NULL;
+                value  = (int) strtol(tokens[0], &endptr, 0);
+                if (*endptr != '\0') {
+                        var    = sprintf(scratch, "ERROR: Key file entry has invalid numeric ID (line %d)\n", line);
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+                if (value < MIN_KEY_ID || value > MAX_KEY_ID) {
+                        var    = sprintf(scratch, "ERROR: Key file entry has out-of-range ID (line %d)\n", line);
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+                for (i = 0; i < repo.keyCount; i++) {
+                        if (repo.key[i].id == value) {
+                                var = sprintf(scratch, "ERROR: Key file entry has duplicate ID (line %d)\n", line);
+                                var = write(fd, scratch, var);
+                                break;
+                        }
+                }
+                if (i < repo.keyCount) {
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+                if (strlen(tokens[1]) > AUTH_KEY_SIZE) {
+                        var    = sprintf(scratch, "ERROR: Key file entry has oversized key (line %d)\n", line);
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+                if (repo.keyCount >= MAX_KEY_ENTRIES) {
+                        var    = sprintf(scratch, "ERROR: Key file entry count exceeds maximum (line %d)\n", line);
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+                        break;
+                }
+
+                //
+                // Store key entry
+                //
+                i              = repo.keyCount++;
+                repo.key[i].id = value;
+                strncpy(repo.key[i].key, tokens[1], AUTH_KEY_SIZE + 1);
+                repo.key[i].key[AUTH_KEY_SIZE] = '\0';
+
+                //
+                // If client, and key ID matches the one from the command-line (or the default), save the index
+                //
+                if (!repo.isServer) {
+                        if (conf.keyId == repo.key[i].id)
+                                repo.keyIndex = i;
+                }
+        }
+
+        //
+        // Verify keys found and do additional processing if client
+        //
+        if (status == -1) {
+                if (repo.keyCount == 0) {
+                        var    = sprintf(scratch, "ERROR: No authentication keys found in key file\n");
+                        var    = write(fd, scratch, var);
+                        status = ERROR_CONF_KEYFILE;
+
+                } else if (!repo.isServer) {
+                        //
+                        // If only one key in key file, and no explicit key ID from command-line, use that key
+                        //
+                        if (repo.keyCount == 1 && conf.keyId == DEF_KEY_ID) {
+                                conf.keyId    = repo.key[0].id; // Set configured key ID to only key available
+                                repo.keyIndex = 0;              // Set key index to first/only entry
+                        }
+                        //
+                        // Verify that a valid key ID was found in the key file
+                        //
+                        if (repo.keyIndex == -1) {
+                                var    = sprintf(scratch, "ERROR: Authentication key ID (%d) not found in key file\n", conf.keyId);
+                                var    = write(fd, scratch, var);
+                                status = ERROR_CONF_KEYFILE;
+                        }
+                }
+        }
+
+        //
+        // Close file
+        //
+        fclose(f);
+        return status;
 }
 //----------------------------------------------------------------------------
 //

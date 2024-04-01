@@ -1,0 +1,14 @@
+#-------------------------------------------------------
+# Key file for udpst (CSV)
+# All spaces, tabs, commas, and comments are ignored
+#
+# Expecting: <KeyID>,<Key> [#<Comment>]
+#   KeyID - Numeric ID (0-255)
+#   Key   - Key String (64 characters max)
+#
+#-------------------------------------------------------
+# Example entries...
+0,legacykey	# Legacy clients using procotol 10
+1,firstkey	# Service abc
+2,secondkey	# Service xyz
+3,thirdkey	# Device 123

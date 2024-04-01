@@ -6,7 +6,12 @@ https://www.broadband-forum.org/technical/download/TR-471.pdf*
 # 2024-01-26: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
 
 This release addresses the need to always handle interface byte counters as 64-bit values,
-regardless of the machine architecture. In addition,...
+regardless of the machine architecture (OBUDPST-56). Also, for improved management of large-scale
+deployments multi-key support has been added (OBUDPST-57). This capability allows for up to 256
+authentication keys to be specified via a key file. The legacy authentication key from the
+command-line is still supported and will act as a backup validation option to the key file if
+provided. This change resulted in the supported protocol version range going from 10-10 to 10-11
+(i.e., the server will continue to support existing clients, see README for details). In addition,...
 
 * Several minor compiler warnings were corrected
 * When verbose is enabled, the server will now display a message when the control port receives

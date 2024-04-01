@@ -43,9 +43,9 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 10 // Current protocol version between client and server
-#define PROTOCOL_MIN 10 // Minimum protocol version for backward compatibility
-#define BWMGMT_PVER  9  // Protocol version required for bandwidth management
+#define PROTOCOL_VER  11 // Current protocol version between client and server
+#define PROTOCOL_MIN  10 // Minimum protocol version for backward compatibility
+#define MULTIKEY_PVER 11 // Protocol version required for multi-key support
 
 //----------------------------------------------------------------------------
 //
@@ -129,9 +129,12 @@ struct controlHdrSR {
 #define AUTH_DIGEST_LENGTH 32 // Use SHA256 length equivalent
 #endif
         unsigned char authDigest[AUTH_DIGEST_LENGTH];
+        uint8_t keyId;      // Key ID in shared table
+        uint8_t reserved1;  // reserved octet
+        uint16_t reserved2; // reserved octets
 };
 #define CHSR_SIZE_CVER sizeof(struct controlHdrSR) // Current protocol version
-#define CHSR_SIZE_MVER (CHSR_SIZE_CVER - 0)        // Minimum protocol version
+#define CHSR_SIZE_MVER (CHSR_SIZE_CVER - 4)        // Minimum protocol version
 //----------------------------------------------------------------------------
 //
 // Control header for UDP payload of Test Activation PDUs
