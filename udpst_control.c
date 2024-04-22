@@ -66,6 +66,7 @@
  * Len Ciavattone          12/18/2023    Add server msg for invalid setup req
  * Len Ciavattone          02/23/2024    Add status feedback loss to export
  * Len Ciavattone          03/03/2024    Add multi-key support
+ * Len Ciavattone          04/12/2024    Enhanced control PDU integrity checks
  *
  */
 
@@ -113,6 +114,7 @@ int sock_connect(int);
 int connected(int);
 int open_outputfile(int);
 BOOL validate_auth(void);
+BOOL verify_ctrlpdu(int, BOOL, char *, char *);
 
 //----------------------------------------------------------------------------
 //
@@ -291,24 +293,22 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
                 cHdrSR->authMode     = AUTHMODE_NONE;
                 cHdrSR->authUnixTime = 0;
                 cHdrSR->keyId        = 0;
-                cHdrSR->reserved1    = 0;
-                cHdrSR->reserved2    = 0;
 #ifdef AUTH_KEY_ENABLE
         } else {
                 cHdrSR->authMode     = AUTHMODE_SHA256;
                 cHdrSR->authUnixTime = htonl((uint32_t) repo.systemClock.tv_sec);
                 cHdrSR->keyId        = (uint8_t) conf.keyId;
-                cHdrSR->reserved1    = 0;
-                cHdrSR->reserved2    = 0;
                 if (*conf.authKey != '\0') {
                         key = conf.authKey;
                 } else {
                         key = repo.key[repo.keyIndex].key;
                 }
-                // HMAC creation and insertion is always last
                 HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER, cHdrSR->authDigest, &uvar);
 #endif
         }
+#ifdef ADD_HEADER_CSUM
+        cHdrSR->checkSum = checksum(cHdrSR, CHSR_SIZE_CVER); // Added after HMAC (server MUST clear before HMAC validation)
+#endif
 
         //
         // Update global address info for subsequent send
@@ -384,25 +384,11 @@ int service_setupreq(int connindex) {
 
         //
         // Verify PDU
-        // Provide info on invalid or rogue datagrams when verbose enabled, else silently ignore
         //
         getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
-        if (repo.rcvDataSize < (int) CHSR_SIZE_MVER || repo.rcvDataSize > (int) CHSR_SIZE_CVER) {
-                if (conf.verbose) {
-                        var = sprintf(scratch, "[%d]Invalid size of setup request from %s:%s for protocol version(s) %d-%d\n",
-                                      connindex, addrstr, portstr, PROTOCOL_MIN, PROTOCOL_VER);
-                        send_proc(monConn, scratch, var);
-                }
-                return 0;
-        }
-        if (ntohs(cHdrSR->controlId) != CHSR_ID || cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ ||
-            cHdrSR->cmdResponse != CHSR_CRSP_NONE) {
-                if (conf.verbose) {
-                        var = sprintf(scratch, "[%d]Invalid ID/format of setup request from %s:%s\n", connindex, addrstr, portstr);
-                        send_proc(monConn, scratch, var);
-                }
-                return 0;
+        if (!verify_ctrlpdu(connindex, TRUE, addrstr, portstr)) {
+                return 0; // Ignore bad PDU
         }
 
         //
@@ -461,6 +447,8 @@ int service_setupreq(int connindex) {
                 //
                 // Validate authentication digest (leave zeroed for response) and check time window if enforced
                 //
+                if (pver >= CHECKSUM_PVER)
+                        cHdrSR->checkSum = 0; // MUST be cleared before HMAC validation
                 if (validate_auth()) {
                         var                 = sprintf(scratch, "ERROR: Authentication failure of setup request from");
                         cHdrSR->cmdResponse = CHSR_CRSP_AUTHFAIL;
@@ -504,7 +492,13 @@ int service_setupreq(int connindex) {
                         var += sprintf(&scratch[var], " %s:%s\n", addrstr, portstr);
                         send_proc(errConn, scratch, var);
                 }
-                send_proc(connindex, (char *) cHdrSR, CHSR_SIZE_CVER);
+                if (pver >= CHECKSUM_PVER) {
+                        cHdrSR->checkSum = 0;
+#ifdef ADD_HEADER_CSUM
+                        cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
+#endif
+                }
+                send_proc(connindex, (char *) cHdrSR, repo.rcvDataSize);
                 return 0;
         }
 
@@ -540,7 +534,13 @@ int service_setupreq(int connindex) {
         //
         cHdrSR->cmdResponse = CHSR_CRSP_ACKOK;
         cHdrSR->testPort    = htons((uint16_t) conn[i].locPort);
-        var                 = CHSR_SIZE_CVER;
+        if (pver >= CHECKSUM_PVER) {
+                cHdrSR->checkSum = 0;
+#ifdef ADD_HEADER_CSUM
+                cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
+#endif
+        }
+        var = repo.rcvDataSize;
         if (send_proc(connindex, (char *) cHdrSR, var) != var)
                 return 0;
         if (conf.verbose) {
@@ -566,11 +566,8 @@ int service_setupresp(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) CHSR_SIZE_CVER || ntohs(cHdrSR->controlId) != CHSR_ID) {
+        if (!verify_ctrlpdu(connindex, TRUE, NULL, NULL)) {
                 return 0; // Ignore bad PDU
-        }
-        if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPRSP) {
-                return 0;
         }
 
         //
@@ -581,7 +578,7 @@ int service_setupresp(int connindex) {
                 repo.endTimeStatus = CHSR_CRSP_ERRBASE + cHdrSR->cmdResponse; // ErrorStatus
                 switch (cHdrSR->cmdResponse) {
                 case CHSR_CRSP_BADVER:
-                        var = sprintf(scratch, "ERROR: Client version not accepted (%u vs. %u) by server", PROTOCOL_VER,
+                        var = sprintf(scratch, "ERROR: Client protocol version (%u) not accepted by server (%u)", PROTOCOL_VER,
                                       ntohs(cHdrSR->protocolVer));
                         break;
                 case CHSR_CRSP_BADJS:
@@ -708,7 +705,10 @@ int service_setupresp(int connindex) {
         // Send test activation request
         //
         c->secAction = &service_actresp; // Set service handler for response
-        var          = CHTA_SIZE_CVER;
+#ifdef ADD_HEADER_CSUM
+        cHdrTA->checkSum = checksum(cHdrTA, CHTA_SIZE_CVER);
+#endif
+        var = CHTA_SIZE_CVER;
         if (send_proc(connindex, (char *) cHdrTA, var) != var)
                 return 0;
         if (conf.verbose) {
@@ -736,32 +736,20 @@ int service_actreq(int connindex) {
         //
         // Verify PDU
         //
-        var = (int) ntohs(cHdrTA->protocolVer);
-        if (repo.rcvDataSize < (int) CHTA_SIZE_MVER || repo.rcvDataSize > (int) CHTA_SIZE_CVER ||
-            ntohs(cHdrTA->controlId) != CHTA_ID || var < PROTOCOL_MIN || var > PROTOCOL_VER) {
-                return 0; // Ignore bad PDU
-        }
-        if ((cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS) && (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS)) {
-                return 0;
-        }
-        if (cHdrTA->cmdResponse != CHTA_CRSP_NONE) {
-                return 0;
-        }
-
-        //
-        // Obtain IP address and port number of sender
-        //
         getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
-        if (conf.verbose) {
-                var = sprintf(scratch, "[%d]Test activation request (%d.%d) received from %s:%s\n", connindex, c->mcIndex,
-                              c->mcIdent, addrstr, portstr);
-                send_proc(monConn, scratch, var);
+        if (!verify_ctrlpdu(connindex, FALSE, addrstr, portstr)) {
+                return 0; // Ignore bad PDU
         }
 
         //
         // Update global address info with client address/port number and connect socket
         //
+        if (conf.verbose) {
+                var = sprintf(scratch, "[%d]Test activation request (%d.%d) received from %s:%s\n", connindex, c->mcIndex,
+                              c->mcIdent, addrstr, portstr);
+                send_proc(monConn, scratch, var);
+        }
         var = atoi(portstr);
         if ((var = sock_mgmt(connindex, addrstr, var, NULL, SMA_UPDATE)) != 0) {
                 send_proc(errConn, scratch, var);
@@ -770,7 +758,7 @@ int service_actreq(int connindex) {
         if (sock_connect(connindex) < 0)
                 return 0;
 
-        //====================================================================================
+        // ===================================================================
         // Accept (but police) most test parameters as is and enforce server configured
         // maximums where applicable. Update modified values for communication back to client.
         // If the request needs to be rejected use command response value CHTA_CRSP_BADPARAM.
@@ -931,7 +919,7 @@ int service_actreq(int connindex) {
         } else {
                 memset(&cHdrTA->srStruct, 0, sizeof(struct sendingRate));
         }
-        //====================================================================================
+        // ===================================================================
 
         //
         // Continue updating connection if test activation is NOT being rejected
@@ -994,7 +982,13 @@ int service_actreq(int connindex) {
         //
         // Send test activation response to client
         //
-        var = CHTA_SIZE_CVER;
+        if (c->protocolVer >= CHECKSUM_PVER) {
+                cHdrTA->checkSum = 0;
+#ifdef ADD_HEADER_CSUM
+                cHdrTA->checkSum = checksum(cHdrTA, repo.rcvDataSize);
+#endif
+        }
+        var = repo.rcvDataSize;
         if (send_proc(connindex, (char *) cHdrTA, var) != var)
                 return 0;
         if (conf.verbose) {
@@ -1056,11 +1050,8 @@ int service_actresp(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) CHTA_SIZE_CVER || ntohs(cHdrTA->controlId) != CHTA_ID) {
+        if (!verify_ctrlpdu(connindex, FALSE, NULL, NULL)) {
                 return 0; // Ignore bad PDU
-        }
-        if ((cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS) && (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS)) {
-                return 0;
         }
 
         //
@@ -1865,20 +1856,9 @@ BOOL validate_auth() {
 #ifdef AUTH_KEY_ENABLE
         int i, var, pver;
         char *key;
-        size_t hdrsize;
         unsigned int uvar;
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
         unsigned char digest1[AUTH_DIGEST_LENGTH], digest2[AUTH_DIGEST_LENGTH];
-
-        //
-        // Determine header size based on protocol version
-        //
-        pver = (int) ntohs(cHdrSR->protocolVer);
-        if (pver < MULTIKEY_PVER) {
-                hdrsize = CHSR_SIZE_MVER; // Use minimum header size for older protocol versions
-        } else {
-                hdrsize = CHSR_SIZE_CVER; // Else use current header size
-        }
 
         //
         // Save off received digest and zero it in header
@@ -1891,6 +1871,7 @@ BOOL validate_auth() {
         //
         key = NULL;
         if (conf.keyFile != NULL) {
+                pver = (int) ntohs(cHdrSR->protocolVer);
                 if (pver < MULTIKEY_PVER) {
                         var = DEF_KEY_ID; // Use default key ID for older protocol versions
                 } else {
@@ -1904,7 +1885,7 @@ BOOL validate_auth() {
                 }
         }
         if (key != NULL) {
-                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, hdrsize, digest2, &uvar);
+                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, repo.rcvDataSize, digest2, &uvar);
                 if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
                         authfail = FALSE;
         }
@@ -1914,11 +1895,121 @@ BOOL validate_auth() {
         //
         if (authfail == TRUE && *conf.authKey != '\0') {
                 key = conf.authKey;
-                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, hdrsize, digest2, &uvar);
+                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, repo.rcvDataSize, digest2, &uvar);
                 if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
                         authfail = FALSE;
         }
 #endif
         return authfail;
+}
+//----------------------------------------------------------------------------
+//
+// Verify control PDU integrity
+//
+BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
+        register struct connection *c = &conn[connindex];
+        BOOL bvar;
+        int var, pver, minsize, maxsize;
+        struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
+        struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
+        static int alertCount       = 0; // Static
+
+        //
+        // Initialize based on role and PDU type
+        //
+        if (repo.isServer) {
+                if (isSetup) {
+                        // Setup request/response
+                        minsize = CHSR_SIZE_MVER;
+                        maxsize = CHSR_SIZE_CVER;
+                        pver    = (int) ntohs(cHdrSR->protocolVer);
+                } else {
+                        // Test activation request/response
+                        minsize = CHTA_SIZE_MVER;
+                        maxsize = CHTA_SIZE_CVER;
+                        pver    = c->protocolVer;
+                }
+        } else {
+                if (isSetup) {
+                        // Setup request/response
+                        minsize = maxsize = CHSR_SIZE_CVER;
+                } else {
+                        // Test activation request/response
+                        minsize = maxsize = CHTA_SIZE_CVER;
+                }
+                pver = c->protocolVer;
+        }
+
+        //
+        // Perform PDU verification
+        //
+        bvar = FALSE;
+        if (isSetup) {
+                if (repo.rcvDataSize < minsize || repo.rcvDataSize > maxsize) {
+                        bvar = TRUE;
+                } else if (ntohs(cHdrSR->controlId) != CHSR_ID) {
+                        bvar = TRUE;
+                } else if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ && cHdrSR->cmdRequest != CHSR_CREQ_SETUPRSP) {
+                        bvar = TRUE;
+                } else if (pver >= CHECKSUM_PVER && cHdrSR->checkSum != 0) {
+                        if (checksum(cHdrSR, repo.rcvDataSize))
+                                bvar = TRUE;
+                }
+        } else {
+                if (repo.rcvDataSize < minsize || repo.rcvDataSize > maxsize) {
+                        bvar = TRUE;
+                } else if (ntohs(cHdrTA->controlId) != CHTA_ID) {
+                        bvar = TRUE;
+                } else if (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS && cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS) {
+                        bvar = TRUE;
+                } else if (pver >= CHECKSUM_PVER && cHdrTA->checkSum != 0) {
+                        if (checksum(cHdrTA, repo.rcvDataSize))
+                                bvar = TRUE;
+                }
+        }
+
+        //
+        // Process verification failure and generate alert if not suppressed
+        //
+        if (bvar) {
+#ifdef SUPP_INVPDU_ALERT
+                bvar = FALSE; // Flip boolean to suppress output
+#endif
+                if (bvar && alertCount < ALERT_MSG_LIMIT && (!repo.isServer || conf.verbose)) {
+                        if (!repo.isServer && !isSetup) {
+                                // A lost test activation response for a downstream test will have load PDUs right behind it.
+                                // Excessive alerts are controlled via a local counter and the alert message limit.
+                                alertCount++;
+                        }
+
+                        var = sprintf(scratch, "ALERT: Received invalid");
+                        if (isSetup) {
+                                var += sprintf(&scratch[var], " setup");
+                        } else {
+                                var += sprintf(&scratch[var], " test activation");
+                        }
+                        if (repo.isServer) {
+                                var += sprintf(&scratch[var], " request");
+                        } else {
+                                var += sprintf(&scratch[var], " response");
+                        }
+                        if (isSetup) {
+                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize,
+                                               ntohs(cHdrSR->controlId), ntohs(cHdrSR->protocolVer), cHdrSR->checkSum);
+                        } else {
+                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize,
+                                               ntohs(cHdrTA->controlId), ntohs(cHdrTA->protocolVer), cHdrTA->checkSum);
+                        }
+                        if (repo.isServer) {
+                                var += sprintf(&scratch[var], " from %s:%s\n", addrstr, portstr);
+                        } else {
+                                var += sprintf(&scratch[var], " [Server %s:%d]\n", repo.server[c->serverIndex].ip,
+                                               repo.server[c->serverIndex].port);
+                        }
+                        send_proc(errConn, scratch, var);
+                }
+                return FALSE;
+        }
+        return TRUE;
 }
 //----------------------------------------------------------------------------

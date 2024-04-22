@@ -3,25 +3,31 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2024-01-26: [UDPST 8.1.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.1)
+# 2024-04-21: [UDPST 8.2.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.2.0)
 
 This release addresses the need to always handle interface byte counters as 64-bit values,
 regardless of the machine architecture (OBUDPST-56). Also, for improved management of large-scale
 deployments multi-key support has been added (OBUDPST-57). This capability allows for up to 256
 authentication keys to be specified via a key file. The legacy authentication key from the
 command-line is still supported and will act as a backup validation option to the key file if
-provided. This change resulted in the supported protocol version range going from 10-10 to 10-11
-(i.e., the server will continue to support existing clients, see README for details). In addition,...
+provided.
+
+Integrity checks for PDUs were enhanced via a compilation flag to insert an optional PDU header
+checksum into control and data PDUs (OBUDPST-58). This functionality is needed when the standard UDP
+checksum is not being utilized by either the sender or receiver system. Changes for OBUDPST-57 and
+OBUDPST-58 resulted in the supported protocol version range on the server going from 10-10 to 10-11
+(i.e., the server will continue to support existing version 10 clients, see README for details).
+In addition,...
 
 * Several minor compiler warnings were corrected
-* When verbose is enabled, the server will now display a message when the control port receives
-a datagram that has an invalid size, ID, or format for a setup request PDU (else it will be silently
-ignored...as it was before)
+* Enhanced integrity checks will generate alerts for invalid control PDUs and warnings for invalid
+data PDUs (both can be suppressed via compilation flags, causing them to be silently ignored)
 * The maximum requestable bandwidth on the client, when using the "-B mbps" option, was increased from
 10000 to 32767
 * The 64-bit ntohll/htonll macros were modified to accommodate big-endian architectures
 * An additional column for lost status feedback messages was added to the metadata export
 * The maximum authentication key size was increase from 32 to 64
+* A new ErrorStatus error value for multi-key and warning value for invalid data PDUs was added
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 

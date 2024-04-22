@@ -67,6 +67,7 @@
  * Len Ciavattone          05/24/2023    Add data output (export) capability
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          03/03/2024    Add multi-key support
+ * Len Ciavattone          04/12/2024    Add checksum info to banner
  *
  */
 
@@ -277,10 +278,15 @@ int main(int argc, char **argv) {
                 else
                         var = sprintf(scratch, "Mode: Client, Payload Default[Max]: %d[%d]", i, j);
 #ifdef AUTH_KEY_ENABLE
-                var += sprintf(&scratch[var], ", Authentication: Available");
+                var += sprintf(&scratch[var], ", Auth: Available");
 #else
-                var += sprintf(&scratch[var], ", Authentication: Unavailable");
+                var += sprintf(&scratch[var], ", Auth: Unavailable");
 #endif // AUTH_KEY_ENABLE
+#ifdef ADD_HEADER_CSUM
+                var += sprintf(&scratch[var], ", Checksum: On");
+#else
+                var += sprintf(&scratch[var], ", Checksum: Off");
+#endif // ADD_HEADER_CSUM
                 var += sprintf(&scratch[var], ", Optimizations:");
 #ifdef HAVE_SENDMMSG
                 var += sprintf(&scratch[var], " SendMMsg()");

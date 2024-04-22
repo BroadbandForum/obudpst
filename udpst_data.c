@@ -73,6 +73,7 @@
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          12/08/2023    Always handle intf counters as 64-bit
  * Len Ciavattone          02/23/2024    Add status feedback loss to export
+ * Len Ciavattone          04/12/2024    Enhanced data PDU integrity checks
  *
  */
 
@@ -128,6 +129,7 @@ void output_warning(int, int);
 double upd_intf_stats(BOOL);
 void output_minimum(int);
 void output_debug(int);
+BOOL verify_datapdu(int, BOOL);
 
 //----------------------------------------------------------------------------
 //
@@ -175,7 +177,7 @@ static void _populate_header(struct loadHdr *lHdr, struct connection *c, unsigne
         lHdr->lpduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         lHdr->lpduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
         lHdr->rttRespDelay  = htons((uint16_t) rttRespDelay);
-        lHdr->reserved1     = 0;
+        lHdr->checkSum      = 0; // Updated in send function if needed
 }
 //
 // Randomize payload of datagram (via single call of random())
@@ -276,6 +278,10 @@ static void _sendmmsg_gso(int connindex, int totalburst, int burstsize, unsigned
                         _populate_header(lHdr, c, rttrd);
                         lHdr->lpduSeqNo  = htonl((uint32_t) ++c->lpduSeqNo);
                         lHdr->udpPayload = htons((uint16_t) uvar);
+#ifdef ADD_HEADER_CSUM
+                        if (c->protocolVer >= CHECKSUM_PVER)
+                                lHdr->checkSum = checksum(lHdr, sizeof(struct loadHdr));
+#endif
                         if (c->randPayload) {
                                 _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
                         }
@@ -379,6 +385,10 @@ static void _sendmmsg_burst(int connindex, int totalburst, int burstsize, unsign
                 else
                         uvar = addon;
                 lHdr->udpPayload = htons((uint16_t) uvar);
+#ifdef ADD_HEADER_CSUM
+                if (c->protocolVer >= CHECKSUM_PVER)
+                        lHdr->checkSum = checksum(lHdr, sizeof(struct loadHdr));
+#endif
                 if (c->randPayload) {
                         _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
                 }
@@ -458,6 +468,11 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                 else
                         uvar = addon;
                 lHdr->udpPayload = htons((uint16_t) uvar);
+#ifdef ADD_HEADER_CSUM
+                lHdr->checkSum = 0; // Zero on each pass because _populate_header() is only called once
+                if (c->protocolVer >= CHECKSUM_PVER)
+                        lHdr->checkSum = checksum(lHdr, sizeof(struct loadHdr));
+#endif
                 if (c->randPayload) {
                         _randomize_payload((char *) lHdr + sizeof(struct loadHdr), uvar - sizeof(struct loadHdr));
                 }
@@ -681,7 +696,7 @@ int service_loadpdu(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct loadHdr) || ntohs(lHdr->loadId) != LOAD_ID) {
+        if (!verify_datapdu(connindex, TRUE)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -949,8 +964,9 @@ int send_statuspdu(int connindex) {
                 // Only continue if some data has been received (initial load PDUs could still be in transit)
                 //
                 if (c->lpduSeqNo == 0) {
-                        if (conf.verbose) {
-                                var = sprintf(scratch, "[%d]Skipping status transmission, awaiting initial load PDUs...\n",
+                        if (c->infoCount < INFO_MSG_LIMIT && conf.verbose) {
+                                c->infoCount++;
+                                var = sprintf(scratch, "[%d]INFO: Skipping status transmission, awaiting initial load PDUs...\n",
                                               connindex);
                                 send_proc(monConn, scratch, var);
                         }
@@ -1031,8 +1047,8 @@ int send_statuspdu(int connindex) {
         sHdr->rttMinimum    = htonl(c->rttMinimum);
         sHdr->rttSample     = htonl(c->rttSample);
         sHdr->delayMinUpd   = (uint8_t) c->delayMinUpd;
-        sHdr->reserved2     = 0;
-        sHdr->reserved3     = 0;
+        sHdr->reserved1     = 0;
+        sHdr->checkSum      = 0;
 
         //
         // Include trial interval info
@@ -1048,6 +1064,10 @@ int send_statuspdu(int connindex) {
         //
         sHdr->spduTime_sec  = htonl((uint32_t) repo.systemClock.tv_sec);
         sHdr->spduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
+#ifdef ADD_HEADER_CSUM
+        if (c->protocolVer >= CHECKSUM_PVER)
+                sHdr->checkSum = checksum(sHdr, sizeof(struct statusHdr));
+#endif
         if (!repo.isServer) {
                 //
                 // Output verbose/debug messages if configured
@@ -1129,7 +1149,7 @@ int service_statuspdu(int connindex) {
         //
         // Verify PDU
         //
-        if (repo.rcvDataSize < (int) sizeof(struct statusHdr) || ntohs(sHdr->statusId) != STATUS_ID) {
+        if (!verify_datapdu(connindex, FALSE)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -2552,5 +2572,112 @@ void output_debug(int connindex) {
         send_proc(monConn, scratch, var);
 
         return;
+}
+//----------------------------------------------------------------------------
+//
+// Header checksum calculation (needed when the UDP checksum is not being utilized)
+//
+unsigned short checksum(register void *p, register int count) {
+        register unsigned long long sum = 0;
+
+        while (count >= 4) {
+                sum += *((unsigned int *) p);
+                count -= 4;
+                p += 4;
+        }
+        if (count >= 2) {
+                sum += *((unsigned short *) p);
+                count -= 2;
+                p += 2;
+        }
+        if (count == 1) {
+                sum += *((unsigned char *) p);
+        }
+        while (sum >> 32) { // Fold sum to 32 bits
+                sum = (sum & 0xffffffff) + (sum >> 32);
+        }
+        while (sum >> 16) { // Fold sum to 16 bits
+                sum = (sum & 0xffff) + (sum >> 16);
+        }
+        return (unsigned short) ~sum;
+}
+//----------------------------------------------------------------------------
+//
+// Verify data PDU integrity
+//
+BOOL verify_datapdu(int connindex, BOOL isLoad) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        BOOL bvar;
+        struct loadHdr *lHdr   = (struct loadHdr *) repo.rcvDataPtr;
+        struct statusHdr *sHdr = (struct statusHdr *) repo.defBuffer;
+        char connid[8];
+
+        //
+        // Perform PDU verification
+        //
+        bvar = FALSE;
+        if (isLoad) {
+                if (repo.rcvDataSize < (int) sizeof(struct loadHdr)) {
+                        bvar = TRUE;
+                } else if (ntohs(lHdr->loadId) != LOAD_ID) {
+                        bvar = TRUE;
+                } else if (lHdr->testAction > TEST_ACT_MAX) {
+                        bvar = TRUE;
+                } else if (lHdr->rxStopped != FALSE && lHdr->rxStopped != TRUE) {
+                        bvar = TRUE;
+                } else if (c->protocolVer >= CHECKSUM_PVER && lHdr->checkSum != 0) {
+                        if (checksum(lHdr, sizeof(struct loadHdr)))
+                                bvar = TRUE;
+                }
+        } else {
+                if (repo.rcvDataSize != (int) sizeof(struct statusHdr)) {
+                        bvar = TRUE;
+                } else if (ntohs(sHdr->statusId) != STATUS_ID) {
+                        bvar = TRUE;
+                } else if (sHdr->testAction > TEST_ACT_MAX) {
+                        bvar = TRUE;
+                } else if (sHdr->rxStopped != FALSE && sHdr->rxStopped != TRUE) {
+                        bvar = TRUE;
+                } else if (c->protocolVer >= CHECKSUM_PVER && sHdr->checkSum != 0) {
+                        if (checksum(sHdr, sizeof(struct statusHdr)))
+                                bvar = TRUE;
+                }
+        }
+
+        //
+        // Process verification failure and generate warning if not suppressed
+        //
+        if (bvar) {
+#ifdef SUPP_INVPDU_WARN
+                bvar = FALSE; // Flip boolean to suppress output
+#endif
+                if (bvar && c->warningCount < WARNING_MSG_LIMIT && (!repo.isServer || conf.verbose)) {
+                        c->warningCount++;
+
+                        *connid = '\0';
+                        if (conf.verbose)
+                                sprintf(connid, "[%d]", connindex);
+                        //
+                        var = sprintf(scratch, "%sWARNING: Received invalid", connid);
+                        if (isLoad) {
+                                var += sprintf(&scratch[var], " load PDU (%d,0x%04X:0x%02X:0x%02X,0x%04X)", repo.rcvDataSize,
+                                               ntohs(lHdr->loadId), lHdr->testAction, lHdr->rxStopped, lHdr->checkSum);
+                        } else {
+                                var += sprintf(&scratch[var], " status PDU (%d,0x%04X:0x%02X:0x%02X,0x%04X)", repo.rcvDataSize,
+                                               ntohs(sHdr->statusId), sHdr->testAction, sHdr->rxStopped, sHdr->checkSum);
+                        }
+                        if (!repo.isServer) {
+                                var += sprintf(&scratch[var], " [Server %s:%d]", repo.server[c->serverIndex].ip,
+                                               repo.server[c->serverIndex].port);
+                        }
+                        scratch[var++] = '\n';
+                        send_proc(errConn, scratch, var);
+                        //
+                        repo.endTimeStatus = STATUS_WARNBASE + WARN_RX_INVPDU; // ErrorStatus
+                }
+                return FALSE;
+        }
+        return TRUE;
 }
 //----------------------------------------------------------------------------

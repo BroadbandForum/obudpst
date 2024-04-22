@@ -64,6 +64,8 @@
 #define MAX_RANDOM_START  50                 // Maximum used for random I/O start (ms)
 #define AUTH_TIME_WINDOW  150                // Authentication +/- time windows (sec)
 #define AUTH_ENFORCE_TIME TRUE               // Enforce authentication time window
+#define ALERT_MSG_LIMIT   10                 // Alert message limit
+#define INFO_MSG_LIMIT    10                 // Info message limit (per connection)
 #define WARNING_MSG_LIMIT 10                 // Warning message limit (per connection)
 #define WARNING_NOTRAFFIC 1                  // Receive traffic stopped warning threshold (sec)
 #define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 2)
@@ -86,6 +88,7 @@
 #define WARN_REM_STATUS  2 // Remotely received status messages lost
 #define WARN_LOC_STOPPED 3 // Locally received traffic has stopped
 #define WARN_REM_STOPPED 4 // Remotely received traffic has stopped
+#define WARN_RX_INVPDU   5 // Received invalid PDU
 // Configuration errors (offset of STATUS_CONF_ERRBASE)
 #define ERROR_CONF_GENERIC 0 // Generic configuration issue
 #define ERROR_CONF_KEYFILE 1 // Configuration issue with/within key file
@@ -471,6 +474,7 @@ struct connection {
         unsigned int tiRxDatagrams;    // Trial interval receive datagrams
         unsigned int tiRxBytes;        // Trial interval receive bytes
         //
+        int infoCount;             // Info message count
         int warningCount;          // Warning message count
         BOOL rxStoppedLoc;         // Local receive traffic stopped indicator
         BOOL rxStoppedRem;         // Remote receive traffic stopped indicator

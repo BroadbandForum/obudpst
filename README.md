@@ -804,3 +804,20 @@ $ cmake -D AUTH_IS_OPTIONAL=ON .
 *Note: This mode of operation is considered low security and should only be
 utilized temporarily for a migration or upgrade of clients.*
 
+## Optional Header Checksum
+On systems where the standard UDP checksum is not being inserted by the
+protocol stack/NIC, or is not being verified upon reception, corrupt datagrams
+will be passed up to udpst. As of protocol version 11, an optional header
+checksum can be calculated and inserted into all control and data PDU headers
+to deal with this. Upon reception, udpst will automatically validate the header
+checksum if populated. And although this mechanism can operate in one direction
+at a time, it should be enabled on both the client and server for bidirectional
+protection. The following compilation flag will enable this functionality on
+the sender for all outgoing PDUs:
+```
+$ cmake -D ADD_HEADER_CSUM=ON .
+```
+*Note: Because of the small to moderate performance impact (depending on the
+device), this flag is normally disabled since it is redundant when the standard
+UDP checksum is being utilized.*
+

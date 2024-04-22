@@ -19,5 +19,8 @@
 #cmakedefine DISABLE_INT_TIMER
 #cmakedefine RATE_LIMITING
 #cmakedefine AUTH_IS_OPTIONAL
+#cmakedefine SUPP_INVPDU_ALERT
+#cmakedefine SUPP_INVPDU_WARN
+#cmakedefine ADD_HEADER_CSUM
 
 #endif /* CONFIG_H */
