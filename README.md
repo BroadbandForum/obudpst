@@ -804,7 +804,7 @@ $ cmake -D AUTH_IS_OPTIONAL=ON .
 *Note: This mode of operation is considered low security and should only be
 utilized temporarily for a migration or upgrade of clients.*
 
-## Optional Header Checksum
+## Optional Header Checksum and PDU Integrity Checks
 On systems where the standard UDP checksum is not being inserted by the
 protocol stack/NIC, or is not being verified upon reception, corrupt datagrams
 will be passed up to udpst. As of protocol version 11, an optional header
@@ -820,4 +820,19 @@ $ cmake -D ADD_HEADER_CSUM=ON .
 *Note: Because of the small to moderate performance impact (depending on the
 device), this flag is normally disabled since it is redundant when the standard
 UDP checksum is being utilized.*
+
+Independent of whether the header checksum is enabled as an additional PDU
+integrity check (beyond size, format, etc.), new output messaging is displayed
+when an invalid PDU is received. A bad PDU during the control phase (whether a
+corrupted PDU or a rogue UDP datagram) will generate an ALERT and a bad PDU
+during the data phase will generate a WARNING (and result in a warning exit
+status and JSON ErrorStatus). In cases where the udpst control port on the
+server is exposed to the open Internet, and verbose is enabled, this may result
+in excessive alerts due to UDP port scanners and probing. If either of these
+new output message types is not desired, the following compilation flags can be
+used to suppress them (and the PDU is silently ignored):
+```
+$ cmake -D SUPP_INVPDU_ALERT=ON .
+$ cmake -D SUPP_INVPDU_WARN=ON .
+```
 
