@@ -67,6 +67,7 @@
  * Len Ciavattone          02/23/2024    Add status feedback loss to export
  * Len Ciavattone          03/03/2024    Add multi-key support
  * Len Ciavattone          04/12/2024    Enhanced control PDU integrity checks
+ * Len Ciavattone          06/24/2024    Add interface Mbps to export
  *
  */
 
@@ -1816,6 +1817,9 @@ int open_outputfile(int connindex) {
                                 else
                                         var += sprintf(&scratch[var], "%d", repo.server[c->serverIndex].port);
                                 lbuffer++;
+                        } else if (*chr == 'E') { // Interface name
+                                var += sprintf(&scratch[var], "%s", conf.intfName);
+                                lbuffer++;
                         } else {
                                 scratch[var++] = *lbuffer; // Copy character if conversion option not found
                         }
@@ -1843,7 +1847,7 @@ int open_outputfile(int connindex) {
         //
         // Initialize with header
         //
-        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n", c->outputFPtr);
+        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,IntfMbps,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n", c->outputFPtr);
 
         return 0;
 }

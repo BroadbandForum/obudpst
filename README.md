@@ -713,6 +713,7 @@ character:
 - #D - Direction of test ('U' = Upstream, 'D' = Downstream)
 - #H - Server host name (or IP) specified on command-line
 - #p - Control port used for test setup
+- #E - Interface name specified with `-E intf` option (only valid on client)
 
 In addition to the above, all conversion specifications supported by strftime()
 (and introduced by a '%' character) can also be utilized - see strftime() man
@@ -733,6 +734,7 @@ receiver's clock).
 - OWD : The one-way delay of the datagram if the sender's and receiver's clocks
 are sufficiently synchronized, else it merely reflects the difference in the
 clocks (and could be negative). This value is in milliseconds.
+- IntfMbps : The interface Mbps when the `-E intf` option is used on the client.
 - RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
 measurements and carried from the load receiver to the load sender in the
 periodic status feedback messages.

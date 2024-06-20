@@ -74,6 +74,7 @@
  * Len Ciavattone          12/08/2023    Always handle intf counters as 64-bit
  * Len Ciavattone          02/23/2024    Add status feedback loss to export
  * Len Ciavattone          04/12/2024    Enhanced data PDU integrity checks
+ * Len Ciavattone          06/24/2024    Add interface Mbps to export
  *
  */
 
@@ -469,7 +470,7 @@ static void _sendmsg_burst(int connindex, int totalburst, int burstsize, unsigne
                         uvar = addon;
                 lHdr->udpPayload = htons((uint16_t) uvar);
 #ifdef ADD_HEADER_CSUM
-                lHdr->checkSum = 0; // Zero on each pass because _populate_header() is only called once
+                lHdr->checkSum   = 0; // Zero on each pass because _populate_header() is only called once
                 if (c->protocolVer >= CHECKSUM_PVER)
                         lHdr->checkSum = checksum(lHdr, sizeof(struct loadHdr));
 #endif
@@ -823,9 +824,9 @@ int service_loadpdu(int connindex) {
         tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
         delta = (int) tspecmsec(&tspecdelta);
         if (c->outputFPtr != NULL) { // Start output data with one-way values
-                fprintf(c->outputFPtr, "%u,%u,%ld.%06ld,%ld.%06ld,%d", seqno, payload, (long) tspecvar.tv_sec,
-                        tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC,
-                        delta);
+                fprintf(c->outputFPtr, "%u,%u,%ld.%06ld,%ld.%06ld,%d,%.2f", seqno, payload, (long) tspecvar.tv_sec,
+                        tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, delta,
+                        repo.intfMbps);
         }
         if (var > 0) {
                 if (c->outputFPtr != NULL) { // Finalize output data with null entries

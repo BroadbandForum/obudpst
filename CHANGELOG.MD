@@ -28,6 +28,7 @@ data PDUs (both can be suppressed via compilation flags, causing them to be sile
 * An additional column for lost status feedback messages was added to the metadata export
 * The maximum authentication key size was increase from 32 to 64
 * A new ErrorStatus error value for multi-key and warning value for invalid data PDUs was added
+* An additional column for interface Mbps (from "-E intf") was added to the metadata export
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
