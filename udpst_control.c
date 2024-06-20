@@ -1914,7 +1914,7 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
         register struct connection *c = &conn[connindex];
         BOOL bvar;
         int var, pver, minsize, maxsize;
-        static int alertCount       = 0; // Static
+        static int alertCount = 0; // Static
 
         //
         // Initialize based on role and PDU type
