@@ -130,7 +130,7 @@ void output_warning(int, int);
 double upd_intf_stats(BOOL);
 void output_minimum(int);
 void output_debug(int);
-BOOL verify_datapdu(int, BOOL);
+BOOL verify_datapdu(int, struct loadHdr *, struct statusHdr *);
 
 //----------------------------------------------------------------------------
 //
@@ -697,7 +697,7 @@ int service_loadpdu(int connindex) {
         //
         // Verify PDU
         //
-        if (!verify_datapdu(connindex, TRUE)) {
+        if (!verify_datapdu(connindex, lHdr, NULL)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -1150,7 +1150,7 @@ int service_statuspdu(int connindex) {
         //
         // Verify PDU
         //
-        if (!verify_datapdu(connindex, FALSE)) {
+        if (!verify_datapdu(connindex, NULL, sHdr)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -2606,19 +2606,17 @@ unsigned short checksum(register void *p, register int count) {
 //
 // Verify data PDU integrity
 //
-BOOL verify_datapdu(int connindex, BOOL isLoad) {
+BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr) {
         register struct connection *c = &conn[connindex];
         int var;
         BOOL bvar;
-        struct loadHdr *lHdr   = (struct loadHdr *) repo.rcvDataPtr;
-        struct statusHdr *sHdr = (struct statusHdr *) repo.defBuffer;
         char connid[8];
 
         //
         // Perform PDU verification
         //
         bvar = FALSE;
-        if (isLoad) {
+        if (lHdr) {
                 if (repo.rcvDataSize < (int) sizeof(struct loadHdr)) {
                         bvar = TRUE;
                 } else if (ntohs(lHdr->loadId) != LOAD_ID) {
@@ -2661,7 +2659,7 @@ BOOL verify_datapdu(int connindex, BOOL isLoad) {
                                 sprintf(connid, "[%d]", connindex);
                         //
                         var = sprintf(scratch, "%sWARNING: Received invalid", connid);
-                        if (isLoad) {
+                        if (lHdr) {
                                 var += sprintf(&scratch[var], " load PDU (%d,0x%04X:0x%02X:0x%02X,0x%04X)", repo.rcvDataSize,
                                                ntohs(lHdr->loadId), lHdr->testAction, lHdr->rxStopped, lHdr->checkSum);
                         } else {

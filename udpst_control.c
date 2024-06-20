@@ -115,7 +115,7 @@ int sock_connect(int);
 int connected(int);
 int open_outputfile(int);
 BOOL validate_auth(void);
-BOOL verify_ctrlpdu(int, BOOL, char *, char *);
+BOOL verify_ctrlpdu(int, struct controlHdrSR *, struct controlHdrTA *, char *, char *);
 
 //----------------------------------------------------------------------------
 //
@@ -388,7 +388,7 @@ int service_setupreq(int connindex) {
         //
         getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
-        if (!verify_ctrlpdu(connindex, TRUE, addrstr, portstr)) {
+        if (!verify_ctrlpdu(connindex, cHdrSR, NULL, addrstr, portstr)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -567,7 +567,7 @@ int service_setupresp(int connindex) {
         //
         // Verify PDU
         //
-        if (!verify_ctrlpdu(connindex, TRUE, NULL, NULL)) {
+        if (!verify_ctrlpdu(connindex, cHdrSR, NULL, NULL, NULL)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -739,7 +739,7 @@ int service_actreq(int connindex) {
         //
         getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
                     NI_NUMERICHOST | NI_NUMERICSERV);
-        if (!verify_ctrlpdu(connindex, FALSE, addrstr, portstr)) {
+        if (!verify_ctrlpdu(connindex, NULL, cHdrTA, addrstr, portstr)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -1051,7 +1051,7 @@ int service_actresp(int connindex) {
         //
         // Verify PDU
         //
-        if (!verify_ctrlpdu(connindex, FALSE, NULL, NULL)) {
+        if (!verify_ctrlpdu(connindex, NULL, cHdrTA, NULL, NULL)) {
                 return 0; // Ignore bad PDU
         }
 
@@ -1910,19 +1910,17 @@ BOOL validate_auth() {
 //
 // Verify control PDU integrity
 //
-BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
+BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHdrTA *cHdrTA, char *addrstr, char *portstr) {
         register struct connection *c = &conn[connindex];
         BOOL bvar;
         int var, pver, minsize, maxsize;
-        struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
-        struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
         static int alertCount       = 0; // Static
 
         //
         // Initialize based on role and PDU type
         //
         if (repo.isServer) {
-                if (isSetup) {
+                if (cHdrSR) {
                         // Setup request/response
                         minsize = CHSR_SIZE_MVER;
                         maxsize = CHSR_SIZE_CVER;
@@ -1934,7 +1932,7 @@ BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
                         pver    = c->protocolVer;
                 }
         } else {
-                if (isSetup) {
+                if (cHdrSR) {
                         // Setup request/response
                         minsize = maxsize = CHSR_SIZE_CVER;
                 } else {
@@ -1948,7 +1946,7 @@ BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
         // Perform PDU verification
         //
         bvar = FALSE;
-        if (isSetup) {
+        if (cHdrSR) {
                 if (repo.rcvDataSize < minsize || repo.rcvDataSize > maxsize) {
                         bvar = TRUE;
                 } else if (ntohs(cHdrSR->controlId) != CHSR_ID) {
@@ -1980,14 +1978,14 @@ BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
                 bvar = FALSE; // Flip boolean to suppress output
 #endif
                 if (bvar && alertCount < ALERT_MSG_LIMIT && (!repo.isServer || conf.verbose)) {
-                        if (!repo.isServer && !isSetup) {
+                        if (!repo.isServer && cHdrTA) {
                                 // A lost test activation response for a downstream test will have load PDUs right behind it.
                                 // Excessive alerts are controlled via a local counter and the alert message limit.
                                 alertCount++;
                         }
 
                         var = sprintf(scratch, "ALERT: Received invalid");
-                        if (isSetup) {
+                        if (cHdrSR) {
                                 var += sprintf(&scratch[var], " setup");
                         } else {
                                 var += sprintf(&scratch[var], " test activation");
@@ -1997,7 +1995,7 @@ BOOL verify_ctrlpdu(int connindex, BOOL isSetup, char *addrstr, char *portstr) {
                         } else {
                                 var += sprintf(&scratch[var], " response");
                         }
-                        if (isSetup) {
+                        if (cHdrSR) {
                                 var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize,
                                                ntohs(cHdrSR->controlId), ntohs(cHdrSR->protocolVer), cHdrSR->checkSum);
                         } else {
