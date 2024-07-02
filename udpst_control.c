@@ -68,6 +68,7 @@
  * Len Ciavattone          03/03/2024    Add multi-key support
  * Len Ciavattone          04/12/2024    Enhanced control PDU integrity checks
  * Len Ciavattone          06/24/2024    Add interface Mbps to export
+ * Len Ciavattone          07/02/2024    Preset dir for bw dealloc on timeout
  *
  */
 
@@ -512,10 +513,13 @@ int service_setupreq(int connindex) {
         conn[i].mcIdent     = (int) ntohs(cHdrSR->mcIdent);
         if (conf.maxBandwidth > 0) {
                 conn[i].maxBandwidth = mbw; // Save bandwidth for adjustment at end of test
-                if (usbw)
-                        repo.usBandwidth += mbw; // Update current upstream bandwidth
-                else
-                        repo.dsBandwidth += mbw; // Update current downstream bandwidth
+                if (usbw) {
+                        conn[i].testType = TEST_TYPE_US; // Preset direction to allow for bandwidth deallocation on timeout
+                        repo.usBandwidth += mbw;         // Update current upstream bandwidth
+                } else {
+                        conn[i].testType = TEST_TYPE_DS; // Preset direction to allow for bandwidth deallocation on timeout
+                        repo.dsBandwidth += mbw;         // Update current downstream bandwidth
+                }
                 if (conf.verbose && mbw > 0) {
                         var = sprintf(scratch, "[%d]Bandwidth of %d allocated (New USBW: %d, DSBW: %d)\n", i, mbw, repo.usBandwidth,
                                       repo.dsBandwidth);
