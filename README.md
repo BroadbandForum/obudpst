@@ -2,7 +2,7 @@
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to
 demonstrate one approach of doing IP capacity measurements as described by:
 
-- Broadband Forum TR-471 Issue 3 (12/2022): _Maximum IP-Layer Capacity Metric,
+- Broadband Forum TR-471 Issue 4 (2024): _Maximum IP-Layer Capacity Metric,
 Related Metrics, and Measurements_, BBF TR-471,
 https://www.broadband-forum.org/technical/download/TR-471.pdf
 
@@ -734,7 +734,7 @@ receiver's clock).
 - OWD : The one-way delay of the datagram if the sender's and receiver's clocks
 are sufficiently synchronized, else it merely reflects the difference in the
 clocks (and could be negative). This value is in milliseconds.
-- IntfMbps : The interface Mbps when the `-E intf` option is used on the client.
+- IntfMbps : The client interface Mbps when the `-E intf` option is used.
 - RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
 measurements and carried from the load receiver to the load sender in the
 periodic status feedback messages.
@@ -826,7 +826,7 @@ UDP checksum is being utilized.*
 Independent of whether the header checksum is enabled as an additional PDU
 integrity check (beyond size, format, etc.), new output messaging is displayed
 when an invalid PDU is received. A bad PDU during the control phase (whether a
-corrupted PDU or a rogue UDP datagram) will generate an ALERT and a bad PDU
+corrupted PDU or a rogue UDP datagram) will generate an ALERT while a bad PDU
 during the data phase will generate a WARNING (and result in a warning exit
 status and JSON ErrorStatus). In cases where the udpst control port on the
 server is exposed to the open Internet, and verbose is enabled, this may result

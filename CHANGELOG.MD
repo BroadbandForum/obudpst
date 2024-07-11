@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2024-04-21: [UDPST 8.2.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.2.0)
+# 2024-07-11: [UDPST 8.2.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.2.0)
 
 This release addresses the need to always handle interface byte counters as 64-bit values,
 regardless of the machine architecture (OBUDPST-56). Also, for improved management of large-scale
@@ -29,8 +29,8 @@ data PDUs (both can be suppressed via compilation flags, causing them to be sile
 * The maximum authentication key size was increase from 32 to 64
 * A new ErrorStatus error value for multi-key and warning value for invalid data PDUs was added
 * An additional column for interface Mbps (from "-E intf") was added to the metadata export
-* A fix was added for scenarios where a timeout occurs due to a lost test activation request and
-the allocated upstream bandwidth is not deallocated.
+* A fix was added for scenarios where a timeout occurs, due to a lost test activation request, and
+the allocated upstream bandwidth on the server is never deallocated
 
 # 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
