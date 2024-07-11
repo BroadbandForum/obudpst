@@ -45,9 +45,13 @@
 typedef int BOOL;
 #define TRUE  1 // Boolean true
 #define FALSE 0 // Boolean false
-// Macros for 64 bit variables to switch to and from network
+// Macros for 64-bit variables to switch to and from network
 #ifndef ntohll
-#define ntohll(x) (((uint64_t) (ntohl((int) ((x << 32) >> 32))) << 32) | (unsigned int) ntohl(((int) (x >> 32))))
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define ntohll(x) (((uint64_t) (ntohl((uint32_t) ((x << 32) >> 32))) << 32) | ntohl(((uint32_t) (x >> 32))))
+#else
+#define ntohll(x) (x)
+#endif
 #endif
 #ifndef htonll
 #define htonll(x) ntohll(x)

@@ -52,5 +52,6 @@ extern int send_proc(int, char *, int);
 extern void sr_copy(struct sendingRate *, struct sendingRate *, BOOL);
 extern int create_timestamp(struct timespec *);
 extern int getuniform(int, int);
+extern unsigned short checksum(void *, int);
 
 #endif /* UDPST_DATA_H */

@@ -2,7 +2,7 @@
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to
 demonstrate one approach of doing IP capacity measurements as described by:
 
-- Broadband Forum TR-471 Issue 3 (12/2022): _Maximum IP-Layer Capacity Metric,
+- Broadband Forum TR-471 Issue 4 (2024): _Maximum IP-Layer Capacity Metric,
 Related Metrics, and Measurements_, BBF TR-471,
 https://www.broadband-forum.org/technical/download/TR-471.pdf
 
@@ -151,7 +151,7 @@ load adjustment when conducting a search for the Maximum IP-Layer Capacity.
 The Type C algorithm (a.k.a. Multiply and Retry) will provide a fast rate
 increase until congestion, reaching 1 Gbps in ~1 second. The "fast" ramp-up
 will be re-tried when conditions warrant, to ensure that the Maximum IP-Layer
-Capacity has been reached. This option is activated using `-A c` (with the
+Capacity has been reached. This option is activated using `-A C` (with the
 more linear Type B algorithm remaining the default).
 
 One change to the default settings was included in Release 7.5.1. All Load
@@ -352,10 +352,10 @@ the connection which closes the socket and deallocates it.
 
 **More Info**
 
-For much more detail on the test protocol, see the ./protocol.md file. Also, an
-Internet-Draft,
+An Internet-Draft,
 https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-protocol/ describes
-Protocol Version 9 in even more detail.
+what will eventually be the official protocol version. Although fundamentally
+the same as described here, it includes accommodations for additional security.
 
 ## JSON Output
 For examples of the JSON output fields see the included sample files named
@@ -713,6 +713,7 @@ character:
 - #D - Direction of test ('U' = Upstream, 'D' = Downstream)
 - #H - Server host name (or IP) specified on command-line
 - #p - Control port used for test setup
+- #E - Interface name specified with `-E intf` option (only valid on client)
 
 In addition to the above, all conversion specifications supported by strftime()
 (and introduced by a '%' character) can also be utilized - see strftime() man
@@ -733,6 +734,7 @@ receiver's clock).
 - OWD : The one-way delay of the datagram if the sender's and receiver's clocks
 are sufficiently synchronized, else it merely reflects the difference in the
 clocks (and could be negative). This value is in milliseconds.
+- IntfMbps : The client interface Mbps when the `-E intf` option is used.
 - RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
 measurements and carried from the load receiver to the load sender in the
 periodic status feedback messages.
@@ -745,9 +747,94 @@ turn-around time in the load sender). This value is in milliseconds.
 - RTT : The resulting "network" RTT when the RTT response delay is subtracted
 from the difference between the RTT transmit and receive times. This value is
 in milliseconds.
+- StatusLoss : The count of lost status feedback messages sent from the load
+receiver to the load sender.
 
 *Because RTT measurements are only periodically sampled (as part of each status
 feedback message), those columns will be empty most of the time. Also, all
 timestamps are based on the local system time zone and utilize microsecond
 resolution.*
+
+## Multi-Key Authentication
+For better support of large-scale deployments with various service offerings
+and device types, multiple authentication keys are now supported. As of version
+8.2.0, and in addition to the legacy authentication key still available on the
+command-line, a key file can now be specified via `-K file` to allow up to 256
+unique authentication keys (see `udpst.keys` example file). The CSV formatted
+file expects a numeric key ID (0-255) followed by the key string (64 characters
+max). Commas, spaces, tabs, and comments (anything beginning with a '#') are
+all ignored.
+
+*Because a key ID field is now needed in the Setup Request PDU, the protocol
+version had to be bumped from 10 to 11. However, the server is backward
+compatible and will support multi-key authentication for clients using either
+version. A default key ID of zero is assumed when one is not specified or is
+unavailable (as is the case with protocol version 10).*
+
+The authentication process begins with the client using a shared key to create
+a 32-byte HMAC-SHA256 hash for the Setup Request PDU. This hash and a key ID are
+inserted in the PDU prior to transmission to the server. The key used to create
+the hash can come from the command-line via the `-a key` option OR from a key
+file specified via the `-K file` option. The key ID is specified via the
+`-y keyid` option. When a key file is being utilized, the key ID option is also
+used to determine which key in the key file will be used to create the hash.
+If the key file only contains a single entry, and a key ID was not explicitly
+specified on the command-line, that key ID and key will automatically be used.
+Otherwise, when a key ID is not explicitly specified on the command-line, or the
+Setup Request is coming from a client using the previous protocol version (10),
+a default key ID of zero is assumed.
+
+When the server receives the Setup Request, and if it is utilizing a key file,
+the included key ID will be used to select the key used to create a
+corresponding hash (for comparison and validation). An entry in the key file
+with a key ID of zero can be used for older clients using the previous protocol
+version (10). In addition to the key file, a command-line key specified via
+`-a key` can also be used for secondary/backup authentication of the client.
+That is, if the authentication via a key file key fails for any reason (key ID
+not found, hash comparison mismatch, etc.) authentication is automatically
+attempted a second time using the command-line key. This flexibility allows for
+an easier transition from the previous protocol version, clients using an older
+command-line key, or clients moving from a zero (default) key ID to a non-zero
+ID.
+
+Lastly, for clients transitioning from no authentication to authentication, a
+new compilation flag is available on the server that makes authentication
+optional.
+```
+$ cmake -D AUTH_IS_OPTIONAL=ON .
+```
+*Note: This mode of operation is considered low security and should only be
+utilized temporarily for a migration or upgrade of clients.*
+
+## Optional Header Checksum and PDU Integrity Checks
+On systems where the standard UDP checksum is not being inserted by the
+protocol stack/NIC, or is not being verified upon reception, corrupt datagrams
+will be passed up to udpst. As of protocol version 11, an optional header
+checksum can be calculated and inserted into all control and data PDU headers
+to deal with this. Upon reception, udpst will automatically validate the header
+checksum if populated. And although this mechanism can operate in one direction
+at a time, it should be enabled on both the client and server for bidirectional
+protection. The following compilation flag will enable this functionality on
+the sender for all outgoing PDUs:
+```
+$ cmake -D ADD_HEADER_CSUM=ON .
+```
+*Note: Because of the small to moderate performance impact (depending on the
+device), this flag is normally disabled since it is redundant when the standard
+UDP checksum is being utilized.*
+
+Independent of whether the header checksum is enabled as an additional PDU
+integrity check (beyond size, format, etc.), new output messaging is displayed
+when an invalid PDU is received. A bad PDU during the control phase (whether a
+corrupted PDU or a rogue UDP datagram) will generate an ALERT while a bad PDU
+during the data phase will generate a WARNING (and result in a warning exit
+status and JSON ErrorStatus). In cases where the udpst control port on the
+server is exposed to the open Internet, and verbose is enabled, this may result
+in excessive alerts due to UDP port scanners and probing. If either of these
+new output message types is not desired, the following compilation flags can be
+used to suppress them (and the PDU is silently ignored):
+```
+$ cmake -D SUPP_INVPDU_ALERT=ON .
+$ cmake -D SUPP_INVPDU_WARN=ON .
+```
 

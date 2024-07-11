@@ -43,9 +43,10 @@
 //
 // Protocol version
 //
-#define PROTOCOL_VER 10 // Current protocol version between client and server
-#define PROTOCOL_MIN 10 // Minimum protocol version for backward compatibility
-#define BWMGMT_PVER  9  // Protocol version required for bandwidth management
+#define PROTOCOL_VER  11 // Current protocol version between client and server
+#define PROTOCOL_MIN  10 // Minimum protocol version for backward compatibility
+#define MULTIKEY_PVER 11 // Protocol version required for multi-key support
+#define CHECKSUM_PVER 11 // Protocol version required for checksum support
 
 //----------------------------------------------------------------------------
 //
@@ -114,11 +115,11 @@ struct controlHdrSR {
 #define CHSR_CRSP_CONNFAIL 13
         uint8_t cmdResponse;   // Command response
 #define CHSR_USDIR_BIT 0x8000  // Bandwidth upstream direction bit
-        uint16_t maxBandwidth; // Required bandwidth (added in v9)
+        uint16_t maxBandwidth; // Required bandwidth
         uint16_t testPort;     // Test port on server
 #define CHSR_JUMBO_STATUS    0x01
 #define CHSR_TRADITIONAL_MTU 0x02
-        uint8_t modifierBitmap; // Modifier bitmap (replaced jumboStatus in v9)
+        uint8_t modifierBitmap; // Modifier bitmap
 #define AUTHMODE_NONE   0
 #define AUTHMODE_SHA256 1
         uint8_t authMode;      // Authentication mode
@@ -129,9 +130,12 @@ struct controlHdrSR {
 #define AUTH_DIGEST_LENGTH 32 // Use SHA256 length equivalent
 #endif
         unsigned char authDigest[AUTH_DIGEST_LENGTH];
+        uint8_t keyId;     // Key ID in shared table
+        uint8_t reserved1; // (Alignment)
+        uint16_t checkSum; // Header checksum
 };
 #define CHSR_SIZE_CVER sizeof(struct controlHdrSR) // Current protocol version
-#define CHSR_SIZE_MVER (CHSR_SIZE_CVER - 0)        // Minimum protocol version
+#define CHSR_SIZE_MVER (CHSR_SIZE_CVER - 4)        // Minimum protocol version
 //----------------------------------------------------------------------------
 //
 // Control header for UDP payload of Test Activation PDUs
@@ -162,17 +166,19 @@ struct controlHdrTA {
         uint8_t ignoreOooDup;   // Ignore Out-of-Order/Duplicate datagrams
 #define CHTA_SRIDX_ISSTART 0x01
 #define CHTA_RAND_PAYLOAD  0x02
-        uint8_t modifierBitmap; // Modifier bitmap (replaced reserved1 in v9)
+        uint8_t modifierBitmap; // Modifier bitmap
 #define CHTA_RA_ALGO_B   0
 #define CHTA_RA_ALGO_C   1
 #define CHTA_RA_ALGO_MIN CHTA_RA_ALGO_B
 #define CHTA_RA_ALGO_MAX CHTA_RA_ALGO_C
-        uint8_t rateAdjAlgo;         // Rate adjust. algo. (replaced reserved2 in v9)
-        uint8_t reserved1;           // (Alignment) (replaced reserved2 in v9)
+        uint8_t rateAdjAlgo;         // Rate adjust. algo.
+        uint8_t reserved1;           // (Alignment)
         struct sendingRate srStruct; // Sending rate structure
+        uint16_t reserved2;          // (Alignment)
+        uint16_t checkSum;           // Header checksum
 };
 #define CHTA_SIZE_CVER sizeof(struct controlHdrTA) // Current protocol version
-#define CHTA_SIZE_MVER (CHTA_SIZE_CVER - 0)        // Minimum protocol version
+#define CHTA_SIZE_MVER (CHTA_SIZE_CVER - 4)        // Minimum protocol version
 //----------------------------------------------------------------------------
 //
 // Load header for UDP payload of load PDUs
@@ -183,6 +189,7 @@ struct loadHdr {
 #define TEST_ACT_TEST  0
 #define TEST_ACT_STOP1 1
 #define TEST_ACT_STOP2 2
+#define TEST_ACT_MAX   TEST_ACT_STOP2
         uint8_t testAction;  // Test action
         uint8_t rxStopped;   // Receive traffic stopped indicator (BOOL)
         uint32_t lpduSeqNo;  // Load PDU sequence number
@@ -195,7 +202,7 @@ struct loadHdr {
         uint32_t lpduTime_nsec; // Send time of this load PDU
         //
         uint16_t rttRespDelay; // Response delay for RTT calculation (ms)
-        uint16_t reserved1;    // (Alignment)
+        uint16_t checkSum;     // Header checksum
 };
 //----------------------------------------------------------------------------
 //
@@ -225,8 +232,8 @@ struct statusHdr {
         uint32_t rttMinimum;    // Minimum round-trip time sampled
         uint32_t rttSample;     // Last round-trip time sample
         uint8_t delayMinUpd;    // Delay minimum(s) updated
-        uint8_t reserved2;      // (Alignment)
-        uint16_t reserved3;     // (Alignment)
+        uint8_t reserved1;      // (Alignment)
+        uint16_t checkSum;      // Header checksum
         //
         uint32_t tiDeltaTime;   // Trial interval delta time
         uint32_t tiRxDatagrams; // Trial interval receive datagrams
