@@ -33,7 +33,7 @@ Open Broadband-UDP Speed Test (OB-UDPST) server configuration package
 %setup -q
 
 %build
-cmake3 -DCMAKE_INSTALL_PREFIX=/usr .
+cmake3 -Wno-dev -DCMAKE_INSTALL_PREFIX=/usr .
 make %{?_smp_mflags}
 pandoc -s -f markdown -t man README.md | gzip > %{name}.1.gz
 
