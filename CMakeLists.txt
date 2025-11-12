@@ -26,21 +26,21 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+cmake_minimum_required(VERSION 3.5)
 project(OB-UDPST)
-cmake_minimum_required(VERSION 3.0)
 if(${CMAKE_VERSION} VERSION_GREATER "3.3.0")
         cmake_policy(SET CMP0057 NEW)
 endif()
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(SOFTWARE_VER "8.2.0")
+set(SOFTWARE_VER "9.0.0(Dev1)")
 
 INCLUDE (CheckIncludeFiles)
 INCLUDE (CheckFunctionExists)
 INCLUDE (CheckSymbolExists)
 INCLUDE (FindPackageHandleStandardArgs)
 
-find_package(PkgConfig)
+find_package(PkgConfig QUIET)
 
 find_package(OpenSSL)
 if(OPENSSL_FOUND)

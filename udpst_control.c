@@ -69,7 +69,8 @@
  * Len Ciavattone          04/12/2024    Enhanced control PDU integrity checks
  * Len Ciavattone          06/24/2024    Add interface Mbps to export
  * Len Ciavattone          07/02/2024    Preset dir for bw dealloc on timeout
- *
+ * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
+ *                                       statistics, and improved idling
  */
 
 #define UDPST_CONTROL
@@ -90,6 +91,10 @@
 #ifdef AUTH_KEY_ENABLE
 #include <openssl/hmac.h>
 #include <openssl/x509.h>
+#include <openssl/evp.h>
+#include <openssl/kdf.h>
+#include <openssl/core_names.h> // Added for OSSL_KDF_PARAM_*
+#include <openssl/params.h>     // Added for OSSL_PARAM
 #endif
 #else
 #include "../udpst_control_alt1.h"
@@ -115,8 +120,10 @@ int service_actresp(int);
 int sock_connect(int);
 int connected(int);
 int open_outputfile(int);
-BOOL validate_auth(void);
+void insert_auth(int, unsigned char *, unsigned char *, unsigned char *, size_t);
+int validate_auth(int, unsigned char *, unsigned char *, unsigned char *, unsigned char *, size_t);
 BOOL verify_ctrlpdu(int, struct controlHdrSR *, struct controlHdrTA *, char *, char *);
+int kdf_hmac_sha256(char *, uint32_t, unsigned char *, unsigned char *);
 
 //----------------------------------------------------------------------------
 //
@@ -141,11 +148,9 @@ extern cJSON *json_top, *json_output;
 #define RTT_TEXT    "RTT"
 #define ZERO_TEXT   "zeroes"
 #define RAND_TEXT   "random"
-#define TESTHDR_LINE1 \
-        "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n"
-#define TESTHDR_LINE2 "  ID: %d, SR Index: %s, Cong. Thresh: %d, HS Delta: %d, SeqErr Thresh: %d, Algo: %s, Conn: %d, "
-static char *testHdrV4 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv4 ToS: %d%s\n";
-static char *testHdrV6 = TESTHDR_LINE1 TESTHDR_LINE2 "IPv6 TClass: %d%s\n";
+#define TESTHDR_LINE                                                                                                     \
+        "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n" \
+        "  ID: %d, SR Index: %s, Cong. Thresh: %d, HS Delta: %d, SeqErr Thresh: %d, Algo: %s, Conn: %d, DSCP+ECN: %d%s\n"
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -214,14 +219,14 @@ int null_action(int connindex) {
 //
 int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         register struct connection *c = &conn[connindex], *a;
-        int var;
+        int i, fd, var;
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8], intfpath[IFNAMSIZ + 64];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
 #ifdef AUTH_KEY_ENABLE
         char *key;
-        unsigned int uvar;
 #endif
+
         //
         // Additional initialization on first setup request
         //
@@ -230,15 +235,21 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
                 // Open local sysfs interface statistics
                 //
                 if (*conf.intfName) {
-                        var = sprintf(intfpath, "/sys/class/net/%s/statistics/", conf.intfName);
-                        if (conf.usTesting)
-                                strcat(&intfpath[var], "tx_bytes");
-                        else
-                                strcat(&intfpath[var], "rx_bytes");
-                        if ((repo.intfFD = open(intfpath, O_RDONLY)) < 0) {
-                                var = sprintf(scratch, "OPEN ERROR: %s (%s)\n", strerror(errno), intfpath);
-                                send_proc(errConn, scratch, var);
-                                return -1;
+                        for (i = 0; i < 2; i++) {
+                                var = sprintf(intfpath, "/sys/class/net/%s/statistics/", conf.intfName);
+                                if ((conf.usTesting && i == 0) || (conf.dsTesting && i == 1))
+                                        strcat(&intfpath[var], "tx_bytes");
+                                else
+                                        strcat(&intfpath[var], "rx_bytes");
+                                if ((fd = open(intfpath, O_RDONLY)) < 0) {
+                                        var = sprintf(scratch, "OPEN ERROR: %s (%s)\n", strerror(errno), intfpath);
+                                        send_proc(errConn, scratch, var);
+                                        return -1;
+                                }
+                                if (i == 0)
+                                        repo.intfFD = fd;
+                                else
+                                        repo.intfFDAlt = fd;
                         }
                 }
                 //
@@ -262,7 +273,7 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         // Build setup request PDU
         //
         memset(cHdrSR, 0, CHSR_SIZE_CVER);
-        cHdrSR->controlId   = htons(CHSR_ID);
+        cHdrSR->pduId       = htons(CHSR_ID);
         c->protocolVer      = PROTOCOL_VER; // Client always uses current version
         cHdrSR->protocolVer = htons((uint16_t) c->protocolVer);
         c->mcIndex          = mcIndex; // Multi-connection index of this connection
@@ -278,8 +289,8 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         cHdrSR->cmdResponse = CHSR_CRSP_NONE;
         if (conf.maxBandwidth > 0) {
                 // Each connection requests 1/Nth the total bandwidth
-                if ((c->maxBandwidth = conf.maxBandwidth / conf.maxConnCount) < MIN_REQUIRED_BW)
-                        c->maxBandwidth = MIN_REQUIRED_BW;
+                if ((c->maxBandwidth = conf.maxBandwidth / conf.maxConnCount) < 1)
+                        c->maxBandwidth = 1;
                 var = c->maxBandwidth;
                 if (conf.usTesting)
                         var |= CHSR_USDIR_BIT; // Set upstream bit of max bandwidth being transmitted
@@ -291,25 +302,27 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         if (conf.traditionalMTU) {
                 cHdrSR->modifierBitmap |= CHSR_TRADITIONAL_MTU;
         }
-        if (*conf.authKey == '\0' && conf.keyFile == NULL) {
-                cHdrSR->authMode     = AUTHMODE_NONE;
-                cHdrSR->authUnixTime = 0;
-                cHdrSR->keyId        = 0;
+        //
+        // Insert authentication if configured
+        //
 #ifdef AUTH_KEY_ENABLE
-        } else {
-                cHdrSR->authMode     = AUTHMODE_SHA256;
-                cHdrSR->authUnixTime = htonl((uint32_t) repo.systemClock.tv_sec);
-                cHdrSR->keyId        = (uint8_t) conf.keyId;
+        if (*conf.authKey != '\0' || conf.keyFile != NULL) {
+                c->authMode      = AUTHMODE_1;
+                cHdrSR->authMode = (uint8_t) c->authMode;
                 if (*conf.authKey != '\0') {
                         key = conf.authKey;
                 } else {
                         key = repo.key[repo.keyIndex].key;
                 }
-                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, CHSR_SIZE_CVER, cHdrSR->authDigest, &uvar);
-#endif
+                // Create KDF keys via shared key and timestamp (identical authUnixTime values
+                // must be used for KDF and initial PDU to server)
+                kdf_hmac_sha256(key, repo.systemClock.tv_sec, c->clientKey, c->serverKey);
+                insert_auth(conf.keyId, c->clientKey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
+                            CHSR_SIZE_CVER);
         }
+#endif
 #ifdef ADD_HEADER_CSUM
-        cHdrSR->checkSum = checksum(cHdrSR, CHSR_SIZE_CVER); // Added after HMAC (server MUST clear before HMAC validation)
+        cHdrSR->checkSum = checksum(cHdrSR, CHSR_SIZE_CVER);
 #endif
 
         //
@@ -324,8 +337,7 @@ int send_setupreq(int connindex, int mcIndex, int serverIndex) {
         //
         // Send setup request PDU (socket not yet connected)
         //
-        var = CHSR_SIZE_CVER;
-        if (send_proc(connindex, (char *) cHdrSR, var) != var)
+        if (send_proc(connindex, (char *) cHdrSR, CHSR_SIZE_CVER) != CHSR_SIZE_CVER)
                 return -1;
         if (conf.verbose) {
                 getnameinfo((struct sockaddr *) &repo.remSas, repo.remSasLen, addrstr, INET6_ADDR_STRLEN, portstr, sizeof(portstr),
@@ -378,11 +390,14 @@ int timeout_testinit(int connindex) {
 //
 int service_setupreq(int connindex) {
         register struct connection *c = &conn[connindex];
-        int i = -1, var, pver, mbw = 0, currbw = repo.dsBandwidth;
+        int i = -1, var, pver, mbw = 0, currbw = repo.dsBandwidth, errmsg;
         BOOL usbw = FALSE;
         struct timespec tspecvar;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
-        struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
+        struct controlHdrSR *cHdrSR        = (struct controlHdrSR *) repo.defBuffer;
+        struct controlHdrNR *cHdrNR        = (struct controlHdrNR *) repo.defBuffer;
+        struct perfStatsCounters *psC      = &repo.psCounters;
+        unsigned char ckey[SHA256_KEY_LEN] = {0}, skey[SHA256_KEY_LEN] = {0}; // Must be initialized to zero
 
         //
         // Verify PDU
@@ -392,97 +407,103 @@ int service_setupreq(int connindex) {
         if (!verify_ctrlpdu(connindex, cHdrSR, NULL, addrstr, portstr)) {
                 return 0; // Ignore bad PDU
         }
+        psC->setupRequestCnt++;
+
+        //
+        // Validate authentication if included and configured
+        //
+        errmsg = 0;
+        pver   = (int) ntohs(cHdrSR->protocolVer);
+        if (cHdrSR->authMode == AUTHMODE_1 && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
+                i = validate_auth(pver, ckey, skey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
+                                  (size_t) repo.rcvDataSize);
+                if (i > 0) {
+                        errmsg              = sprintf(scratch, "ERROR: Authentication failure of setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHFAIL;
+                        psC->ctrlAuthFailure++;
+                } else if (i < 0) {
+                        errmsg              = sprintf(scratch, "ERROR: Authentication time invalid in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHTIME;
+                        psC->ctrlBadAuthTime++;
+                }
+        }
 
         //
         // Check specifics of setup request from client
         //
-        var  = 0; // Used for error indication throughout next section
-        pver = (int) ntohs(cHdrSR->protocolVer);
-        mbw  = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
-        if (ntohs(cHdrSR->maxBandwidth) & CHSR_USDIR_BIT) {
-                usbw   = TRUE; // Max bandwidth is for upstream
-                currbw = repo.usBandwidth;
-        }
-        if (pver < PROTOCOL_MIN || pver > PROTOCOL_VER) {
-                var                 = sprintf(scratch, "ERROR: Invalid version (%d) in setup request from", pver);
-                cHdrSR->protocolVer = htons(PROTOCOL_VER); // Send back expected version
-                cHdrSR->cmdResponse = CHSR_CRSP_BADVER;
-
-        } else if (cHdrSR->mcCount == 0 || cHdrSR->mcCount > MAX_MC_COUNT || cHdrSR->mcIndex >= cHdrSR->mcCount) {
-                var = sprintf(scratch, "ERROR: Invalid multi-connection parameters (%d,%d) in setup request from", cHdrSR->mcIndex,
-                              cHdrSR->mcCount);
-                cHdrSR->cmdResponse = CHSR_CRSP_MCINVPAR;
-
-        } else if (((cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && !conf.jumboStatus) ||
-                   (!(cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && conf.jumboStatus)) {
-                var                 = sprintf(scratch, "ERROR: Invalid jumbo datagram option in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_BADJS;
-
-        } else if (((cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && !conf.traditionalMTU) ||
-                   (!(cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && conf.traditionalMTU)) {
-                var                 = sprintf(scratch, "ERROR: Invalid traditional MTU option in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_BADTMTU;
-
-        } else if (conf.maxBandwidth > 0 && mbw == 0) {
-                var                 = sprintf(scratch, "ERROR: Required bandwidth not specified in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_NOMAXBW;
-
-        } else if (conf.maxBandwidth > 0 && currbw + mbw > conf.maxBandwidth) {
-                var = sprintf(scratch, "ERROR: Capacity exceeded (%d.%d) by required bandwidth (%d) in setup request from",
-                              cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), mbw);
-                cHdrSR->cmdResponse = CHSR_CRSP_CAPEXC;
-
-        } else if (cHdrSR->authMode != AUTHMODE_NONE && *conf.authKey == '\0' && conf.keyFile == NULL) {
-                var                 = sprintf(scratch, "ERROR: Unexpected authentication in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_AUTHNC;
-#ifdef AUTH_KEY_ENABLE
-#ifndef AUTH_IS_OPTIONAL
-        } else if (cHdrSR->authMode == AUTHMODE_NONE && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
-                var                 = sprintf(scratch, "ERROR: Authentication missing in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_AUTHREQ;
-#endif // AUTH_IS_OPTIONAL
-        } else if (cHdrSR->authMode != AUTHMODE_NONE && cHdrSR->authMode != AUTHMODE_SHA256) {
-                var                 = sprintf(scratch, "ERROR: Invalid authentication method in setup request from");
-                cHdrSR->cmdResponse = CHSR_CRSP_AUTHINV;
-
-        } else if (cHdrSR->authMode == AUTHMODE_SHA256 && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
-                //
-                // Validate authentication digest (leave zeroed for response) and check time window if enforced
-                //
-                if (pver >= CHECKSUM_PVER)
-                        cHdrSR->checkSum = 0; // MUST be cleared before HMAC validation
-                if (validate_auth()) {
-                        var                 = sprintf(scratch, "ERROR: Authentication failure of setup request from");
-                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHFAIL;
-
-                } else if (AUTH_ENFORCE_TIME) {
-                        tspecvar.tv_sec = (time_t) ntohl(cHdrSR->authUnixTime);
-                        if (tspecvar.tv_sec < repo.systemClock.tv_sec - AUTH_TIME_WINDOW ||
-                            tspecvar.tv_sec > repo.systemClock.tv_sec + AUTH_TIME_WINDOW) {
-                                var                 = sprintf(scratch, "ERROR: Authentication time invalid in setup request from");
-                                cHdrSR->cmdResponse = CHSR_CRSP_AUTHTIME;
-                        }
+        mbw = (int) (ntohs(cHdrSR->maxBandwidth) & ~CHSR_USDIR_BIT); // Obtain max bandwidth while ignoring upstream bit
+        if (errmsg == 0) {
+                if (ntohs(cHdrSR->maxBandwidth) & CHSR_USDIR_BIT) {
+                        usbw   = TRUE; // Max bandwidth is for upstream
+                        currbw = repo.usBandwidth;
                 }
-#endif // AUTH_KEY_ENABLE
+                if (pver < PROTOCOL_MIN || pver > PROTOCOL_VER) {
+                        errmsg              = sprintf(scratch, "ERROR: Invalid version (%d) in setup request from", pver);
+                        cHdrSR->protocolVer = htons(PROTOCOL_VER); // Send back expected version
+                        cHdrSR->cmdResponse = CHSR_CRSP_BADVER;
+                        psC->invalidProtocolVer++;
+
+                } else if (cHdrSR->mcCount == 0 || cHdrSR->mcCount > MAX_MC_COUNT || cHdrSR->mcIndex >= cHdrSR->mcCount) {
+                        errmsg = sprintf(scratch, "ERROR: Invalid multi-connection parameters (%d,%d) in setup request from",
+                                         cHdrSR->mcIndex, cHdrSR->mcCount);
+                        cHdrSR->cmdResponse = CHSR_CRSP_MCINVPAR;
+                        psC->invalidSetupOption++;
+
+                } else if (((cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && !conf.jumboStatus) ||
+                           (!(cHdrSR->modifierBitmap & CHSR_JUMBO_STATUS) && conf.jumboStatus)) {
+                        errmsg              = sprintf(scratch, "ERROR: Invalid jumbo datagram option in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_BADJS;
+                        psC->invalidSetupOption++;
+
+                } else if (((cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && !conf.traditionalMTU) ||
+                           (!(cHdrSR->modifierBitmap & CHSR_TRADITIONAL_MTU) && conf.traditionalMTU)) {
+                        errmsg              = sprintf(scratch, "ERROR: Invalid traditional MTU option in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_BADTMTU;
+                        psC->invalidSetupOption++;
+
+                } else if (conf.maxBandwidth > 0 && mbw == 0) {
+                        errmsg              = sprintf(scratch, "ERROR: Required bandwidth not specified in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_NOMAXBW;
+                        psC->invalidSetupOption++;
+
+                } else if (conf.maxBandwidth > 0 && currbw + mbw > conf.maxBandwidth) {
+                        errmsg =
+                            sprintf(scratch, "ERROR: Capacity exceeded (%d.%d) by required bandwidth (%d) in setup request from",
+                                    cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), mbw);
+                        cHdrSR->cmdResponse = CHSR_CRSP_CAPEXC;
+                        psC->bandwidthExceeded++;
+
+                } else if (cHdrSR->authMode != AUTHMODE_0 && *conf.authKey == '\0' && conf.keyFile == NULL) {
+                        errmsg              = sprintf(scratch, "ERROR: Unexpected authentication in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHNC;
+                        psC->invalidSetupOption++;
+#ifndef AUTH_IS_OPTIONAL
+                } else if (cHdrSR->authMode == AUTHMODE_0 && (*conf.authKey != '\0' || conf.keyFile != NULL)) {
+                        errmsg              = sprintf(scratch, "ERROR: Authentication missing in setup request from");
+                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHREQ;
+                        psC->invalidSetupOption++;
+#endif
+                } else if (cHdrSR->authMode > AUTHMODE_1) {
+                        errmsg =
+                            sprintf(scratch, "ERROR: Invalid authentication mode (%u) in setup request from", cHdrSR->authMode);
+                        cHdrSR->cmdResponse = CHSR_CRSP_AUTHINV;
+                        psC->invalidSetupOption++;
+                }
         }
         if (cHdrSR->cmdResponse == CHSR_CRSP_NONE) {
                 if (conf.verbose) {
-                        if (pver < MULTIKEY_PVER) {
-                                var = DEF_KEY_ID; // Use default key ID for older protocol versions
-                        } else {
-                                var = (int) cHdrSR->keyId; // Else obtain key ID specified by client
-                        }
                         var = sprintf(scratch, "[%d]Setup request (%d.%d, Ver: %d, MaxBW: %d, KeyID: %d) received from %s:%s\n",
-                                      connindex, (int) cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), pver, mbw, var, addrstr,
-                                      portstr);
+                                      connindex, (int) cHdrSR->mcIndex, (int) ntohs(cHdrSR->mcIdent), pver, mbw,
+                                      (int) cHdrSR->keyId, addrstr, portstr);
                         send_proc(monConn, scratch, var);
                 }
                 //
                 // Obtain new test connection for this client
                 //
                 if ((i = new_conn(-1, repo.server[0].ip, 0, T_UDP, &recv_proc, &service_actreq)) < 0) {
-                        var                 = 0; // Error message already output as part of allocation failure
+                        errmsg              = 0; // Error message already output as part of allocation failure
                         cHdrSR->cmdResponse = CHSR_CRSP_CONNFAIL;
+                        psC->connCreateFail++;
                 }
         }
         cHdrSR->cmdRequest = CHSR_CREQ_SETUPRSP; // Convert setup request to setup response
@@ -490,16 +511,19 @@ int service_setupreq(int connindex) {
                 //
                 // Output error message if needed (append source info), send back setup response, and exit
                 //
-                if (var > 0) {
-                        var += sprintf(&scratch[var], " %s:%s\n", addrstr, portstr);
-                        send_proc(errConn, scratch, var);
+                if (errmsg > 0) {
+                        errmsg += sprintf(&scratch[errmsg], " %s:%s\n", addrstr, portstr);
+                        send_proc(errConn, scratch, errmsg);
                 }
-                if (pver >= CHECKSUM_PVER) {
-                        cHdrSR->checkSum = 0;
+                if (pver >= EXTAUTH_PVER) {
+                        insert_auth((int) cHdrSR->keyId, skey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
+                                    (size_t) repo.rcvDataSize);
+                }
+                cHdrSR->checkSum = 0;
 #ifdef ADD_HEADER_CSUM
-                        cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
+                cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
 #endif
-                }
+                psC->setupRejectCnt++;
                 send_proc(connindex, (char *) cHdrSR, repo.rcvDataSize);
                 return 0;
         }
@@ -507,6 +531,8 @@ int service_setupreq(int connindex) {
         //
         // Initialize new test connection obtained above as 'i'
         //
+        if (pver < PROTOCOL_VER)
+                psC->legacyProtocolVer++;
         conn[i].protocolVer = pver;
         conn[i].mcIndex     = (int) cHdrSR->mcIndex;
         conn[i].mcCount     = (int) cHdrSR->mcCount;
@@ -526,6 +552,9 @@ int service_setupreq(int connindex) {
                         send_proc(monConn, scratch, var);
                 }
         }
+        conn[i].authMode = (int) cHdrSR->authMode;
+        memcpy(conn[i].clientKey, ckey, SHA256_KEY_LEN);
+        memcpy(conn[i].serverKey, skey, SHA256_KEY_LEN);
 
         //
         // Set end time (used as watchdog) in case client goes quiet
@@ -539,19 +568,51 @@ int service_setupreq(int connindex) {
         //
         cHdrSR->cmdResponse = CHSR_CRSP_ACKOK;
         cHdrSR->testPort    = htons((uint16_t) conn[i].locPort);
-        if (pver >= CHECKSUM_PVER) {
-                cHdrSR->checkSum = 0;
-#ifdef ADD_HEADER_CSUM
-                cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
-#endif
+        if (pver >= EXTAUTH_PVER) {
+                insert_auth((int) cHdrSR->keyId, skey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
+                            (size_t) repo.rcvDataSize);
         }
-        var = repo.rcvDataSize;
-        if (send_proc(connindex, (char *) cHdrSR, var) != var)
+        cHdrSR->checkSum = 0;
+#ifdef ADD_HEADER_CSUM
+        cHdrSR->checkSum = checksum(cHdrSR, repo.rcvDataSize);
+#endif
+        psC->setupAcceptCnt++;
+        if (send_proc(connindex, (char *) cHdrSR, repo.rcvDataSize) != repo.rcvDataSize)
                 return 0;
         if (conf.verbose) {
                 var = sprintf(scratch, "[%d]Setup response (%d.%d) sent from %s:%d to %s:%s\n", connindex, conn[i].mcIndex,
                               conn[i].mcIdent, c->locAddr, c->locPort, addrstr, portstr);
                 send_proc(monConn, scratch, var);
+        }
+
+        //
+        // Send null request to client from new test connection (to potentially open firewall for server)
+        // NOTE: The protocol version check can be commented out so that a null request will also be sent to
+        //       legacy clients. Although this may result in a "ALERT: Received invalid test activation response..."
+        //       error message on them, it would allow a newer server to no longer require that all its ephemeral ports
+        //       be configured as reachable through its firewall.
+        //
+        if (pver >= EXTAUTH_PVER) {
+                cHdrNR->pduId       = htons(CHNR_ID);
+                cHdrNR->protocolVer = htons((uint16_t) pver);
+                cHdrNR->cmdRequest  = CHNR_CREQ_NULLREQ;
+                cHdrNR->cmdResponse = CHNR_CRSP_NONE;
+                cHdrNR->reserved1   = 0;
+                //
+                cHdrNR->authMode = (uint8_t) conn[i].authMode;
+                insert_auth((int) cHdrSR->keyId, skey, (unsigned char *) &cHdrNR->authMode, (unsigned char *) cHdrNR,
+                            CHNR_SIZE_CVER);
+                cHdrNR->checkSum = 0;
+#ifdef ADD_HEADER_CSUM
+                cHdrNR->checkSum = checksum(cHdrNR, CHNR_SIZE_CVER);
+#endif
+                if (send_proc(i, (char *) cHdrNR, CHNR_SIZE_CVER) != CHNR_SIZE_CVER)
+                        return 0;
+                if (conf.verbose) {
+                        var = sprintf(scratch, "[%d]Null request (%d.%d) sent from %s:%d to %s:%s\n", i, conn[i].mcIndex,
+                                      conn[i].mcIdent, conn[i].locAddr, conn[i].locPort, addrstr, portstr);
+                        send_proc(monConn, scratch, var);
+                }
         }
         return 0;
 }
@@ -563,7 +624,7 @@ int service_setupreq(int connindex) {
 //
 int service_setupresp(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
+        int i, var;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
         struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
@@ -572,7 +633,29 @@ int service_setupresp(int connindex) {
         // Verify PDU
         //
         if (!verify_ctrlpdu(connindex, cHdrSR, NULL, NULL, NULL)) {
-                return 0; // Ignore bad PDU
+                return 0; // Ignore bad PDU (or null request)
+        }
+
+        //
+        // Validate authentication if configured
+        //
+        if (*conf.authKey != '\0' || conf.keyFile != NULL) {
+                var = 0;
+                i   = validate_auth(c->protocolVer, c->clientKey, c->serverKey, (unsigned char *) &cHdrSR->authMode,
+                                    (unsigned char *) cHdrSR, CHSR_SIZE_CVER);
+                if (i > 0) {
+                        var                = sprintf(scratch, "ERROR: Authentication failure of setup response from server");
+                        repo.endTimeStatus = CHSR_CRSP_ERRBASE + CHSR_CRSP_AUTHFAIL; // ErrorStatus
+                } else if (i < 0) {
+                        var                = sprintf(scratch, "ERROR: Authentication time invalid in setup response from server");
+                        repo.endTimeStatus = CHSR_CRSP_ERRBASE + CHSR_CRSP_AUTHTIME; // ErrorStatus
+                }
+                if (var > 0) {
+                        var += sprintf(&scratch[var], " %s:%d\n", repo.server[c->serverIndex].ip, repo.server[c->serverIndex].port);
+                        send_proc(errConn, scratch, var);
+                        tspeccpy(&c->endTime, &repo.systemClock); // Set for immediate close/exit
+                        return 0;
+                }
         }
 
         //
@@ -657,7 +740,7 @@ int service_setupresp(int connindex) {
         // Build test activation PDU
         //
         memset(cHdrTA, 0, CHTA_SIZE_CVER);
-        cHdrTA->controlId   = htons(CHTA_ID);
+        cHdrTA->pduId       = htons(CHTA_ID);
         cHdrTA->protocolVer = htons((uint16_t) c->protocolVer);
         if (conf.usTesting) {
                 c->testType        = TEST_TYPE_US;
@@ -680,9 +763,9 @@ int service_setupresp(int connindex) {
         c->testIntTime         = conf.testIntTime;
         cHdrTA->testIntTime    = htons((uint16_t) c->testIntTime);
         c->subIntPeriod        = conf.subIntPeriod;
-        cHdrTA->subIntPeriod   = (uint8_t) c->subIntPeriod;
-        c->ipTosByte           = conf.ipTosByte;
-        cHdrTA->ipTosByte      = (uint8_t) c->ipTosByte;
+        cHdrTA->subIntPeriod   = htons((uint16_t) c->subIntPeriod);
+        c->dscpEcn             = conf.dscpEcn;
+        cHdrTA->dscpEcn        = (uint8_t) c->dscpEcn;
         c->srIndexConf         = conf.srIndexConf;
         cHdrTA->srIndexConf    = htons((uint16_t) c->srIndexConf);
         c->useOwDelVar         = (BOOL) conf.useOwDelVar;
@@ -707,14 +790,20 @@ int service_setupresp(int connindex) {
         cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
 
         //
-        // Send test activation request
+        // Send test activation request to server
         //
         c->secAction = &service_actresp; // Set service handler for response
+#ifdef AUTH_KEY_ENABLE
+        if (*conf.authKey != '\0' || conf.keyFile != NULL) {
+                cHdrTA->authMode = (uint8_t) c->authMode;
+                insert_auth(conf.keyId, c->clientKey, (unsigned char *) &cHdrTA->authMode, (unsigned char *) cHdrTA,
+                            CHTA_SIZE_CVER);
+        }
+#endif
 #ifdef ADD_HEADER_CSUM
         cHdrTA->checkSum = checksum(cHdrTA, CHTA_SIZE_CVER);
 #endif
-        var = CHTA_SIZE_CVER;
-        if (send_proc(connindex, (char *) cHdrTA, var) != var)
+        if (send_proc(connindex, (char *) cHdrTA, CHTA_SIZE_CVER) != CHTA_SIZE_CVER)
                 return 0;
         if (conf.verbose) {
                 var = sprintf(scratch, "[%d]Test activation request (%d.%d) sent from %s:%d to %s:%d\n", connindex, c->mcIndex,
@@ -732,11 +821,12 @@ int service_setupresp(int connindex) {
 //
 int service_actreq(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var;
+        int i, var;
         char addrstr[INET6_ADDR_STRLEN], portstr[8];
         struct sendingRate *sr = repo.sendingRates; // Set to first row of table
         struct timespec tspecvar;
-        struct controlHdrTA *cHdrTA = (struct controlHdrTA *) repo.defBuffer;
+        struct controlHdrTA *cHdrTA   = (struct controlHdrTA *) repo.defBuffer;
+        struct perfStatsCounters *psC = &repo.psCounters;
 
         //
         // Verify PDU
@@ -745,6 +835,28 @@ int service_actreq(int connindex) {
                     NI_NUMERICHOST | NI_NUMERICSERV);
         if (!verify_ctrlpdu(connindex, NULL, cHdrTA, addrstr, portstr)) {
                 return 0; // Ignore bad PDU
+        }
+        psC->actRequestCnt++;
+
+        //
+        // Validate authentication based on mode of original setup request
+        //
+        if (c->authMode == AUTHMODE_1 && c->protocolVer >= EXTAUTH_PVER) {
+                var = 0;
+                i   = validate_auth(c->protocolVer, c->clientKey, c->serverKey, (unsigned char *) &cHdrTA->authMode,
+                                    (unsigned char *) cHdrTA, (size_t) repo.rcvDataSize);
+                if (i > 0) {
+                        var = sprintf(scratch, "ERROR: Authentication failure of test activation request from");
+                        psC->ctrlAuthFailure++;
+                } else if (i < 0) {
+                        var = sprintf(scratch, "ERROR: Authentication time invalid in test activation request from");
+                        psC->ctrlBadAuthTime++;
+                }
+                if (var > 0) {
+                        var += sprintf(&scratch[var], " %s:%s\n", addrstr, portstr);
+                        send_proc(errConn, scratch, var);
+                        return 0;
+                }
         }
 
         //
@@ -807,45 +919,58 @@ int service_actreq(int connindex) {
                 c->testIntTime      = conf.testIntTime;
                 cHdrTA->testIntTime = htons((uint16_t) c->testIntTime);
         }
-        c->subIntPeriod = (int) cHdrTA->subIntPeriod;
+        if (c->protocolVer >= MSSUBINT_PVER) {
+                c->subIntPeriod = (int) ntohs(cHdrTA->subIntPeriod);
+        } else {
+                c->subIntPeriod = (int) cHdrTA->reserved1; // Location within previous PDU version
+                c->subIntPeriod *= MSECINSEC;              // Convert seconds to ms
+        }
         if (c->subIntPeriod < MIN_SUBINT_PERIOD || c->subIntPeriod > MAX_SUBINT_PERIOD) {
-                c->subIntPeriod      = DEF_SUBINT_PERIOD;
-                cHdrTA->subIntPeriod = (uint8_t) c->subIntPeriod;
+                c->subIntPeriod = DEF_SUBINT_PERIOD;
+                if (c->protocolVer >= MSSUBINT_PVER) {
+                        cHdrTA->subIntPeriod = htons((uint16_t) c->subIntPeriod);
+                } else {
+                        cHdrTA->reserved1 = (uint8_t) (c->subIntPeriod / MSECINSEC); // Send back as seconds
+                }
         }
-        if (c->subIntPeriod > c->testIntTime) { // Check for invalid relationship
-                c->testIntTime       = DEF_TESTINT_TIME;
-                cHdrTA->testIntTime  = htons((uint16_t) c->testIntTime);
-                c->subIntPeriod      = DEF_SUBINT_PERIOD;
-                cHdrTA->subIntPeriod = (uint8_t) c->subIntPeriod;
+        if (c->subIntPeriod > (c->testIntTime * MSECINSEC)) { // Check for invalid relationship
+                c->testIntTime      = DEF_TESTINT_TIME;
+                cHdrTA->testIntTime = htons((uint16_t) c->testIntTime);
+                c->subIntPeriod     = DEF_SUBINT_PERIOD;
+                if (c->protocolVer >= MSSUBINT_PVER) {
+                        cHdrTA->subIntPeriod = htons((uint16_t) c->subIntPeriod);
+                } else {
+                        cHdrTA->reserved1 = (uint8_t) (c->subIntPeriod / MSECINSEC); // Send back as seconds
+                }
         }
         //
-        // IP ToS/TClass byte (also set socket option)
+        // DSCP+ECN byte (also set socket option)
         //
-        c->ipTosByte = (int) cHdrTA->ipTosByte;
-        if (c->ipTosByte < MIN_IPTOS_BYTE || c->ipTosByte > MAX_IPTOS_BYTE) {
-                c->ipTosByte      = DEF_IPTOS_BYTE;
-                cHdrTA->ipTosByte = (uint8_t) c->ipTosByte;
-        } else if (c->ipTosByte > conf.ipTosByte) { // Enforce server maximum
-                c->ipTosByte      = conf.ipTosByte;
-                cHdrTA->ipTosByte = (uint8_t) c->ipTosByte;
+        c->dscpEcn = (int) cHdrTA->dscpEcn;
+        if (c->dscpEcn < MIN_DSCPECN_BYTE || c->dscpEcn > MAX_DSCPECN_BYTE) {
+                c->dscpEcn      = DEF_DSCPECN_BYTE;
+                cHdrTA->dscpEcn = (uint8_t) c->dscpEcn;
+        } else if (c->dscpEcn > conf.dscpEcn) { // Enforce server maximum
+                c->dscpEcn      = conf.dscpEcn;
+                cHdrTA->dscpEcn = (uint8_t) c->dscpEcn;
         }
-        if (c->ipTosByte != 0) {
+        if (c->dscpEcn != 0) {
                 if (c->ipProtocol == IPPROTO_IPV6)
                         var = IPV6_TCLASS;
                 else
                         var = IP_TOS;
-                if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &c->ipTosByte, sizeof(c->ipTosByte)) < 0) {
-                        c->ipTosByte      = 0;
-                        cHdrTA->ipTosByte = (uint8_t) c->ipTosByte;
+                if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &c->dscpEcn, sizeof(c->dscpEcn)) < 0) {
+                        c->dscpEcn      = 0;
+                        cHdrTA->dscpEcn = (uint8_t) c->dscpEcn;
                 }
         }
         //
         // Static or starting sending rate index (special case <Auto>, which is the default but greater than max)
         //
         c->srIndexConf = (int) ntohs(cHdrTA->srIndexConf);
-        if (c->srIndexConf != DEF_SRINDEX_CONF) {
+        if (c->srIndexConf != CHTA_SRIDX_DEF) {
                 if (c->srIndexConf < MIN_SRINDEX_CONF || c->srIndexConf > MAX_SRINDEX_CONF) {
-                        c->srIndexConf      = DEF_SRINDEX_CONF;
+                        c->srIndexConf      = CHTA_SRIDX_DEF;
                         cHdrTA->srIndexConf = htons((uint16_t) c->srIndexConf);
                 } else if (c->srIndexConf > conf.srIndexConf) { // Enforce server maximum
                         c->srIndexConf      = conf.srIndexConf;
@@ -855,7 +980,7 @@ int service_actreq(int connindex) {
                         c->srIndexIsStart = TRUE;           // Designate configured value as starting point
                         c->srIndex        = c->srIndexConf; // Set starting point from configured value
                 }
-                if (c->srIndexConf != DEF_SRINDEX_CONF)
+                if (c->srIndexConf != CHTA_SRIDX_DEF)
                         sr = &repo.sendingRates[c->srIndexConf]; // Select starting SR table row
         }
         //
@@ -924,6 +1049,11 @@ int service_actreq(int connindex) {
         } else {
                 memset(&cHdrTA->srStruct, 0, sizeof(struct sendingRate));
         }
+        //
+        // <<<<< If request is being rejected update counter >>>>>
+        //
+        if (cHdrTA->cmdResponse != CHTA_CRSP_ACKOK)
+                psC->badActParameter++;
         // ===================================================================
 
         //
@@ -944,16 +1074,15 @@ int service_actreq(int connindex) {
                         // Upstream
                         // Setup to receive load PDUs and send status PDUs
                         //
-                        c->testType   = TEST_TYPE_US;
-                        c->rttMinimum = INITIAL_MIN_DELAY;
-                        c->rttSample  = INITIAL_MIN_DELAY;
+                        c->testType     = TEST_TYPE_US;
+                        c->rttMinimum   = STATUS_NODEL;
+                        c->rttVarSample = STATUS_NODEL;
 #ifdef HAVE_RECVMMSG
                         c->secAction = &service_recvmmsg;
 #else
                         c->secAction = &service_loadpdu;
 #endif
-                        //
-                        c->delayVarMin = INITIAL_MIN_DELAY;
+                        c->delayVarMin = STATUS_NODEL;
                         tspeccpy(&c->trialIntClock, &repo.systemClock);
                         tspecvar.tv_sec  = 0;
                         tspecvar.tv_nsec = (long) (c->trialInt * NSECINMSEC);
@@ -982,19 +1111,28 @@ int service_actreq(int connindex) {
                         }
                         c->timer2Action = &send2_loadpdu;
                 }
+                psC->actAcceptCnt++;
+        } else {
+                psC->actRejectCnt++;
         }
 
         //
         // Send test activation response to client
         //
-        if (c->protocolVer >= CHECKSUM_PVER) {
+        if (c->protocolVer >= EXTAUTH_PVER) {
+                insert_auth((int) cHdrTA->keyId, c->serverKey, (unsigned char *) &cHdrTA->authMode, (unsigned char *) cHdrTA,
+                            (size_t) repo.rcvDataSize);
                 cHdrTA->checkSum = 0;
 #ifdef ADD_HEADER_CSUM
                 cHdrTA->checkSum = checksum(cHdrTA, repo.rcvDataSize);
 #endif
+        } else {
+                cHdrTA->reserved3 = 0;
+#ifdef ADD_HEADER_CSUM
+                cHdrTA->reserved3 = checksum(cHdrTA, repo.rcvDataSize); // Location within previous PDU version
+#endif
         }
-        var = repo.rcvDataSize;
-        if (send_proc(connindex, (char *) cHdrTA, var) != var)
+        if (send_proc(connindex, (char *) cHdrTA, repo.rcvDataSize) != repo.rcvDataSize)
                 return 0;
         if (conf.verbose) {
                 var = sprintf(scratch, "[%d]Test activation response (%d.%d) sent from %s:%d to %s:%d\n", connindex, c->mcIndex,
@@ -1045,8 +1183,8 @@ int service_actreq(int connindex) {
 //
 int service_actresp(int connindex) {
         register struct connection *c = &conn[connindex];
-        int var, i, ipv6add;
-        char *testhdr, *testtype, connid[8], delusage[8], sritext[8], payload[8];
+        int i, var, ipv6add;
+        char *testtype, connid[8], delusage[8], sritext[8], payload[8];
         char intflabel[IFNAMSIZ + 8];
         struct sendingRate *sr = &c->srStruct; // Set to connection structure
         struct timespec tspecvar;
@@ -1056,7 +1194,29 @@ int service_actresp(int connindex) {
         // Verify PDU
         //
         if (!verify_ctrlpdu(connindex, NULL, cHdrTA, NULL, NULL)) {
-                return 0; // Ignore bad PDU
+                return 0; // Ignore bad PDU (or null request)
+        }
+
+        //
+        // Validate authentication if configured
+        //
+        if (*conf.authKey != '\0' || conf.keyFile != NULL) {
+                var = 0;
+                i   = validate_auth(c->protocolVer, c->clientKey, c->serverKey, (unsigned char *) &cHdrTA->authMode,
+                                    (unsigned char *) cHdrTA, CHTA_SIZE_CVER);
+                if (i > 0) {
+                        var = sprintf(scratch, "ERROR: Authentication failure of test activation response from server");
+                        repo.endTimeStatus = CHTA_CRSP_ERRBASE + CHSR_CRSP_AUTHFAIL; // Reuse CHSR offset for ErrorStatus
+                } else if (i < 0) {
+                        var = sprintf(scratch, "ERROR: Authentication time invalid in test activation response from server");
+                        repo.endTimeStatus = CHTA_CRSP_ERRBASE + CHSR_CRSP_AUTHTIME; // Reuse CHSR offset for ErrorStatus
+                }
+                if (var > 0) {
+                        var += sprintf(&scratch[var], " %s:%d\n", repo.server[c->serverIndex].ip, repo.server[c->serverIndex].port);
+                        send_proc(errConn, scratch, var);
+                        tspeccpy(&c->endTime, &repo.systemClock); // Set for immediate close/exit
+                        return 0;
+                }
         }
 
         //
@@ -1089,15 +1249,15 @@ int service_actresp(int connindex) {
         c->upperThresh  = (int) ntohs(cHdrTA->upperThresh);
         c->trialInt     = (int) ntohs(cHdrTA->trialInt);
         c->testIntTime  = (int) ntohs(cHdrTA->testIntTime);
-        c->subIntPeriod = (int) cHdrTA->subIntPeriod;
-        c->ipTosByte    = (int) cHdrTA->ipTosByte;
-        if (c->ipTosByte != 0) {
+        c->subIntPeriod = (int) ntohs(cHdrTA->subIntPeriod);
+        c->dscpEcn      = (int) cHdrTA->dscpEcn;
+        if (c->dscpEcn != 0) {
                 if (c->ipProtocol == IPPROTO_IPV6)
                         var = IPV6_TCLASS;
                 else
                         var = IP_TOS;
-                if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &c->ipTosByte, sizeof(c->ipTosByte)) < 0) {
-                        var = sprintf(scratch, "ERROR: Failure setting IP ToS/TClass (%d) %s\n", c->ipTosByte, strerror(errno));
+                if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &c->dscpEcn, sizeof(c->dscpEcn)) < 0) {
+                        var = sprintf(scratch, "ERROR: Failure setting IP_TOS/IPV6_TCLASS (%d) %s\n", c->dscpEcn, strerror(errno));
                         send_proc(errConn, scratch, var);
                         tspeccpy(&c->endTime, &repo.systemClock); // Set for immediate close/exit
                         return 0;
@@ -1154,16 +1314,15 @@ int service_actresp(int connindex) {
                 // Downstream
                 // Setup to receive load PDUs and send status PDUs
                 //
-                testtype      = DSTEST_TEXT;
-                c->rttMinimum = INITIAL_MIN_DELAY;
-                c->rttSample  = INITIAL_MIN_DELAY;
+                testtype        = DSTEST_TEXT;
+                c->rttMinimum   = STATUS_NODEL;
+                c->rttVarSample = STATUS_NODEL;
 #ifdef HAVE_RECVMMSG
                 c->secAction = &service_recvmmsg;
 #else
                 c->secAction = &service_loadpdu;
 #endif
-                //
-                c->delayVarMin = INITIAL_MIN_DELAY;
+                c->delayVarMin = STATUS_NODEL;
                 tspeccpy(&c->trialIntClock, &repo.systemClock);
                 tspecvar.tv_sec  = 0;
                 tspecvar.tv_nsec = (long) (c->trialInt * NSECINMSEC);
@@ -1181,10 +1340,6 @@ int service_actresp(int connindex) {
                 if (conf.verbose)
                         sprintf(connid, "[%d]", connindex);
 
-                if (c->ipProtocol == IPPROTO_IPV6)
-                        testhdr = testHdrV6;
-                else
-                        testhdr = testHdrV4;
                 if (c->useOwDelVar)
                         strcpy(delusage, OWD_TEXT);
                 else
@@ -1193,7 +1348,7 @@ int service_actresp(int connindex) {
                         strcpy(payload, RAND_TEXT);
                 else
                         strcpy(payload, ZERO_TEXT);
-                if (c->srIndexConf == DEF_SRINDEX_CONF) {
+                if (c->srIndexConf == CHTA_SRIDX_DEF) {
                         strcpy(sritext, SRAUTO_TEXT);
                 } else if (c->srIndexIsStart) {
                         sprintf(sritext, "%c%d", SRIDX_ISSTART_PREFIX, c->srIndexConf);
@@ -1205,10 +1360,10 @@ int service_actresp(int connindex) {
                         snprintf(intflabel, sizeof(intflabel), ", [%s]", conf.intfName);
                 }
                 if (!conf.jsonOutput) {
-                        var = sprintf(scratch, testhdr, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh, delusage,
-                                      c->trialInt, boolText[c->ignoreOooDup], payload, c->mcIdent, sritext, c->slowAdjThresh,
-                                      c->highSpeedDelta, c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->mcCount, c->ipTosByte,
-                                      intflabel);
+                        var = sprintf(scratch, TESTHDR_LINE, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh,
+                                      delusage, c->trialInt, boolText[c->ignoreOooDup], payload, c->mcIdent, sritext,
+                                      c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->mcCount,
+                                      c->dscpEcn, intflabel);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (!conf.jsonBrief) {
@@ -1244,7 +1399,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "JumboFramesPermitted", conf.jumboStatus);
                                 cJSON_AddNumberToObject(json_input, "NumberOfConnections", conf.maxConnCount);
                                 cJSON_AddNumberToObject(json_input, "MinNumOfConnections", conf.minConnCount);
-                                cJSON_AddNumberToObject(json_input, "DSCP", c->ipTosByte >> 2);
+                                cJSON_AddNumberToObject(json_input, "DSCP", c->dscpEcn >> 2);
                                 if (conf.ipv4Only) {
                                         cJSON_AddStringToObject(json_input, "ProtocolVersion", "IPv4");
                                 } else if (conf.ipv6Only) {
@@ -1273,7 +1428,7 @@ int service_actresp(int connindex) {
                                 } else {
                                         cJSON_AddStringToObject(json_input, "UDPPayloadContent", ZERO_TEXT);
                                 }
-                                if (c->srIndexConf == DEF_SRINDEX_CONF || c->srIndexIsStart) {
+                                if (c->srIndexConf == CHTA_SRIDX_DEF || c->srIndexIsStart) {
                                         cJSON_AddStringToObject(json_input, "TestType", "Search");
                                 } else {
                                         cJSON_AddStringToObject(json_input, "TestType", "Fixed");
@@ -1283,7 +1438,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "RIPREnable", 1);
                                 cJSON_AddNumberToObject(json_input, "PreambleDuration", 0);
                                 // Using "[Start]SendingRateIndex" instead of "StartSendingRate" for this implementation
-                                if (c->srIndexConf == DEF_SRINDEX_CONF || c->srIndexIsStart) {
+                                if (c->srIndexConf == CHTA_SRIDX_DEF || c->srIndexIsStart) {
                                         var = 0;
                                         if (c->srIndexIsStart)
                                                 var = c->srIndexConf;
@@ -1293,9 +1448,10 @@ int service_actresp(int connindex) {
                                         cJSON_AddNumberToObject(json_input, "StartSendingRateIndex", c->srIndexConf);
                                         cJSON_AddNumberToObject(json_input, "SendingRateIndex", c->srIndexConf);
                                 }
-                                cJSON_AddNumberToObject(json_input, "NumberTestSubIntervals", c->testIntTime / c->subIntPeriod);
+                                cJSON_AddNumberToObject(json_input, "NumberTestSubIntervals",
+                                                        (c->testIntTime * MSECINSEC) / c->subIntPeriod);
                                 cJSON_AddNumberToObject(json_input, "NumberFirstModeTestSubIntervals", conf.bimodalCount);
-                                cJSON_AddNumberToObject(json_input, "TestSubInterval", c->subIntPeriod * MSECINSEC);
+                                cJSON_AddNumberToObject(json_input, "TestSubInterval", c->subIntPeriod);
                                 cJSON_AddNumberToObject(json_input, "StatusFeedbackInterval", c->trialInt);
                                 cJSON_AddNumberToObject(json_input, "TimeoutNoTestTraffic", WARNING_NOTRAFFIC * MSECINSEC);
                                 cJSON_AddNumberToObject(json_input, "TimeoutNoStatusMessage", WARNING_NOTRAFFIC * MSECINSEC);
@@ -1322,7 +1478,7 @@ int service_actresp(int connindex) {
                         if (json_output == NULL) {
                                 json_output = cJSON_CreateObject();
                         }
-                        create_timestamp(&repo.systemClock);
+                        create_timestamp(&repo.systemClock, TRUE);
                         cJSON_AddStringToObject(json_output, "BOMTime", scratch);
                         //
                         cJSON_AddNumberToObject(json_output, "TmaxUsed", WARNING_NOTRAFFIC * MSECINSEC);
@@ -1851,40 +2007,92 @@ int open_outputfile(int connindex) {
         //
         // Initialize with header
         //
-        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,IntfMbps,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n", c->outputFPtr);
+        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,IntfMbps,IntfMbpsAlt,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n",
+              c->outputFPtr);
 
         return 0;
 }
 //----------------------------------------------------------------------------
 //
-// Validate authentication of client request
+// Insert authentication
 //
-BOOL validate_auth() {
-        BOOL authfail = TRUE;
+void insert_auth(int keyid, unsigned char *key, unsigned char *modeptr, unsigned char *data, size_t data_len) {
+        struct authOverlay *ao = (struct authOverlay *) (modeptr - AO_MODE_OFFSET); // Align with overlay structure
 #ifdef AUTH_KEY_ENABLE
-        int i, var, pver;
-        char *key;
         unsigned int uvar;
-        struct controlHdrSR *cHdrSR = (struct controlHdrSR *) repo.defBuffer;
-        unsigned char digest1[AUTH_DIGEST_LENGTH], digest2[AUTH_DIGEST_LENGTH];
+#endif
+        if (keyid < 0 || key == NULL || data == NULL || data_len == 0)
+                return;
+
+        //
+        // Clear and fill authentication overlay
+        //
+        ao->authUnixTime = 0;
+        memset(ao->authDigest, 0, AUTH_DIGEST_LENGTH);
+        ao->keyId         = 0;
+        ao->reservedAuth1 = 0;
+#ifdef AUTH_KEY_ENABLE
+        if (ao->authMode == AUTHMODE_1) {
+                ao->authUnixTime = htonl((uint32_t) repo.systemClock.tv_sec);
+                ao->keyId        = (uint8_t) keyid;
+                ao->checkSum     = 0; // Must be cleared before HMAC calculation
+                HMAC(EVP_sha256(), key, SHA256_KEY_LEN, data, data_len, ao->authDigest, &uvar);
+        }
+#endif
+        return;
+}
+//----------------------------------------------------------------------------
+//
+// Validate authentication
+// Return Values: 0 = Success, 1 = Auth. Failure, -1 = Outside Auth. Time Window
+//
+int validate_auth(int pver, unsigned char *ckey, unsigned char *skey, unsigned char *modeptr, unsigned char *data,
+                  size_t data_len) {
+        struct authOverlay *ao = (struct authOverlay *) (modeptr - AO_MODE_OFFSET); // Align with overlay structure
+        int i, var, authfail = 1;
+        char *key;
+        BOOL kdf = FALSE; // KDF keys available/provided
+        unsigned char digest1[AUTH_DIGEST_LENGTH];
+        struct timespec tspecvar;
+#ifdef AUTH_KEY_ENABLE
+        unsigned int uvar;
+        unsigned char digest2[AUTH_DIGEST_LENGTH];
+#endif
+        if (data == NULL || data_len == 0)
+                return authfail;
+
+        //
+        // Check authentication mode
+        //
+        if (ao->authMode != AUTHMODE_1)
+                return authfail;
 
         //
         // Save off received digest and zero it in header
         //
-        memcpy(digest1, cHdrSR->authDigest, AUTH_DIGEST_LENGTH);
-        memset(cHdrSR->authDigest, 0, AUTH_DIGEST_LENGTH);
+        memcpy(digest1, ao->authDigest, AUTH_DIGEST_LENGTH);
+        memset(ao->authDigest, 0, AUTH_DIGEST_LENGTH);
+        ao->checkSum = 0; // Must be cleared before HMAC calculation
+
+        //
+        // Use KDF keys if already available
+        //
+        key = NULL;
+        if (pver >= EXTAUTH_PVER) {
+                if (memcmp(ckey, skey, SHA256_KEY_LEN) != 0) { // Check if not identical (not initialized to zero)
+                        kdf = TRUE;
+                        if (repo.isServer)
+                                key = (char *) ckey;
+                        else
+                                key = (char *) skey;
+                }
+        }
 
         //
         // Attempt initial validation via key file entry if available
         //
-        key = NULL;
-        if (conf.keyFile != NULL) {
-                pver = (int) ntohs(cHdrSR->protocolVer);
-                if (pver < MULTIKEY_PVER) {
-                        var = DEF_KEY_ID; // Use default key ID for older protocol versions
-                } else {
-                        var = (int) cHdrSR->keyId; // Else obtain key ID specified by client
-                }
+        if (key == NULL && conf.keyFile != NULL) {
+                var = (int) ao->keyId; // Obtain key ID
                 for (i = 0; i < repo.keyCount; i++) {
                         if (repo.key[i].id == var) { // Find key with matching key ID
                                 key = repo.key[i].key;
@@ -1892,22 +2100,56 @@ BOOL validate_auth() {
                         }
                 }
         }
-        if (key != NULL) {
-                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, repo.rcvDataSize, digest2, &uvar);
-                if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
-                        authfail = FALSE;
+        for (i = 0; i < 2; i++) {
+                if (key != NULL) {
+                        //
+                        // Create and use KDF keys if needed, else use shared key directly
+                        //
+                        if (pver >= EXTAUTH_PVER) {
+                                if (!kdf) {
+#ifdef AUTH_KEY_ENABLE
+                                        // If creating KDF keys via shared key and timestamp, identical authUnixTime values
+                                        // must be used for KDF and initial PDU from client
+                                        kdf_hmac_sha256(key, ntohl(ao->authUnixTime), ckey, skey);
+#endif
+                                }
+                                if (repo.isServer)
+                                        key = (char *) ckey;
+                                else
+                                        key = (char *) skey;
+                                var = SHA256_KEY_LEN;
+                        } else {
+                                var = strlen(key);
+                        }
+#ifdef AUTH_KEY_ENABLE
+                        HMAC(EVP_sha256(), key, var, data, data_len, digest2, &uvar);
+                        if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0) {
+                                authfail = 0;
+                                break;
+                        }
+#endif
+                }
+                if (kdf) {
+                        break; // Pre-existing KDF key must succeed on first pass
+                }
+                //
+                // Attempt backup validation via command-line key if key file entry was unavailable or unsuccessful
+                //
+                if (i == 0 && *conf.authKey != '\0') {
+                        key = conf.authKey;
+                }
         }
 
         //
-        // Attempt backup validation via command-line key if key file entry was unavailable or unsuccessful
+        // Check authentication time window if validation was successful
         //
-        if (authfail == TRUE && *conf.authKey != '\0') {
-                key = conf.authKey;
-                HMAC(EVP_sha256(), key, strlen(key), (const unsigned char *) cHdrSR, repo.rcvDataSize, digest2, &uvar);
-                if (memcmp(digest1, digest2, AUTH_DIGEST_LENGTH) == 0)
-                        authfail = FALSE;
+        if (authfail == 0 && AUTH_ENFORCE_TIME) {
+                tspecvar.tv_sec = (time_t) ntohl(ao->authUnixTime);
+                if (tspecvar.tv_sec < repo.systemClock.tv_sec - AUTH_TIME_WINDOW ||
+                    tspecvar.tv_sec > repo.systemClock.tv_sec + AUTH_TIME_WINDOW) {
+                        authfail = -1;
+                }
         }
-#endif
         return authfail;
 }
 //----------------------------------------------------------------------------
@@ -1917,8 +2159,10 @@ BOOL validate_auth() {
 BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHdrTA *cHdrTA, char *addrstr, char *portstr) {
         register struct connection *c = &conn[connindex];
         BOOL bvar;
-        int var, pver, minsize, maxsize;
-        static int alertCount = 0; // Static
+        int var, pver, minsize, maxsize, csum;
+        static int alertCount         = 0; // Static
+        struct controlHdrNR *cHdrNR   = NULL;
+        struct perfStatsCounters *psC = &repo.psCounters;
 
         //
         // Initialize based on role and PDU type
@@ -1939,11 +2183,31 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
                 if (cHdrSR) {
                         // Setup request/response
                         minsize = maxsize = CHSR_SIZE_CVER;
+                        cHdrNR            = (struct controlHdrNR *) cHdrSR;
                 } else {
                         // Test activation request/response
                         minsize = maxsize = CHTA_SIZE_CVER;
+                        cHdrNR            = (struct controlHdrNR *) cHdrTA;
                 }
                 pver = c->protocolVer;
+
+                //
+                // Check for possible null request from server
+                //
+                if (ntohs(cHdrNR->pduId) == CHNR_ID) {
+                        if (conf.verbose) {
+                                var = sprintf(scratch, "[%d]Null request (%d.%d) received", connindex, c->mcIndex, c->mcIdent);
+                                if (*c->remAddr != '\0') {
+                                        var += sprintf(&scratch[var], " from %s:%d", c->remAddr, c->remPort);
+                                } else {
+                                        // Possible scenario if setup response is lost or arrives after null request
+                                        var += sprintf(&scratch[var], " before socket connect");
+                                }
+                                scratch[var++] = '\n';
+                                send_proc(monConn, scratch, var);
+                        }
+                        return FALSE; // No processing required
+                }
         }
 
         //
@@ -1953,24 +2217,45 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
         if (cHdrSR) {
                 if (repo.rcvDataSize < minsize || repo.rcvDataSize > maxsize) {
                         bvar = TRUE;
-                } else if (ntohs(cHdrSR->controlId) != CHSR_ID) {
+                        psC->ctrlInvalidSize++;
+
+                } else if (ntohs(cHdrSR->pduId) != CHSR_ID) {
                         bvar = TRUE;
+                        psC->ctrlInvalidFormat++;
+
                 } else if (cHdrSR->cmdRequest != CHSR_CREQ_SETUPREQ && cHdrSR->cmdRequest != CHSR_CREQ_SETUPRSP) {
                         bvar = TRUE;
-                } else if (pver >= CHECKSUM_PVER && cHdrSR->checkSum != 0) {
-                        if (checksum(cHdrSR, repo.rcvDataSize))
+                        psC->ctrlInvalidFormat++;
+
+                } else if (cHdrSR->checkSum != 0) {
+                        if (checksum(cHdrSR, repo.rcvDataSize)) {
                                 bvar = TRUE;
+                                psC->ctrlInvalidChksum++;
+                        }
                 }
         } else {
                 if (repo.rcvDataSize < minsize || repo.rcvDataSize > maxsize) {
                         bvar = TRUE;
-                } else if (ntohs(cHdrTA->controlId) != CHTA_ID) {
+                        psC->ctrlInvalidSize++;
+
+                } else if (ntohs(cHdrTA->pduId) != CHTA_ID) {
                         bvar = TRUE;
+                        psC->ctrlInvalidFormat++;
+
                 } else if (cHdrTA->cmdRequest != CHTA_CREQ_TESTACTUS && cHdrTA->cmdRequest != CHTA_CREQ_TESTACTDS) {
                         bvar = TRUE;
-                } else if (pver >= CHECKSUM_PVER && cHdrTA->checkSum != 0) {
-                        if (checksum(cHdrTA, repo.rcvDataSize))
+                        psC->ctrlInvalidFormat++;
+
+                } else if ((pver >= EXTAUTH_PVER) && (cHdrTA->checkSum != 0)) {
+                        if (checksum(cHdrTA, repo.rcvDataSize)) {
                                 bvar = TRUE;
+                                psC->ctrlInvalidChksum++;
+                        }
+                } else if ((pver < EXTAUTH_PVER) && (cHdrTA->reserved3 != 0)) { // Location within previous PDU version
+                        if (checksum(cHdrTA, repo.rcvDataSize)) {
+                                bvar = TRUE;
+                                psC->ctrlInvalidChksum++;
+                        }
                 }
         }
 
@@ -2000,11 +2285,15 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
                                 var += sprintf(&scratch[var], " response");
                         }
                         if (cHdrSR) {
-                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize,
-                                               ntohs(cHdrSR->controlId), ntohs(cHdrSR->protocolVer), cHdrSR->checkSum);
+                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize, ntohs(cHdrSR->pduId),
+                                               ntohs(cHdrSR->protocolVer), cHdrSR->checkSum);
                         } else {
-                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize,
-                                               ntohs(cHdrTA->controlId), ntohs(cHdrTA->protocolVer), cHdrTA->checkSum);
+                                if (pver >= EXTAUTH_PVER)
+                                        csum = cHdrTA->checkSum;
+                                else
+                                        csum = cHdrTA->reserved3; // Location within previous PDU version
+                                var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize, ntohs(cHdrTA->pduId),
+                                               ntohs(cHdrTA->protocolVer), csum);
                         }
                         if (repo.isServer) {
                                 var += sprintf(&scratch[var], " from %s:%s\n", addrstr, portstr);
@@ -2018,4 +2307,83 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
         }
         return TRUE;
 }
+//----------------------------------------------------------------------------
+#ifdef AUTH_KEY_ENABLE
+//
+// Output individual authentication keys of length SHA256_KEY_LEN
+// from derived key material.
+//
+// Return Values: 0 = Failure, 1 = Success
+//
+int kdf_hmac_sha256(char *Kin, uint32_t authUnixTime,
+                    unsigned char *cAuthKey,   // Client key
+                    unsigned char *sAuthKey) { // Server key
+
+        int var, keylen = SHA256_KEY_LEN * 2;
+        char context[16];
+        unsigned char *keyptr, keybuf[keylen];
+        EVP_KDF *kdf      = NULL;
+        EVP_KDF_CTX *kctx = NULL;
+        OSSL_PARAM params[16], *p = params;
+
+        //
+        // Fetch KDF algorithm and create context
+        //
+        if ((kdf = EVP_KDF_fetch(NULL, "KBKDF", NULL)) == NULL) {
+                return 0;
+        }
+        if ((kctx = EVP_KDF_CTX_new(kdf)) == NULL) {
+                EVP_KDF_free(kdf);
+                return 0;
+        }
+
+        //
+        // Set parameters for KBKDF
+        // ---------------------------------------------------------
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_MODE, "COUNTER", 0);
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_MAC, "HMAC", 0);
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, "SHA256", 0);
+        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_KEY, Kin, strlen(Kin));
+        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, "UDPSTP", 6);
+        var  = snprintf(context, sizeof(context), "%u", authUnixTime);
+        *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_INFO, context, var);
+        //
+        // Confirm the following are enabled
+        //
+        var  = 1;
+        *p++ = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_KBKDF_USE_L, &var);
+        *p++ = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_KBKDF_USE_SEPARATOR, &var);
+        //
+        // Set counter length in bits (available as of OpenSSL 3.1)
+        //
+        // var = 32; // Length of 32 is backward compatible with OpenSSL 3.0
+        //*p++ = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_KBKDF_R, &var);
+        *p++ = OSSL_PARAM_construct_end();
+        // ---------------------------------------------------------
+
+        //
+        // Derive key material
+        //
+        if (EVP_KDF_derive(kctx, keybuf, keylen, params) < 1) {
+                EVP_KDF_CTX_free(kctx);
+                EVP_KDF_free(kdf);
+                return 0;
+        }
+
+        //
+        // Output individual keys
+        //
+        keyptr = keybuf;
+        memcpy(cAuthKey, keyptr, SHA256_KEY_LEN);
+        keyptr += SHA256_KEY_LEN;
+        memcpy(sAuthKey, keyptr, SHA256_KEY_LEN);
+
+        //
+        // Cleanup
+        //
+        EVP_KDF_CTX_free(kctx);
+        EVP_KDF_free(kdf);
+        return 1;
+}
+#endif
 //----------------------------------------------------------------------------

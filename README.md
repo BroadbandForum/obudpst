@@ -2,13 +2,19 @@
 Open Broadband-UDP Speed Test (OB-UDPST) is a client/server software utility to
 demonstrate one approach of doing IP capacity measurements as described by:
 
-- Broadband Forum TR-471 Issue 4 (2024): _Maximum IP-Layer Capacity Metric,
+- Broadband Forum TR-471 Issue 4 (2024/09): _Maximum IP-Layer Capacity Metric,
 Related Metrics, and Measurements_, BBF TR-471,
 https://www.broadband-forum.org/technical/download/TR-471.pdf
 
-- ITU-T Recommendation Y.1540 (revised 03/2023): _Internet protocol data communication
-service - IP packet transfer and availability performance parameters_,
-ITU-T Y.1540, https://www.itu.int/rec/T-REC-Y.1540-201912-I/en 
+- IETF RFC 9097: _Metrics and Methods for One-way IP Capacity_, 
+https://www.rfc-editor.org/rfc/rfc9097.html
+
+- IETF RFC xxx: _UDP Speed Test Protocol for One-way IP Capacity Metric
+Measurement_, https://www.rfc-editor.org/rfc/rfcXXX.html
+
+- ITU-T Recommendation Y.1540 (revised 03/2023): _Internet protocol data
+communication service - IP packet transfer and availability performance
+parameters_, ITU-T Y.1540, https://www.itu.int/rec/T-REC-Y.1540-201912-I/en 
    
 - ITU-T Y-series Supplement 60 (2022): _Interpreting ITU-T Y.1540 maximum
 IP-layer capacity measurements_, ITU-T Y.Sup60,
@@ -18,20 +24,42 @@ https://www.itu.int/rec/T-REC-Y.Sup60/en
 benchmarking and KPIs for High speed internet_, ETSI TS 103 222-2, V1.2.1,
 https://www.etsi.org/deliver/etsi_ts/103200_103299/10322202/01.02.01_60/ts_10322202v010201p.pdf
 
-- IETF RFC 9097: _Metrics and Methods for One-way IP Capacity_, 
-https://datatracker.ietf.org/doc/html/rfc9097
-
 - ETSI Technical Report 103 702 (2020-11): _Speech and multimedia Transmission
 Quality (STQ); QoS parameters and test scenarios for assessing network
 capabilities in 5G performance measurements_, ETSI TR 103 702, V1.1.1
 https://www.etsi.org/deliver/etsi_tr/103700_103799/103702/01.01.01_60/tr_103702v010101p.pdf
+
+**IMPORTANT: As of release 9.0.0, the default control port has changed from
+25000 to 24601. For backward compatibility, 8.2.0 clients will either need to
+use the new control port via `-p 24601` or the server can be run with the
+legacy control port (via `-p 25000`).**
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Fixed-Rate and Low-Rate Testing](#fixed-rate-and-low-rate-testing)
+- [Multiple Connections and Distributed Servers](#multiple-connections-and-distributed-servers)
+- [Building OB-UDPST](#building-ob-udpst)
+- [Test Processing Walkthrough](#test-processing-walkthrough)
+- [JSON Output (client test results)](#json-output-client-test-results)
+- [Local Interface Traffic Rate](#local-interface-traffic-rate)
+- [Server Bandwidth Management](#server-bandwidth-management)
+- [Increasing the Starting Sending Rate](#increasing-the-starting-sending-rate)
+- [Linux Socket Buffer Optimization](#linux-socket-buffer-optimization)
+- [Server Optimization](#server-optimization)
+- [Considerations for Older or Low-End Devices](#considerations-for-older-or-low-end-devices)
+- [Output (Export) of Received Load Traffic Metadata](#output-export-of-received-load-traffic-metadata)
+- [Multi-Key Authentication](#multi-key-authentication)
+- [Optional Header Checksum and Integrity Checks](#optional-header-checksum-and-integrity-checks)
+- [Local Backpressure](#local-backpressure)
+- [Server Performance Statistics](#server-performance-statistics)
 
 ## Overview
 Utilizing an adaptive transmission rate, via a pre-built table of discreet
 sending rates (starting at 0.11 Mbps), UDP datagrams are sent from client
 to server(s) or server(s) to client to determine the maximum available IP-layer
 capacity between them. The load traffic is only sent in one direction at a
-time, and status feedback messages are sent periodically in the opposite
+time and status feedback messages are sent periodically in the opposite
 direction.
 
 For upstream tests, the feedback messages from the server(s) instruct the client
@@ -83,11 +111,20 @@ $ udpst -p <port> <Local_IP>
     Service client requests using a non-default UDP control port and only when
     received on the interface with the specified IP address
 $ udpst -a <key>
-    Only service requests that utilize a matching authentication key
+$ udpst -K <file>
+    Only service requests that utilize a matching authentication key from the
+    command line or from a key file
+$ udpst -G <file>
+    Write periodic performance statistics (as JSON) to the specified file
 ```
-*Note: The server must be reachable on the UDP control port [default **25000**]
-and all UDP ephemeral ports (**32768 - 60999** as of the Linux 2.4 kernel,
-available via `cat /proc/sys/net/ipv4/ip_local_port_range`).*
+*Note: The server must be reachable on the UDP control port [default
+**24601**]. With release 9.0.0 the server now sends an immediate Null request
+control message (after the Setup response) to open access through its firewall
+to the new UDP ephemeral port created for the test. However, if the firewall is
+using port address translation (PAT), and the Null request is ineffective,
+access to all UDP ephemeral ports will need to be preconfigured on the firewall
+(**32768 - 60999** as of the Linux 2.4 kernel, available via
+`cat /proc/sys/net/ipv4/ip_local_port_range`).*
 
 **Usage examples for client mode:**
 ```
@@ -162,11 +199,40 @@ from "Ignore" back to "Include". This change was justified by recognizing that
 both out-of-order and duplicate datagrams are a legitimate part of IP-Layer
 Capacity.
 
-See the following publication (which is updated frequently) for more details
-on testing in the circumstances described above:
+See the following publication for more details on testing in the circumstances
+described above:
 - ITU-T Y-series Supplement 60 (06/22): _Interpreting ITU-T Y.1540 maximum
 IP-layer capacity measurements_, ITU-T Y.Sup60,
 https://www.itu.int/rec/T-REC-Y.Sup60/en
+
+## Fixed-Rate and Low-Rate Testing
+Although the primary function of the software is to "find" the maximum IP-layer
+capacity between two endpoints, fixed-rate and low-rate testing can also be
+quite valuable. This is because "finding" the maximum capacity involves ramping
+up traffic to induce congestion (i.e., loss and/or delay). However, there are
+scenarios where simply measuring the traffic conditions is desirable.
+
+Fixed-rate testing via the `-I [@]index` option (used without the '@' prefix)
+allows for the sending of load traffic at a static rate, below the actual
+maximum. This can be helpful as part of the test and turn-up of new service
+or the verification of service after repair. For example, a 1 Gbps service
+should theoretically provide an IP capacity of ~972.76 Mbps (1500 MTU, 1 VLAN
+Tag). Testing with a sending rate of ~90% of that maximum (via `-I 875`), would
+allow confirmation that the connectivity is stable, error-free, and with low
+delay variation.
+
+Similarly, for ongoing monitoring, low-rate testing can be used.
+Due to the significant amount of traffic typically required to "find" a
+maximum, it can be impractical to run frequent capacity tests in
+large-scale networks. Therefore, and as an alternative to infrequent testing
+alone, low-rate tests (via `-I 0`) can be utilized very regularly between
+maximum capacity tests. These tests, with a minimum sending rate, send a
+random size datagram every 50 ms. With the size still constrained by the `-j`
+and `-T` options, this equates to a traffic rate of only ~0.11 Mbps.
+The benefit of this testing is that it can still detect various network
+impairments (loss, delay, instability, etc.) while utilizing all of the
+existing infrastructure and support systems already in place for maximum
+capacity measurements.
 
 ## Multiple Connections and Distributed Servers
 As of Release 8.0.0, the client can now test using multiple connections (i.e.,
@@ -235,7 +301,7 @@ connection. Alternatively, XPS (Transmit Packet Steering) can be utilized to
 make the device behave the same as servers normally do with multi-queue NICs.
 That is, having each CPU map onto one queue. Additional details, as well as
 the XPS configuration used on the Pi4, are available below under
-"Considerations for Older Hardware and Low-End Devices".
+"Considerations for Older or Low-End Devices".
 
 ## Building OB-UDPST
 To build OB-UDPST a local installation of CMake is required. Please obtain it
@@ -246,15 +312,17 @@ consult with [https://cmake.org] for other download options.
 $ cmake .
 $ make
 ```
-*Note: Authentication functionality uses a command-line key along with the
+*Note: Authentication functionality utilizes a key along with the
 OpenSSL crypto library to create and validate a HMAC-SHA256 signature (which is
-used in the setup request to the server). Although the makefile will build even
-if the expected directory is not present, disabling the key and library
-dependency, the additional files needed to support authentication should be
-relatively easy to obtain (e.g., `sudo apt-get install libssl-dev` or
+used in control messages between client and server). Although the makefile will
+build even if the expected OpenSSL directory is not present (disabling the key
+and library dependency), the additional files needed to support authentication
+should be relatively easy to obtain (e.g., `sudo apt-get install libssl-dev` or
 `sudo yum install openssl-devel`).*
 
-## Test Processing Walkthrough (all messaging and PDUs use UDP)
+## Test Processing Walkthrough
+**All messaging and PDUs use UDP**
+
 On the server, the software is run in server mode in either the foreground or
 background (as a daemon) where it awaits Setup requests on its UDP control
 port.
@@ -269,18 +337,26 @@ available, the client will display an error message to the user and exit.
 **Setup Request**
 
 When the server receives the Setup request it will validate the request by
-checking the protocol version, the jumbo datagram support indicator, and the
-authentication data if utilized. If the Setup request must be rejected, a Setup
-response will be sent back to the client with a corresponding command response
-value indicating the reason for the rejection. If the Setup request is
-accepted, a new test connection is allocated and initialized for the client.
-This new connection is associated with a new UDP socket allocated from the UDP
-ephemeral port range. A timer is then set for the new connection as a watchdog
-(in case the client goes quiet) and a Setup response is sent back to the
-client. The Setup response includes the new port number associated with the new
-test connection. Subsequently, if a Test Activation request is not received
-from the client on this new port number, the watchdog will close the socket and
-deallocate the connection.
+checking the authentication data (if utilized) as well as the protocol version
+and jumbo/traditional datagram support indicators. If the Setup request must
+be rejected, a Setup response will be sent back to the client with a
+corresponding command response value indicating the reason for the rejection.
+If the Setup request is accepted, a new test connection is allocated and
+initialized for the client. This new connection is associated with a new UDP
+socket allocated from the UDP ephemeral port range. A timer is then set for the
+new connection as a watchdog (in case the client goes quiet) and a Setup
+response is sent back to the client. The Setup response includes the new port
+number associated with the new test connection. As of version 9.0.0, the server
+will immediately follow the Setup response with a Null request back to the
+client from the new port. This opens the server's firewall, if one is present,
+for the expected Test Activation request and subsequent data traffic. If a Test
+Activation request is not received from the client on this new port number, the
+watchdog will close the socket and deallocate the connection.
+
+*Note: If the server's firewall is using a complex ruleset and/or PAT, and the
+Null request is ineffective in opening the new port for inbound traffic from
+the client, access to all UDP ephemeral ports will need to be preconfigured on
+it.*
 
 **Setup Response**
 
@@ -290,12 +366,14 @@ the user (and exit if the required connection count falls below the minimum).
 If it indicates success it will build a Test Activation request with all the
 test parameters it desires such as the direction, the duration, etc. It will
 then send the Test Activation request to the UDP port number the server
-communicated in the Setup response.
+communicated in the Setup response. And if the client receives the Null request
+sent by the server, which is not guaranteed given its own NAT/PAT processing,
+it can simply be discarded.
 
 **Test Activation request**
 
 After the server receives the Test Activation request on the new connection, it
-can choose to accept, ignore or modify any of the test parameters. When the
+can choose to accept, ignore, or modify any of the test parameters. When the
 Test Activation response is sent back, it will include all the test parameters
 again to make the client aware of any changes. If an upstream test is being
 requested, the transmission parameters from the appropriate row of the sending
@@ -350,19 +428,15 @@ action of STOP as confirmation to the server. When the server receives this
 confirmation in the load or status PDU, it schedules an immediate end time for
 the connection which closes the socket and deallocates it.
 
-**More Info**
-
-An Internet-Draft,
-https://datatracker.ietf.org/doc/draft-ietf-ippm-capacity-protocol/ describes
-what will eventually be the official protocol version. Although fundamentally
-the same as described here, it includes accommodations for additional security.
-
-## JSON Output
+## JSON Output (client test results)
 For examples of the JSON output fields see the included sample files named
 "udpst-*.json". Available JSON output options include `-f json` (unformatted),
 `-f jsonb` (brief & unformatted), and `-f jsonf` (formatted). To significantly
 reduce the size of the JSON output, option `-s` (omit sub-interval results)
-can be combined with `-f jsonb` (omit static input fields). 
+can be combined with `-f jsonb` (omit static input fields). Also, the
+JSON key names are closely aligned with the objects and parameters of the
+TR-181 data model available at https://device-data-model.broadband-forum.org
+(see "IPLayerCapacity..." under "Device.IP.Diagnostics").
 
 Included in the output is a numeric ErrorStatus field (which corresponds with
 the software exit status) as well as a text ErrorMessage field. As of version
@@ -374,10 +448,6 @@ will be empty. If a test completes, but encounters a warning or soft error,
 the ErrorStatus values for warnings will begin at 1 (one). If a test fails to
 complete, the ErrorStatus values will begin at 50 (up to maximum of 255). See
 `udpst.h` for specific ErrorStatus values and ranges.
-
-The file "ob-udpst_output_mapping.pdf" provides a mapping between JSON key
-names, TR-471 names, TR-181 names, and the ob-udpst STDOUT names for various
-results.
 
 *Note: When stdout is not redirected to a file, JSON may appear clipped due to
 non-blocking console writes.*
@@ -412,8 +482,8 @@ scenario, the bandwidth option for each is set to handle some portion of the
 total aggregate available (with clients always utilizing several at once). For
 example, 10 instances could be run with `-B 1000` for a 10G or `-B 10000` for
 a 100G. This can be accomplished by either binding each to a different IP alias
-or configuring them to use different UDP control ports (e.g., `-p 25000`,
-`-p 25001`, `-p 25002`,...). And although single threaded, each running
+or configuring them to use different UDP control ports (e.g., `-p 24601`,
+`-p 24602`, `-p 24603`,...). And although single threaded, each running
 instance supports multiple simultaneous overlapping tests.
 
 When configured on the server, clients will also need to utilize the `-B mbps`
@@ -456,7 +526,7 @@ granular than sending rates below it. Also, aggregate rates may end up slightly
 below requested rates due to the traffic pattern and enforced limit of the
 maximum sending rate a connection is limited to.*
 
-## Increasing the Starting Sending Rate (Considerations)
+## Increasing the Starting Sending Rate
 While the `-I index` option designates a fixed sending rate, it is also possible
 to set the starting rate with load adjustment enabled. Option `-I @index` allows
 selection of a higher initial sending rate starting at the specified index in
@@ -499,10 +569,12 @@ However, the command-line option `-b buffer` can be used if even higher buffer
 levels (granted at 2x the designated value) should be explicitly requested for
 each socket.*
 
-## Server Optimization - Particularly When Jumbo Frames Are Unavailable
+## Server Optimization
+**Important considerations when jumbo frames are unavailable...**
+
 By default, the sending rate table utilizes jumbo size datagrams when testing
 above 1 Gbps. As expected, maximum performance is obtained when the network
-also supports a jumbo MTU size (9000+ bytes). However, some environments are
+also supports a jumbo MTU size (>= 9000 bytes). However, some environments are
 restricted to a traditional MTU of 1500 bytes and would be required to fragment
 the jumbo datagrams into multiple IP packets.
 
@@ -622,7 +694,7 @@ values to persist across reboots. The details of formally incorporating
 *ethtool* settings into the boot process are distribution specific. However, an
 "informal" approach could simply make use of the /etc/rc.local file.*
 
-## Considerations for Older Hardware and Low-End Devices
+## Considerations for Older or Low-End Devices
 There are two general categories of devices in this area, 1) those that operate
 normally but lack the horsepower needed to reach a specific sending rate and
 2) those that are unable to function properly because they do not support the
@@ -685,9 +757,15 @@ for standard server operation.*
 
 ## Output (Export) of Received Load Traffic Metadata
 To allow for advanced post-analysis of received load traffic during testing, it
-is now possible to specify an output file (via the `-O file` option) to capture
-datagram metadata as CSV text. However, it must be stressed that due to the
-significant number of file writes, this capability is NOT intended for
+is possible to specify an output file (via the `-O [+]file` option) to
+capture datagram metadata as CSV text. By default (starting in release 9.0.0),
+metadata entries are only written when an RTT sample is available (i.e., only
+when a status message exchange occurs). Accordingly, the filename parameter now
+accepts a plus-sign prefix to indicate that the original behavior is actually
+desired (all metadata should be output).
+
+It must be stressed that when all metadata is being written, due to
+the significant number of file writes, this capability is NOT intended for
 large-scale usage or production environments. In fact, on hosts with slower
 filesystems (e.g., SD card devices) it may cause udpst test traffic loss. In
 such cases it would be beneficial to utilize a memory filesystem such as
@@ -699,8 +777,8 @@ is created for each connection.
 
 **File Naming**
 
-The provided file name can contain a number of conversion specifications to
-allow for dynamic file name creation. The following are introduced by a '#'
+The provided filename can contain a number of conversion specifications to
+allow for dynamic filename creation. The following are introduced by a '#'
 character:
 - #i - Multi-connection index (0,1,2,...)
 - #c - Multi-connection count (the total requested/attempted)
@@ -716,10 +794,11 @@ character:
 - #E - Interface name specified with `-E intf` option (only valid on client)
 
 In addition to the above, all conversion specifications supported by strftime()
-(and introduced by a '%' character) can also be utilized - see strftime() man
-page for details. For example, an output file specified as
-`-O udpst_%F_%H%M%S_#M_#D_#i-#c_#I.csv` would produce a file name similar to
-`udpst_2023-05-30_152402_S_U_0-3_23831.csv`.
+(and introduced by a '%' character) can also be utilized - see strftime()
+manpage for details. For example, an output file specified as
+`-O udpst_%F_%H%M%S_#M_#D_#i-#c_#I.csv` would produce a filename similar to
+`udpst_2023-05-30_152402_S_U_0-3_23831.csv`. Note, date and time references
+in the filename use the local system timezone.
 
 **File Format**
 
@@ -735,6 +814,7 @@ receiver's clock).
 are sufficiently synchronized, else it merely reflects the difference in the
 clocks (and could be negative). This value is in milliseconds.
 - IntfMbps : The client interface Mbps when the `-E intf` option is used.
+- IntfMbpsAlt : The client interface Mbps for the alternate direction.
 - RTTTxTime : The transmit timestamp used for RTT (Round-Trip Time)
 measurements and carried from the load receiver to the load sender in the
 periodic status feedback messages.
@@ -752,8 +832,7 @@ receiver to the load sender.
 
 *Because RTT measurements are only periodically sampled (as part of each status
 feedback message), those columns will be empty most of the time. Also, all
-timestamps are based on the local system time zone and utilize microsecond
-resolution.*
+timestamps utilize microsecond resolution.*
 
 ## Multi-Key Authentication
 For better support of large-scale deployments with various service offerings
@@ -765,31 +844,28 @@ file expects a numeric key ID (0-255) followed by the key string (64 characters
 max). Commas, spaces, tabs, and comments (anything beginning with a '#') are
 all ignored.
 
-*Because a key ID field is now needed in the Setup Request PDU, the protocol
-version had to be bumped from 10 to 11. However, the server is backward
-compatible and will support multi-key authentication for clients using either
-version. A default key ID of zero is assumed when one is not specified or is
-unavailable (as is the case with protocol version 10).*
+*A default key ID of zero is assumed when one is not specified.*
 
-The authentication process begins with the client using a shared key to create
-a 32-byte HMAC-SHA256 hash for the Setup Request PDU. This hash and a key ID are
-inserted in the PDU prior to transmission to the server. The key used to create
+The authentication process begins with the client using a shared key as input
+to a KDF (Key Derivation Function) to create a 32-byte hash for the Setup
+Request PDU. This hash and a key ID are inserted in the PDU prior to
+transmission to the server. The key used to create
 the hash can come from the command-line via the `-a key` option OR from a key
 file specified via the `-K file` option. The key ID is specified via the
 `-y keyid` option. When a key file is being utilized, the key ID option is also
 used to determine which key in the key file will be used to create the hash.
 If the key file only contains a single entry, and a key ID was not explicitly
 specified on the command-line, that key ID and key will automatically be used.
-Otherwise, when a key ID is not explicitly specified on the command-line, or the
-Setup Request is coming from a client using the previous protocol version (10),
-a default key ID of zero is assumed.
+Otherwise, when a key ID is not explicitly specified on the command-line, a
+default key ID of zero is assumed.
 
 When the server receives the Setup Request, and if it is utilizing a key file,
-the included key ID will be used to select the key used to create a
-corresponding hash (for comparison and validation). An entry in the key file
-with a key ID of zero can be used for older clients using the previous protocol
-version (10). In addition to the key file, a command-line key specified via
-`-a key` can also be used for secondary/backup authentication of the client.
+the included key ID will be used to select the key either directly (for
+the previous protocol version 11) or as input to the KDF to
+create the corresponding hash for comparison and validation. Note, the included
+authentication timestamp is also used as input to the KDF. In addition to the
+key file, a command-line key specified via `-a key` can also be used for
+secondary/backup authentication of the client.
 That is, if the authentication via a key file key fails for any reason (key ID
 not found, hash comparison mismatch, etc.) authentication is automatically
 attempted a second time using the command-line key. This flexibility allows for
@@ -806,7 +882,7 @@ $ cmake -D AUTH_IS_OPTIONAL=ON .
 *Note: This mode of operation is considered low security and should only be
 utilized temporarily for a migration or upgrade of clients.*
 
-## Optional Header Checksum and PDU Integrity Checks
+## Optional Header Checksum and Integrity Checks
 On systems where the standard UDP checksum is not being inserted by the
 protocol stack/NIC, or is not being verified upon reception, corrupt datagrams
 will be passed up to udpst. As of protocol version 11, an optional header
@@ -837,4 +913,100 @@ used to suppress them (and the PDU is silently ignored):
 $ cmake -D SUPP_INVPDU_ALERT=ON .
 $ cmake -D SUPP_INVPDU_WARN=ON .
 ```
+
+## Local Backpressure
+In version 9.0.0, an enhancement was made to better accommodate backpressure
+from the protocol stack. Whenever load PDUs are not accepted for transmission,
+typically because the network interface is unable to send traffic out fast
+enough, sequence numbers are adjusted to ignore the PDUs not accepted. This is
+a change from the previous version, where PDUs not accepted by the protocol
+stack would eventually be detected as loss by the far-end receiver. Note that
+this older mode of operation is still available via the `-n` option.
+
+## Server Performance Statistics
+As of release 9.0.0, a server instance can periodically write operational
+counters and performance metrics (in JSON) to a filesystem file via the
+`-G file` option. The time intervals for data records and file writes are
+controlled by the corresponding `STATS_RECORD_INT` and `STATS_FILE_INT`
+compilation constants in the udpst.h file.
+
+A statistics file is written every time the file interval timer expires (300
+seconds by default). It will contain however many data records are appropriate
+given the data record interval (10 seconds by default). At startup, the first
+file may contain less than the expected record count. It is recommended that
+the file interval be an even multiple of the data record interval. Also,
+although the file is written at a fixed interval, the start of the first
+interval is randomized to reduce file write synchronization when a large number
+of server instances are running on the same machine.
+
+The default data record and file write intervals are intended to provide good
+measurement density for import into a time-series database and subsequent use
+by visualization tools. However, if only passive monitoring is needed (for
+simple alarming and long-term trending) the two intervals can be set to the
+same (larger) value to reduce the amount of data. For example, setting both to
+900 would produce a single file with one data record every 15 minutes.
+
+When the file interval time expires the file is opened, written, and closed as
+three back-to-back operations (the file does not remain open). More
+specifically, it is written as a temporary file (with an added ".tmp" extension)
+and renamed at the end. This allows files in the directory to be periodically
+moved or purged in bulk, with wildcards, while avoiding partially written data
+(e.g., mv *.json /datadir).
+
+**File Naming**
+
+All conversion specifications supported by strftime() (and introduced by a '%'
+character) can be utilized for filenames - see strftime() manpage for details.
+For example, a file specified as `-G udpst_ny4-vm2_eth2_instance3_%H%M%S.json`
+would produce a filename similar to `udpst_ny4-vm2_eth2_instance3_224500.json`.
+Note, date and time references in the filename use the local system timezone.
+
+For easier file management, the time used for conversion specifications in
+the filename is truncated to the same number of seconds as the file interval.
+Therefore, a file interval of 300 seconds would produce time values on even
+5-minute boundaries. Using the filename from the previous example, the files
+produced would be:
+```
+udpst_ny4-vm2_eth2_instance3_224500.json
+udpst_ny4-vm2_eth2_instance3_225000.json
+udpst_ny4-vm2_eth2_instance3_225500.json
+udpst_ny4-vm2_eth2_instance3_230000.json
+udpst_ny4-vm2_eth2_instance3_230500.json
+...
+```
+This approach has the benefit of automatically overwriting the oldest file
+every 24 hours while still allowing reasonable time for its processing, storage,
+or transfer. This methodology can be utilized to allow numerous overwrite
+time frames (an hour, a day, a week, a month,...).
+
+*Note: The times and timestamps within the files always use exact time
+references with microsecond resolution.*
+
+**File Contents**
+
+The performance statistics file is in JSON format. At the top level it contains
+static information about the server instance including a few of its key
+configuration settings (i.e., hostname, IP address, PID, software version,...).
+This includes a schema version that can be used by post processors to detect
+file changes and maintain backward compatibility. Also at the top level is the
+start time for the period covered by the file as well as an array of data
+records included in that period.
+
+Within each data record is time information indicating the period covered by
+the record. Each data record contains a group of "maximum" values capturing the
+largest value of a performance metric during the record period. This is
+followed by a group of "average" values that show the averages of performance
+metrics across the same period. All rates are per-second averages and are
+calculated using the data record interval as the time period.
+
+Additionally, at the top level and after the data record array, is a group of
+"counters" that keep track of various events and errors. These counters are
+only incremented and are never reset. There is also a process uptime
+(indicating the number of seconds since the instance started) as well as
+an end time for the period covered by the file. The counters show the
+cumulative values as of the end time of the file.
+
+An example file is included with the software `server_performance_stats.json`
+as well as an abbreviated text version containing details about the various
+fields and metrics.
 

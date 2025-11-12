@@ -8,7 +8,7 @@
 #
 #-------------------------------------------------------
 # Example entries...
-0,legacykey	# Legacy clients using procotol 10
+0,legacykey	# Legacy clients
 1,firstkey	# Service abc
 2,secondkey	# Service xyz
 3,thirdkey	# Device 123
