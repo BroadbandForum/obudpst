@@ -42,7 +42,7 @@ INCLUDE (FindPackageHandleStandardArgs)
 
 find_package(PkgConfig QUIET)
 
-find_package(OpenSSL)
+find_package(OpenSSL 3.0) # Minimum of 3.0 required for <openssl/core_names.h>
 if(OPENSSL_FOUND)
         set(HAVE_OPENSSL TRUE)
         link_directories(${OPENSSL_LIBRARY_DIRS})
