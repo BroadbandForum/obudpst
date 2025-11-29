@@ -123,7 +123,9 @@ int open_outputfile(int);
 void insert_auth(int, unsigned char *, unsigned char *, unsigned char *, size_t);
 int validate_auth(int, unsigned char *, unsigned char *, unsigned char *, unsigned char *, size_t);
 BOOL verify_ctrlpdu(int, struct controlHdrSR *, struct controlHdrTA *, char *, char *);
+#ifdef __linux__
 int kdf_hmac_sha256(char *, uint32_t, unsigned char *, unsigned char *);
+#endif
 
 //----------------------------------------------------------------------------
 //
@@ -2308,6 +2310,7 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
         return TRUE;
 }
 //----------------------------------------------------------------------------
+#ifdef __linux__
 #ifdef AUTH_KEY_ENABLE
 //
 // Output individual authentication keys of length SHA256_KEY_LEN
@@ -2385,5 +2388,6 @@ int kdf_hmac_sha256(char *Kin, uint32_t authUnixTime,
         EVP_KDF_free(kdf);
         return 1;
 }
+#endif // AUTH_KEY_ENABLE
 #endif
 //----------------------------------------------------------------------------

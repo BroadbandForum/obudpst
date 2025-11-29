@@ -2736,7 +2736,11 @@ int create_timestamp(struct timespec *tspecvar, BOOL utc) {
         }
         var = strftime(scratch, STRING_SIZE, "%FT%T", tm_data);
         var += sprintf(&scratch[var], ".%06ld", tspecvar->tv_nsec / NSECINUSEC);
+#ifndef __linux__
+        if (utc) {
+#else
         if (tm_data->tm_gmtoff == 0) {
+#endif
                 scratch[var++] = 'Z';
                 scratch[var]   = '\0';
         } else {
@@ -2857,12 +2861,12 @@ unsigned short checksum(register void *p, register int count) {
         while (count >= 4) {
                 sum += *((unsigned int *) p);
                 count -= 4;
-                p += 4;
+                p = (unsigned char *) p + 4;
         }
         if (count >= 2) {
                 sum += *((unsigned short *) p);
                 count -= 2;
-                p += 2;
+                p = (unsigned char *) p + 2;
         }
         if (count == 1) {
                 sum += *((unsigned char *) p);
