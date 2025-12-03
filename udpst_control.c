@@ -1625,10 +1625,12 @@ int sock_mgmt(int connindex, char *host, int port, char *ip, int action) {
                                 var = sprintf(scratch, "SOCKET ERROR: %s (%s:%d)\n", strerror(errno), host, port);
                                 continue;
                         }
-                        if (conf.ipv6Only) {
-                                i = 1;
+                        if (ai->ai_family == AF_INET6) {
+                                i = 0;
+                                if (conf.ipv6Only) // Explicitly enable OR disable (some non-Linux systems default to enabled)
+                                        i = 1;
                                 if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (const void *) &i, sizeof(i)) == -1) {
-                                        var = sprintf(scratch, "IPV6_V6ONLY ERROR: %s\n", strerror(errno));
+                                        var = sprintf(scratch, "IPV6_V6ONLY ERROR: %s (%d)\n", strerror(errno), i);
                                         close(fd);
                                         continue;
                                 }
