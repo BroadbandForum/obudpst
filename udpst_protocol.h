@@ -47,6 +47,7 @@
 #define PROTOCOL_MIN  11 // Minimum protocol version for backward compatibility
 #define MSSUBINT_PVER 20 // Protocol version required for ms sub-interval support
 #define EXTAUTH_PVER  20 // Protocol version required for extended auth. support
+#define SRASUPP_PVER  20 // Protocol version required for sending rate adj. suppression
 
 //----------------------------------------------------------------------------
 //

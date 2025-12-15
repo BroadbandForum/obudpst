@@ -71,6 +71,7 @@
  * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
  *                                       statistics, and improved idling
  * Len Ciavattone          10/30/2025    Add export all as optional
+ * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
  *
  */
 
@@ -1124,12 +1125,23 @@ int proc_parameters(int argc, char **argv, int fd) {
                         conf.showLossRatio = TRUE;
                         break;
                 case 'i':
-                        value = atoi(optarg);
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Bimodal option only available to client\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        lbuf = optarg;
+                        if (*lbuf == '-') {
+                                lbuf++;
+                        }
+                        value = atoi(lbuf);
                         if ((var = param_error(value, MIN_BIMODAL_COUNT, MAX_BIMODAL_COUNT)) > 0) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
                         }
                         conf.bimodalCount = value;
+                        if (lbuf != optarg)
+                                conf.srAdjSuppCount = value; // Set suppression count equal to bimodal count if prefix is present
                         break;
                 case 'o':
                         if (repo.isServer) {
@@ -1403,59 +1415,60 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -C cnt[-max] Multi-connection count [Default %d per server]\n"
                                       "(s)    -x           Execute server as background (daemon) process\n"
                                       "(s)    -1           Server exits after one test execution\n"
-                                      "(e)    -e           Disable suppression of socket (send/receive) errors\n"
-                                      "       -v           Enable verbose output messaging\n"
-                                      "       -s           Summary/Max output only (no sub-interval output)\n"
-                                      "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
-                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n",
+                                      "(e)    -e           Disable suppression of socket (send/receive) errors\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT);
                         var = write(fd, scratch, var);
+                        var = sprintf(scratch, "       -v           Enable verbose output messaging\n"
+                                               "       -s           Summary/Max output only (no sub-interval output)\n"
+                                               "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
+                                               "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
+                                               "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
+                                               "       -D           Enable debug output messaging (requires '-v')\n"
+                                               "(m)    -X           Randomize datagram payload (else zeroes)\n"
+                                               "       -S           Show server sending rate table and exit\n"
+                                               "(o)    -O [+]file   Output (export) file of received load metadata\n"
+                                               "       -B mbps      Max bandwidth required by client OR available to server\n"
+                                               "       -r           Display loss ratio instead of delivered percentage\n"
+                                               "(c,b)  -i [-]count  Display bimodal maxima (specify initial sub-intervals)\n"
+                                               "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
+                                               "(c)    -R           Include Out-of-Order/Duplicate datagrams\n");
+                        var = write(fd, scratch, var);
                         var = sprintf(scratch,
-                                      "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
-                                      "       -D           Enable debug output messaging (requires '-v')\n"
-                                      "(m)    -X           Randomize datagram payload (else zeroes)\n"
-                                      "       -S           Show server sending rate table and exit\n"
-                                      "(o)    -O [+]file   Output (export) file of received load metadata\n"
-                                      "       -B mbps      Max bandwidth required by client OR available to server\n"
-                                      "       -r           Display loss ratio instead of delivered percentage\n"
-                                      "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
-                                      "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
-                                      "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(c)    -y keyid     Key ID used with authentication key [Default %d]\n"
                                       "       -K file      Key file containing authentication keys\n"
                                       "(m,v)  -m value     Packet marking octet (DSCP+ECN) [Default %d]\n"
-                                      "(s)    -G file      Periodic server performance statistics (JSON)\n",
-                                      AUTH_KEY_SIZE, DEF_KEY_ID, DEF_DSCPECN_BYTE);
-                        var = write(fd, scratch, var);
-                        var = sprintf(scratch,
+                                      "(s)    -G file      Periodic server performance statistics (JSON)\n"
                                       "       -n           No adjustment to sequence numbers from backpressure\n"
                                       "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
                                       "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n"
                                       "(c)    -P period    Sub-interval period in ms [Default %d]\n"
                                       "       -p port      Default port number used for control [Default %d]\n"
                                       "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
-                                      "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n"
+                                      "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n",
+                                      AUTH_KEY_SIZE, DEF_KEY_ID, DEF_DSCPECN_BYTE, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX,
+                                      DEF_TESTINT_TIME, MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT,
+                                      rateAdjAlgo[CHTA_RA_ALGO_MIN], rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO]);
+                        var = write(fd, scratch, var);
+                        var = sprintf(scratch,
                                       "(c)    -L delvar    Low delay variation threshold in ms [Default %d]\n"
                                       "(c)    -U delvar    Upper delay variation threshold in ms [Default %d]\n"
                                       "(c)    -F interval  Status feedback/trial interval in ms [Default %d]\n"
                                       "(c)    -c thresh    Congestion slow adjustment threshold [Default %d]\n"
                                       "(c)    -h delta     High-speed (row adjustment) delta [Default %d]\n"
                                       "(c)    -q seqerr    Sequence error threshold [Default %d]\n"
-                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n",
-                                      SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME, MAX_TESTINT_TIME,
-                                      DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
-                                      rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO], DEF_LOW_THRESH, DEF_UPPER_THRESH,
-                                      DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA, DEF_SEQ_ERR_TH);
-                        var = write(fd, scratch, var);
-                        var = sprintf(scratch,
+                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n"
                                       "(c)    -M           Use local interface rate to determine maximum\n"
                                       "(s)    -l logfile   Log file name when executing as daemon\n"
                                       "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n"
                                       "Parameters:\n"
                                       "   server[:<port>]  Hostname/IP of server OR local interface IP if server\n"
                                       "                    - Optional port number overrides configured control port\n"
-                                      "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n"
+                                      "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n",
+                                      DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
+                                      DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX);
+                        var = write(fd, scratch, var);
+                        var = sprintf(scratch,
                                       "Notes:\n"
                                       "(c) = Used only by client.\n"
                                       "(s) = Used only by server.\n"
@@ -1465,8 +1478,9 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "      requests that exceed server maximum are automatically coerced down.\n"
                                       "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n"
                                       "(i) = Static OR starting (with '%c' prefix) sending rate index.\n"
-                                      "(o) = Prefix '+' exports all metadata (not just RTT entries).\n",
-                                      DEF_LOGFILE_MAX, SRIDX_ISSTART_PREFIX);
+                                      "(o) = Prefix '+' exports all metadata (not just RTT entries).\n"
+                                      "(b) = Prefix '-' suppresses rate adjustments during initial mode.\n",
+                                      SRIDX_ISSTART_PREFIX);
                         var = write(fd, scratch, var);
                         return ERROR_CONF_GENERIC;
                 }

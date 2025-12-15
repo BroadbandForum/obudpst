@@ -8,5 +8,5 @@
 	},
 	"ErrorStatus":	200,
 	"ErrorMessage":	"ERROR: Minimum required connections (4) unavailable",
-	"ErrorMessage2":	"WARNING: Timeout awaiting response from server 192.168.1.224:24601"
+	"ErrorMessage2":	"WARNING: Timeout awaiting response from server 192.168.1.224:24604"
 }

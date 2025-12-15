@@ -67,6 +67,21 @@ plus-sign filename prefix (`-O [+]file`) to indicate that the original
 behavior is actually desired. That is, all metadata should be output. This
 change in the default operation should drastically reduce the number of
 metadata entries written when testing at higher speeds.
+* The count parameter for the bimodal option now accepts a minus sign prefix
+(`-i [-]count`). This prefix suppresses sending rate adjustments during the
+initial mode. This allows for dual-phase testing where the initial mode uses
+one rate and the second mode uses another (either fixed or variable).
+By default, the initial mode uses sending rate index 0 and the second mode
+attempts to find a maximum, starting from zero. If a fixed rate is also
+specified (e.g., `-I 500`), the first mode uses sending rate index 0 and the
+second uses the specified fixed sending rate. In contrast, if a starting rate is
+specified (e.g., `-I @500`), the first mode uses the fixed starting rate and the
+second attempts to find a maximum, starting from that rate. In addition, bimodal
+usage is now accompanied by a change in the summary output info. The single text
+line "Summary" will now be two lines, one for each mode, output as "Sum[#-#]".
+The JSON object "Summary" will now only cover the first mode and the second
+mode summary will be in an array called "ModalSummary". This is consistent with
+the existing "AtMax" and "ModalResult" structure for the maximum rate.
 
 # Changelog for UDPST 8.x.x Releases
 

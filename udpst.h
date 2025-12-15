@@ -48,7 +48,7 @@
 //
 // General
 //
-#define SOFTWARE_VER       "9.0.0(Dev4)"
+#define SOFTWARE_VER       "9.0.0(Dev5)"
 #define SOFTWARE_TITLE     "UDP Speed Test"
 #define USTEST_TEXT        "Upstream"
 #define DSTEST_TEXT        "Downstream"
@@ -151,7 +151,7 @@
 #define MAX_CONTROL_PORT     UINT16_MAX //
 #define DEF_BIMODAL_COUNT    0          // Bimodal initial sub-interval count
 #define MIN_BIMODAL_COUNT    1          //
-#define MAX_BIMODAL_COUNT    (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
+#define MAX_BIMODAL_COUNT    ((MAX_TESTINT_TIME * MSECINSEC) / MIN_SUBINT_PERIOD)
 #define DEF_SOCKET_BUF       1024000        // Socket buffer to request
 #define MIN_SOCKET_BUF       0              // (0 = System default/minimum)
 #define MAX_SOCKET_BUF       16777216       //
@@ -284,6 +284,7 @@ struct configuration {
         int dscpEcn;                     // DSCP+ECN byte for testing
         int srIndexConf;                 // Configured sending rate index
         BOOL srIndexIsStart;             // Configured SR index is starting point
+        int srAdjSuppCount;              // Sending rate adj. suppression count
         int testIntTime;                 // Test interval time (sec)
         int subIntPeriod;                // Sub-interval period (ms)
         int controlPort;                 // Control port number for setup requests
@@ -430,7 +431,7 @@ struct repository {
         double siAggRateL2;                   // Sub-interval L2 aggregate rate
         double siAggRateL1;                   // Sub-interval L1 aggregate rate
         double siAggRateL0;                   // Sub-interval L1+VLAN aggregate rate
-        struct testSummary testSum;           // Test summary statistics
+        struct testSummary testSum[2];        // Test summary statistics (bimodal)
         int intfFD;                           // File descriptor to read interface data
         int intfFDAlt;                        // Interface FD (alternate direction)
         unsigned long long intfBytes;         // Last byte counter of interface data
@@ -500,6 +501,7 @@ struct connection {
         //
         int srIndex;                 // Sending rate index
         struct sendingRate srStruct; // Sending rate structure
+        int srAdjSuppCount;          // Sending rate adj. suppression count
         unsigned int lpduSeqNo;      // Load PDU sequence number
         unsigned int spduSeqNo;      // Status PDU sequence number
         int spduSeqErr;              // Status PDU sequence error count
@@ -532,6 +534,7 @@ struct connection {
         unsigned char clientKey[SHA256_KEY_LEN]; // Client key via KDF
         unsigned char serverKey[SHA256_KEY_LEN]; // Server key via KDF
                                                  //
+        struct timespec startTime;               // Connection start time
         struct timespec endTime;                 // Connection end time
         int (*priAction)(int);                   // Primary action upon IO
         int (*secAction)(int);                   // Secondary action upon IO

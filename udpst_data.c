@@ -79,6 +79,8 @@
  *                                       statistics, and improved idling
  * Len Ciavattone          10/30/2025    Add RTT variation average and
  *                                       export all as optional
+ * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
+ *
  */
 
 #define UDPST_DATA
@@ -1499,7 +1501,8 @@ int service_statuspdu(int connindex) {
 int adjust_sending_rate(int connindex) {
         register struct connection *c = &conn[connindex];
         unsigned int dvmin, dvavg;
-        int var, delay, seqerr;
+        int var, delay, seqerr, supptime;
+        struct timespec tspecvar;
 
         //
         // Select algorithm parameters
@@ -1529,7 +1532,17 @@ int adjust_sending_rate(int connindex) {
         //
         // Adjust sending rate as needed
         //
-        if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart) {
+        var = supptime = 0;
+        if (c->srAdjSuppCount > 0) { // Check if rate adjustment suppression requested
+                tspecminus(&repo.systemClock, &c->startTime, &tspecvar);
+                var      = (int) tspecmsec(&tspecvar);                                // Test time as of now
+                supptime = (c->srAdjSuppCount * c->subIntPeriod) + (c->trialInt * 2); // Suppression period
+        }
+        if (var < supptime) { // If currently in suppression period
+                if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart)
+                        c->srIndex = 0; // If static sending rate, use zero rate during suppression period
+
+        } else if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart) {
                 c->srIndex = c->srIndexConf; // Use static sending rate if not specified as starting point
 
         } else if (c->rateAdjAlgo == CHTA_RA_ALGO_B) {
@@ -1744,7 +1757,7 @@ int agg_query_proc(int connindex) {
                 //
                 // Output maximums and end testing
                 //
-                if (repo.testSum.sampleCount > 0) {
+                if (repo.testSum[0].sampleCount > 0) {
                         output_maxrate(connindex);
                 }
                 tspeccpy(&a->endTime, &repo.systemClock); // Trigger process shutdown
@@ -1776,7 +1789,7 @@ int output_currate(int connindex) {
         unsigned int dvmin, dvavg, rttmin, rttavg;
         double dvar, mbps, sent, delivered = 0.0, intfmbps = 0.0;
         char connid[8], intfrate[16];
-        struct testSummary *ts = &repo.testSum;
+        struct testSummary *ts;
 
         //
         // Do not allow sub-interval count to exceed expected maximum
@@ -2011,6 +2024,11 @@ int output_currate(int connindex) {
                 //
                 // Accumulate overall test summary statistics
                 //
+                i = 0; // Initialize to single summary or first bimodal summary
+                if (conf.bimodalCount > 0 && c->subIntCount > conf.bimodalCount) {
+                        i++; // Adjust to save as second bimodal summary
+                }
+                ts = &repo.testSum[i];
                 if (ts->sampleCount == 0) {
                         ts->delayVarMin = dvmin;
                         ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
@@ -2066,12 +2084,11 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8], maxtext[32], intfrate[16];
+        char *testtype, connid[8], labeltext[32], intfrate[16];
         int i, sibegin, siend, var;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, sent, delivered = 0.0;
-        struct testSummary *ts = &repo.testSum;
-        cJSON *json_summary    = NULL;
+        struct testSummary *ts;
         cJSON *json_modalArray = NULL;
 
         //
@@ -2095,104 +2112,147 @@ int output_maxrate(int connindex) {
         }
 
         //
-        // Output summary info
+        // Output summary info for either single summary or both bimodal summaries
         //
-        sent = (double) ts->rxDatagrams + (double) ts->seqErrLoss;
-        if (sent > 0.0 && ts->sampleCount > 0) {
-                if (conf.showLossRatio)
-                        delivered = (double) ts->seqErrLoss / sent;
-                else
-                        delivered = ((double) ts->rxDatagrams * 100.0) / sent;
-                ts->delayVarSum = (((ts->delayVarSum * 10) / ts->sampleCount) + 5) / 10; // Convert sum to average
-                ts->rateSumL3 /= (double) ts->sampleCount;
-                ts->rateSumIntf /= (double) ts->sampleCount;
-        }
-        if (ts->rttVarCnt > 0) {
-                ts->rttVarSum = (((ts->rttVarSum * 10) / ts->rttVarCnt) + 5) / 10; // Convert sum to average
-        }
-        if (!conf.jsonOutput) {
-                strcpy(scratch2, "%s%s Summary ");
-                if (!conf.showLossRatio) {
-                        strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
-                } else {
-                        strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
-                }
-                *intfrate = '\0';
-                if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
-                        snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
-                }
-                var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
-                              ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttVarSum, ts->rttMaximum,
-                              ts->rateSumL3, intfrate);
-                send_proc(errConn, scratch, var);
+        sibegin = 1;
+        if (conf.bimodalCount >= c->subIntCount) {
+                siend = c->subIntCount;
         } else {
+                siend = conf.bimodalCount;
+        }
+        for (i = 0; i < 2; i++) {
+                ts = &repo.testSum[i];
                 //
-                // Create JSON summary object and add items to it
-                //
-                json_summary = cJSON_CreateObject();
-                //
-                cJSON_AddNumberToObject(json_summary, "ActiveConnections", repo.actConnCount);
-                if (sent > 0.0) {
-                        dvar = ((double) ts->rxDatagrams * 100.0) / sent;
-                        cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", dvar, 2);
-                        dvar = (double) ts->seqErrLoss / sent;
-                        cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", dvar, 9);
-                        dvar = (double) ts->seqErrOoo / sent;
-                        cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", dvar, 9);
-                        dvar = (double) ts->seqErrDup / sent;
-                        cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", dvar, 9);
-                } else {
-                        cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", 0.0, 2);
-                        cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", 0.0, 9);
-                        cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", 0.0, 9);
-                        cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", 0.0, 9);
+                sent = (double) ts->rxDatagrams + (double) ts->seqErrLoss;
+                if (sent > 0.0 && ts->sampleCount > 0) {
+                        if (conf.showLossRatio)
+                                delivered = (double) ts->seqErrLoss / sent;
+                        else
+                                delivered = ((double) ts->rxDatagrams * 100.0) / sent;
+                        ts->delayVarSum = (((ts->delayVarSum * 10) / ts->sampleCount) + 5) / 10; // Convert sum to average
+                        ts->rateSumL3 /= (double) ts->sampleCount;
+                        ts->rateSumIntf /= (double) ts->sampleCount;
                 }
-                cJSON_AddNumberToObject(json_summary, "LossCount", ts->seqErrLoss);
-                cJSON_AddNumberToObject(json_summary, "ReorderedCount", ts->seqErrOoo);
-                cJSON_AddNumberToObject(json_summary, "ReplicatedCount", ts->seqErrDup);
-                //
-                dvar = (double) ts->delayVarMin / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "PDVMin", dvar, -9);
-                dvar = (double) ts->delayVarSum / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "PDVAvg", dvar, -9);
-                dvar = (double) ts->delayVarMax / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "PDVMax", dvar, -9);
-                dvar = (double) (ts->delayVarMax - ts->delayVarMin) / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "PDVRangeSummary", dvar, -9);
-                //
-                dvar = (double) ts->rttMinimum / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "RTTMin", dvar, -9);
-                dvar = (double) ts->rttVarSum / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "RTTAvg", dvar, -9); // Local RTT variation average
-                dvar = (double) ts->rttMaximum / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "RTTMax", dvar, -9);
-                dvar = (double) (ts->rttMaximum - ts->rttMinimum) / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "RTTRangeSummary", dvar, -9);
-                //
-                cJSON_AddNumberPToObject(json_summary, "IPLayerCapacitySummary", ts->rateSumL3, 2);
-                cJSON_AddNumberPToObject(json_summary, "InterfaceEthMbps", ts->rateSumIntf, 2);
+                if (ts->rttVarCnt > 0) {
+                        ts->rttVarSum = (((ts->rttVarSum * 10) / ts->rttVarCnt) + 5) / 10; // Convert sum to average
+                }
+                if (!conf.jsonOutput) {
+                        if (conf.bimodalCount == 0) {
+                                strcpy(labeltext, "Summary");
+                        } else {
+                                sprintf(labeltext, "Sum[%d-%d]", sibegin, siend);
+                        }
+                        sprintf(scratch2, "%%s%%s %s ", labeltext);
+                        if (!conf.showLossRatio) {
+                                strcat(scratch2, DELIVERED_TEXT SUMMARY_TEXT);
+                        } else {
+                                strcat(scratch2, LOSSRATIO_TEXT SUMMARY_TEXT);
+                        }
+                        *intfrate = '\0';
+                        if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
+                                snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
+                        }
+                        var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
+                                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttVarSum,
+                                      ts->rttMaximum, ts->rateSumL3, intfrate);
+                        send_proc(errConn, scratch, var);
+                } else {
+                        if (conf.bimodalCount == 0) {
+                                var = c->subIntCount;
+                        } else {
+                                var = siend - sibegin + 1;
+                        }
+                        //
+                        // Create JSON summary object and add items to it
+                        //
+                        cJSON *json_summary = cJSON_CreateObject();
+                        //
+                        cJSON_AddNumberToObject(json_summary, "Mode", i + 1);
+                        cJSON_AddNumberToObject(json_summary, "Intervals", var);
+                        //
+                        cJSON_AddNumberToObject(json_summary, "ActiveConnections", repo.actConnCount);
+                        if (sent > 0.0) {
+                                dvar = ((double) ts->rxDatagrams * 100.0) / sent;
+                                cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", dvar, 2);
+                                dvar = (double) ts->seqErrLoss / sent;
+                                cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", dvar, 9);
+                                dvar = (double) ts->seqErrOoo / sent;
+                                cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", dvar, 9);
+                                dvar = (double) ts->seqErrDup / sent;
+                                cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", dvar, 9);
+                        } else {
+                                cJSON_AddNumberPToObject(json_summary, "DeliveredPercent", 0.0, 2);
+                                cJSON_AddNumberPToObject(json_summary, "LossRatioSummary", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", 0.0, 9);
+                                cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", 0.0, 9);
+                        }
+                        cJSON_AddNumberToObject(json_summary, "LossCount", ts->seqErrLoss);
+                        cJSON_AddNumberToObject(json_summary, "ReorderedCount", ts->seqErrOoo);
+                        cJSON_AddNumberToObject(json_summary, "ReplicatedCount", ts->seqErrDup);
+                        //
+                        dvar = (double) ts->delayVarMin / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "PDVMin", dvar, -9);
+                        dvar = (double) ts->delayVarSum / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "PDVAvg", dvar, -9);
+                        dvar = (double) ts->delayVarMax / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "PDVMax", dvar, -9);
+                        dvar = (double) (ts->delayVarMax - ts->delayVarMin) / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "PDVRangeSummary", dvar, -9);
+                        //
+                        dvar = (double) ts->rttMinimum / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "RTTMin", dvar, -9);
+                        dvar = (double) ts->rttVarSum / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "RTTAvg", dvar, -9); // Local RTT variation average
+                        dvar = (double) ts->rttMaximum / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "RTTMax", dvar, -9);
+                        dvar = (double) (ts->rttMaximum - ts->rttMinimum) / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "RTTRangeSummary", dvar, -9);
+                        //
+                        cJSON_AddNumberPToObject(json_summary, "IPLayerCapacitySummary", ts->rateSumL3, 2);
+                        cJSON_AddNumberPToObject(json_summary, "InterfaceEthMbps", ts->rateSumIntf, 2);
+                        //
+                        dvar = (double) c->clockDeltaMin / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "MinOnewayDelaySummary", dvar, -9); // Global value for all modes
+                        rttmin = 0;
+                        if (c->rttMinimum != STATUS_NODEL)
+                                rttmin = c->rttMinimum;
+                        dvar = (double) rttmin / 1000.0;
+                        cJSON_AddNumberPToObject(json_summary, "MinRTTSummary", dvar, -9); // Global value for all modes
+
+                        //
+                        // On first pass add summary object to output and create modal array, else add to modal array
+                        //
+                        if (i == 0) {
+                                cJSON_AddItemToObject(json_output, "Summary", json_summary);
+                                json_modalArray = cJSON_CreateArray();
+                        } else {
+                                cJSON_AddItemToArray(json_modalArray, json_summary);
+                        }
+
+                        //
+                        // When complete (modes 1 of 1 <OR> 2 of 2) add modal array to output
+                        //
+                        if (conf.bimodalCount == 0 || i == 1) {
+                                cJSON_AddItemToObject(json_output, "ModalSummary", json_modalArray);
+                        }
+                }
+                if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
+                        break; // Either a single maximum or bimodal count exceeds sub-interval count
+
+                sibegin = conf.bimodalCount + 1;
+                siend   = c->subIntCount;
         }
 
         //
-        // Output delay info
+        // Output minimum info if text
         //
-        rttmin = 0;
-        if (c->rttMinimum != STATUS_NODEL)
-                rttmin = c->rttMinimum;
         if (!conf.jsonOutput) {
+                rttmin = 0;
+                if (c->rttMinimum != STATUS_NODEL)
+                        rttmin = c->rttMinimum;
                 strcpy(scratch2, "%s%s " MINIMUM_FINAL);
                 var = sprintf(scratch, scratch2, connid, testtype, c->clockDeltaMin, rttmin, repo.actConnCount);
                 send_proc(errConn, scratch, var);
-        } else {
-                //
-                // Add final items to summary object and add summary object to output object
-                //
-                dvar = (double) c->clockDeltaMin / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "MinOnewayDelaySummary", dvar, -9);
-                dvar = (double) rttmin / 1000.0;
-                cJSON_AddNumberPToObject(json_summary, "MinRTTSummary", dvar, -9);
-                //
-                cJSON_AddItemToObject(json_output, "Summary", json_summary);
         }
 
         //
@@ -2207,9 +2267,9 @@ int output_maxrate(int connindex) {
         for (i = 0; i < 2; i++) {
                 if (!conf.jsonOutput) {
                         if (conf.bimodalCount == 0) {
-                                strcpy(maxtext, "Maximum");
+                                strcpy(labeltext, "Maximum");
                         } else {
-                                sprintf(maxtext, "Max[%d-%d]", sibegin, siend);
+                                sprintf(labeltext, "Max[%d-%d]", sibegin, siend);
                         }
                         *intfrate = '\0';
                         if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
@@ -2217,8 +2277,8 @@ int output_maxrate(int connindex) {
                         }
                         strcpy(scratch2,
                                "%s%s %s Mbps(L3/IP): %.2f%s, Mbps(L2/Eth): %.2f, Mbps(L1/Eth): %.2f, Mbps(L1/Eth+VLAN): %.2f\n");
-                        var = sprintf(scratch, scratch2, connid, testtype, maxtext, repo.rateMaxL3[i], intfrate, repo.rateMaxL2[i],
-                                      repo.rateMaxL1[i], repo.rateMaxL0[i]);
+                        var = sprintf(scratch, scratch2, connid, testtype, labeltext, repo.rateMaxL3[i], intfrate,
+                                      repo.rateMaxL2[i], repo.rateMaxL1[i], repo.rateMaxL0[i]);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (conf.bimodalCount == 0) {

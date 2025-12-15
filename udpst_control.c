@@ -71,6 +71,8 @@
  * Len Ciavattone          07/02/2024    Preset dir for bw dealloc on timeout
  * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
  *                                       statistics, and improved idling
+ * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
+ *
  */
 
 #define UDPST_CONTROL
@@ -764,8 +766,6 @@ int service_setupresp(int connindex) {
         cHdrTA->trialInt       = htons((uint16_t) c->trialInt);
         c->testIntTime         = conf.testIntTime;
         cHdrTA->testIntTime    = htons((uint16_t) c->testIntTime);
-        c->subIntPeriod        = conf.subIntPeriod;
-        cHdrTA->subIntPeriod   = htons((uint16_t) c->subIntPeriod);
         c->dscpEcn             = conf.dscpEcn;
         cHdrTA->dscpEcn        = (uint8_t) c->dscpEcn;
         c->srIndexConf         = conf.srIndexConf;
@@ -788,8 +788,12 @@ int service_setupresp(int connindex) {
                 c->randPayload = TRUE;
                 cHdrTA->modifierBitmap |= CHTA_RAND_PAYLOAD;
         }
-        c->rateAdjAlgo      = conf.rateAdjAlgo;
-        cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
+        c->rateAdjAlgo       = conf.rateAdjAlgo;
+        cHdrTA->rateAdjAlgo  = (uint8_t) c->rateAdjAlgo;
+        c->subIntPeriod      = conf.subIntPeriod;
+        cHdrTA->subIntPeriod = htons((uint16_t) c->subIntPeriod);
+        c->srAdjSuppCount    = conf.srAdjSuppCount;
+        cHdrTA->reserved4    = htons((uint16_t) c->srAdjSuppCount); // Utilizes reserved alignment field
 
         //
         // Send test activation request to server
@@ -1044,6 +1048,12 @@ int service_actreq(int connindex) {
                 cHdrTA->rateAdjAlgo = (uint8_t) c->rateAdjAlgo;
         }
         //
+        // Sending rate adjustment suppression count
+        //
+        if (c->protocolVer >= SRASUPP_PVER) {
+                c->srAdjSuppCount = (int) ntohs(cHdrTA->reserved4); // Utilizes reserved alignment field
+        }
+        //
         // If upstream test, send back initial sending rate transmission parameters
         //
         if (cHdrTA->cmdRequest == CHTA_CREQ_TESTACTUS) {
@@ -1174,6 +1184,11 @@ int service_actreq(int connindex) {
         tspecvar.tv_nsec = NSECINSEC / 2;
         tspecplus(&repo.systemClock, &tspecvar, &c->timer3Thresh);
         c->timer3Action = &stop_test;
+
+        //
+        // Save start time
+        //
+        tspeccpy(&c->startTime, &repo.systemClock);
 
         return 0;
 }
@@ -1515,6 +1530,11 @@ int service_actresp(int connindex) {
         tspecvar.tv_nsec = NSECINSEC / 2;
         tspecplus(&repo.systemClock, &tspecvar, &c->timer3Thresh);
         c->timer3Action = &stop_test;
+
+        //
+        // Save start time
+        //
+        tspeccpy(&c->startTime, &repo.systemClock);
 
         return 0;
 }
