@@ -1052,6 +1052,8 @@ int service_actreq(int connindex) {
         //
         if (c->protocolVer >= SRASUPP_PVER) {
                 c->srAdjSuppCount = (int) ntohs(cHdrTA->reserved4); // Utilizes reserved alignment field
+                if (c->srAdjSuppCount < 0 || c->srAdjSuppCount >= ((c->testIntTime * MSECINSEC) / c->subIntPeriod))
+                        c->srAdjSuppCount = 0;
         }
         //
         // If upstream test, send back initial sending rate transmission parameters
@@ -1184,11 +1186,6 @@ int service_actreq(int connindex) {
         tspecvar.tv_nsec = NSECINSEC / 2;
         tspecplus(&repo.systemClock, &tspecvar, &c->timer3Thresh);
         c->timer3Action = &stop_test;
-
-        //
-        // Save start time
-        //
-        tspeccpy(&c->startTime, &repo.systemClock);
 
         return 0;
 }
@@ -1530,11 +1527,6 @@ int service_actresp(int connindex) {
         tspecvar.tv_nsec = NSECINSEC / 2;
         tspecplus(&repo.systemClock, &tspecvar, &c->timer3Thresh);
         c->timer3Action = &stop_test;
-
-        //
-        // Save start time
-        //
-        tspeccpy(&c->startTime, &repo.systemClock);
 
         return 0;
 }

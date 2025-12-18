@@ -1443,11 +1443,11 @@ int service_statuspdu(int connindex) {
                 return 0;
 
         //
-        // Process sending rate
+        // If client, process sending rate and verbose messaging
         //
         if (!repo.isServer) {
                 //
-                // If not server, use (copy) sending rate parameters specified by server in this status message
+                // Copy sending rate parameters specified by server in this status message
                 //
                 sr_copy(&c->srStruct, &sHdr->srStruct, FALSE);
 
@@ -1461,11 +1461,6 @@ int service_statuspdu(int connindex) {
                         if (conf.debug)
                                 output_debug(connindex);
                 }
-        } else {
-                //
-                // If server, adjust our sending rate based on client traffic info in this status message
-                //
-                adjust_sending_rate(connindex);
         }
 
         //
@@ -1492,6 +1487,14 @@ int service_statuspdu(int connindex) {
                         }
                 }
         }
+
+        //
+        // If server, adjust sending rate based on client traffic info in this status message
+        //
+        if (repo.isServer) {
+                adjust_sending_rate(connindex);
+        }
+
         return 0;
 }
 //----------------------------------------------------------------------------
@@ -1501,7 +1504,7 @@ int service_statuspdu(int connindex) {
 int adjust_sending_rate(int connindex) {
         register struct connection *c = &conn[connindex];
         unsigned int dvmin, dvavg;
-        int var, delay, seqerr, supptime;
+        int var, delay, seqerr;
         struct timespec tspecvar;
 
         //
@@ -1532,15 +1535,9 @@ int adjust_sending_rate(int connindex) {
         //
         // Adjust sending rate as needed
         //
-        var = supptime = 0;
-        if (c->srAdjSuppCount > 0) { // Check if rate adjustment suppression requested
-                tspecminus(&repo.systemClock, &c->startTime, &tspecvar);
-                var      = (int) tspecmsec(&tspecvar);                                // Test time as of now
-                supptime = (c->srAdjSuppCount * c->subIntPeriod) + (c->trialInt * 2); // Suppression period
-        }
-        if (var < supptime) { // If currently in suppression period
+        if (c->srAdjSuppCount > 0 && c->subIntSeqNo < (unsigned int) c->srAdjSuppCount) { // Check if suppressed
                 if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart)
-                        c->srIndex = 0; // If static sending rate, use zero rate during suppression period
+                        c->srIndex = 0; // If static sending rate, use zero rate during suppressed sub-intervals
 
         } else if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart) {
                 c->srIndex = c->srIndexConf; // Use static sending rate if not specified as starting point

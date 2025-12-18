@@ -48,7 +48,7 @@
 //
 // General
 //
-#define SOFTWARE_VER       "9.0.0(Dev5)"
+#define SOFTWARE_VER       "9.0.0(Dev6)"
 #define SOFTWARE_TITLE     "UDP Speed Test"
 #define USTEST_TEXT        "Upstream"
 #define DSTEST_TEXT        "Downstream"
@@ -526,24 +526,23 @@ struct connection {
         BOOL randPayload;    // Payload randomization
         int rateAdjAlgo;     // Rate adjustment algorithm
         //
-        int algoCRetryCount;                     // AlgoC: Waiting timer till next multiplicative retry
-        int algoCRetryThresh;                    // AlgoC: Threshold for multiplicative retry
-        BOOL algoCUpdate;                        // AlgoC: Indicates when max send rate was updated
-                                                 //
+        int algoCRetryCount;  // AlgoC: Waiting timer till next multiplicative retry
+        int algoCRetryThresh; // AlgoC: Threshold for multiplicative retry
+        BOOL algoCUpdate;     // AlgoC: Indicates when max send rate was updated
+        //
         int authMode;                            // Authentication mode
         unsigned char clientKey[SHA256_KEY_LEN]; // Client key via KDF
         unsigned char serverKey[SHA256_KEY_LEN]; // Server key via KDF
-                                                 //
-        struct timespec startTime;               // Connection start time
-        struct timespec endTime;                 // Connection end time
-        int (*priAction)(int);                   // Primary action upon IO
-        int (*secAction)(int);                   // Secondary action upon IO
-        struct timespec timer1Thresh;            // First timer threshold
-        int (*timer1Action)(int);                // First action upon expiry
-        struct timespec timer2Thresh;            // Second timer threshold
-        int (*timer2Action)(int);                // Second action upon expiry
-        struct timespec timer3Thresh;            // Third timer threshold
-        int (*timer3Action)(int);                // Third action upon expiry
+        //
+        struct timespec endTime;      // Connection end time
+        int (*priAction)(int);        // Primary action upon IO
+        int (*secAction)(int);        // Secondary action upon IO
+        struct timespec timer1Thresh; // First timer threshold
+        int (*timer1Action)(int);     // First action upon expiry
+        struct timespec timer2Thresh; // Second timer threshold
+        int (*timer2Action)(int);     // Second action upon expiry
+        struct timespec timer3Thresh; // Third timer threshold
+        int (*timer3Action)(int);     // Third action upon expiry
         //
         struct timespec subIntClock; // Sub-interval clock
         unsigned int accumTime;      // Accumulated time
