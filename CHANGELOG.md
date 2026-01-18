@@ -82,6 +82,10 @@ line "Summary" will now be two lines, one for each mode, output as "Sum[#-#]".
 The JSON object "Summary" will now only cover the first mode and the second
 mode summary will be in an array called "ModalSummary". This is consistent with
 the existing "AtMax" and "ModalResult" structure for the maximum rate.
+* For better compliance with the protocol specified in the RFC, padding normally
+inserted by the C compiler in the subIntStats structure has been removed. This
+should improve interoperability with platforms and devices where C padding rules
+do not apply. This change does not impact backward compatibility with 8.2.0.
 
 # Changelog for UDPST 8.x.x Releases
 

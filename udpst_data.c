@@ -79,7 +79,8 @@
  *                                       statistics, and improved idling
  * Len Ciavattone          10/30/2025    Add RTT variation average and
  *                                       export all as optional
- * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
+ * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
+ * Len Ciavattone          01/15/2026    Realign legacy status messages
  *
  */
 
@@ -136,6 +137,7 @@ void upd_intf_stats(BOOL);
 void output_minimum(int);
 void output_debug(int);
 BOOL verify_datapdu(int, struct loadHdr *, struct statusHdr *);
+unsigned char *align_statuspdu(unsigned char *, BOOL);
 
 //----------------------------------------------------------------------------
 //
@@ -1196,7 +1198,7 @@ int send_statuspdu(int connindex) {
         } else {
                 sHdr->reserved2 = 0;
 #ifdef ADD_HEADER_CSUM
-                sHdr->reserved2 = checksum(sHdr, STATUS_SIZE_MVER); // Location within previous PDU version
+                sHdr->reserved2 = checksum(sHdr, STATUS_NPSIZE_MVER); // Location within legacy PDU
 #endif
         }
         if (!repo.isServer) {
@@ -1252,10 +1254,15 @@ int send_statuspdu(int connindex) {
         //
         // Send status message
         //
-        if (c->protocolVer >= EXTAUTH_PVER)
+        if (c->protocolVer >= EXTAUTH_PVER) {
                 var = STATUS_SIZE_CVER;
-        else
-                var = STATUS_SIZE_MVER;
+        } else {
+                //
+                // Obtain realigned legacy status message
+                //
+                sHdr = (struct statusHdr *) align_statuspdu((unsigned char *) sHdr, FALSE);
+                var  = STATUS_SIZE_MVER;
+        }
         send_proc(connindex, (char *) sHdr, var);
 
         //
@@ -1302,11 +1309,22 @@ int service_statuspdu(int connindex) {
         //
         // Verify PDU
         //
+        // NOTE: Verification of the legacy status message can be done prior to realignment
+        // because it only looks at the initial fields already aligned OR references the
+        // intended field(s) based on an explicit offset (e.g., checkSum).
+        //
         if (!verify_datapdu(connindex, NULL, sHdr)) {
                 return 0; // Ignore bad PDU
         }
 
         //
+        //
+        // Realign legacy status message into current format
+        //
+        if (c->protocolVer < EXTAUTH_PVER) {
+                sHdr = (struct statusHdr *) align_statuspdu((unsigned char *) sHdr, TRUE);
+        }
+
         // Handle test stop in progress, else extend test (reset watchdog)
         //
         if (c->testAction != TEST_ACT_TEST || sHdr->testAction != TEST_ACT_TEST) {
@@ -1505,7 +1523,6 @@ int adjust_sending_rate(int connindex) {
         register struct connection *c = &conn[connindex];
         unsigned int dvmin, dvavg;
         int var, delay, seqerr;
-        struct timespec tspecvar;
 
         //
         // Select algorithm parameters
@@ -2942,10 +2959,11 @@ unsigned short checksum(register void *p, register int count) {
 //
 BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr) {
         register struct connection *c = &conn[connindex];
-        int var, csum;
+        int var;
         BOOL bvar;
         char connid[8];
         struct perfStatsCounters *psC = &repo.psCounters;
+        uint16_t *csumptr             = NULL; // Pointer to checksum in status message
 
         //
         // Perform PDU verification
@@ -2975,12 +2993,17 @@ BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr)
                         }
                 }
         } else {
+                if (c->protocolVer >= EXTAUTH_PVER) {
+                        csumptr = (uint16_t *) &sHdr->checkSum;
+                } else {
+                        csumptr = (uint16_t *) (((unsigned char *) sHdr) + STATUS_CSOFF_MVER);
+                }
                 if (!repo.isServer && repo.rcvDataSize != (int) STATUS_SIZE_CVER) {
                         bvar = TRUE;
                         psC->statusInvalidSize++;
 
                 } else if (repo.isServer &&
-                           (repo.rcvDataSize < (int) STATUS_SIZE_MVER || repo.rcvDataSize > (int) STATUS_SIZE_CVER)) {
+                           (repo.rcvDataSize != (int) STATUS_SIZE_MVER && repo.rcvDataSize != (int) STATUS_SIZE_CVER)) {
                         bvar = TRUE;
                         psC->statusInvalidSize++;
 
@@ -2996,12 +3019,7 @@ BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr)
                         bvar = TRUE;
                         psC->statusInvalidFormat++;
 
-                } else if ((c->protocolVer >= EXTAUTH_PVER) && (sHdr->checkSum != 0)) {
-                        if (checksum(sHdr, repo.rcvDataSize)) {
-                                bvar = TRUE;
-                                psC->statusInvalidChksum++;
-                        }
-                } else if ((c->protocolVer < EXTAUTH_PVER) && (sHdr->reserved2 != 0)) { // Location within previous PDU version
+                } else if (*csumptr != 0) {
                         if (checksum(sHdr, repo.rcvDataSize)) {
                                 bvar = TRUE;
                                 psC->statusInvalidChksum++;
@@ -3028,12 +3046,8 @@ BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr)
                                 var += sprintf(&scratch[var], " load PDU (%d,0x%04X:0x%02X:0x%02X,0x%04X)", repo.rcvDataSize,
                                                ntohs(lHdr->pduId), lHdr->testAction, lHdr->rxStopped, lHdr->checkSum);
                         } else {
-                                if (c->protocolVer >= EXTAUTH_PVER)
-                                        csum = sHdr->checkSum;
-                                else
-                                        csum = sHdr->reserved2; // Location within previous PDU version
                                 var += sprintf(&scratch[var], " status PDU (%d,0x%04X:0x%02X:0x%02X,0x%04X)", repo.rcvDataSize,
-                                               ntohs(sHdr->pduId), sHdr->testAction, sHdr->rxStopped, csum);
+                                               ntohs(sHdr->pduId), sHdr->testAction, sHdr->rxStopped, *csumptr);
                         }
                         if (!repo.isServer) {
                                 var += sprintf(&scratch[var], " [Server %s:%d]", repo.server[c->serverIndex].ip,
@@ -3047,5 +3061,65 @@ BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr)
                 return FALSE;
         }
         return TRUE;
+}
+//----------------------------------------------------------------------------
+//
+// Align legacy status message to/from current format
+//
+// The legacy format included additional padding inserted in subIntStats by
+// the C compiler to align it on an 8-byte boundary. Realigning the status
+// message to or from the legacy format is done by copying it while inserting
+// or removing the two instances of 4-byte padding.
+//
+unsigned char *align_statuspdu(unsigned char *src, BOOL fromLegacy) {
+        size_t n;
+        unsigned char *dest   = (unsigned char *) repo.defBuffer + RCV_BUFFER_SIZE - 1024; // Use back of buffer
+        unsigned char *newpdu = dest;
+
+        //
+        // Copy from beginning of statusHdr to end of rxDatagrams in subIntStats
+        //
+        n = 44;
+        memcpy(dest, src, n);
+        src += n;
+        dest += n;
+
+        //
+        // Copy from rxBytes in subIntStats to end of accumTime in subIntStats
+        //
+        if (fromLegacy) {
+                src += 4; // Skip over padding after rxDatagrams in (legacy) subIntStats
+        } else {
+                *((uint32_t *) dest) = 0; // Zero the padding so no impact to checksum
+                dest += 4;                // Add padding after rxDatagrams in (legacy) subIntStats
+        }
+        n = 52;
+        memcpy(dest, src, n);
+        src += n;
+        dest += n;
+
+        //
+        // Copy from seqErrLoss in statusHdr to end of spduTime_nsec in statusHdr
+        // (legacy status message ends with spduTime_nsec)
+        //
+        if (fromLegacy) {
+                src += 4; // Skip over padding after accumTime in (legacy) subIntStats
+        } else {
+                *((uint32_t *) dest) = 0; // Zero the padding so no impact to checksum
+                dest += 4;                // Add padding after accumTime in (legacy) subIntStats
+        }
+        n = 64;
+        memcpy(dest, src, n);
+
+        //
+        // Clear additional fields in new status message not present in legacy version
+        //
+        if (fromLegacy) {
+                dest += n;
+                n = 44;
+                memset(dest, 0, n);
+        }
+
+        return newpdu;
 }
 //----------------------------------------------------------------------------

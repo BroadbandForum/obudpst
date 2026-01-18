@@ -71,7 +71,7 @@
  * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
  *                                       statistics, and improved idling
  * Len Ciavattone          10/30/2025    Add export all as optional
- * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
+ * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
  *
  */
 

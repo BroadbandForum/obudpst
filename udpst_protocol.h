@@ -219,6 +219,9 @@ struct loadHdr {
 //
 // Sub-interval statistics structure for received traffic information
 //
+#pragma pack(push, 1) // Begin: Force strict byte alignment
+// Without the #pragma pack() the C compiler would add 4 bytes of padding after
+// rxDatagrams and accumTime, increasing the size by 8 bytes (to a total of 64)
 struct subIntStats {
         uint32_t rxDatagrams; // Received datagrams
         uint64_t rxBytes;     // Received bytes (64 bits)
@@ -234,6 +237,7 @@ struct subIntStats {
         uint32_t rttMaximum;  // Maximum round-trip time (ms)
         uint32_t accumTime;   // Accumulated time (ms)
 };
+#pragma pack(pop) // End: Force strict byte alignment
 //
 // Status feedback header for UDP payload of status PDUs
 //
@@ -275,8 +279,10 @@ struct statusHdr {
         uint8_t reservedAuth1; // (reserved for alignment)
         uint16_t checkSum;     // Header checksum
 };
-#define STATUS_SIZE_CVER sizeof(struct statusHdr) // Current protocol version
-#define STATUS_SIZE_MVER (STATUS_SIZE_CVER - 48)  // Minimum protocol version
+#define STATUS_SIZE_CVER   sizeof(struct statusHdr) // Current protocol version (no padding)
+#define STATUS_SIZE_MVER   (STATUS_SIZE_CVER - 36)  // Minimum protocol version (w/subIntStats padding)
+#define STATUS_CSOFF_MVER  146                      // Checksum offset (w/subIntStats padding)
+#define STATUS_NPSIZE_MVER (STATUS_SIZE_MVER - 8)   // No padding size (no subIntStats padding)
 //----------------------------------------------------------------------------
 //
 // Authentication overlay structure (for common processing across PDUs)

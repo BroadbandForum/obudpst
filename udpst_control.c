@@ -71,7 +71,7 @@
  * Len Ciavattone          07/02/2024    Preset dir for bw dealloc on timeout
  * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
  *                                       statistics, and improved idling
- * Len Ciavattone          12/12/2025    Add sending rate adj. supp. time
+ * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
  *
  */
 
