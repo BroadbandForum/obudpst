@@ -9,8 +9,8 @@ https://www.broadband-forum.org/technical/download/TR-471.pdf
 - IETF RFC 9097: _Metrics and Methods for One-way IP Capacity_, 
 https://www.rfc-editor.org/rfc/rfc9097.html
 
-- IETF RFC xxx: _UDP Speed Test Protocol for One-way IP Capacity Metric
-Measurement_, https://www.rfc-editor.org/rfc/rfcXXX.html
+- IETF RFC 9946: _UDP Speed Test Protocol for One-way IP Capacity Metric
+Measurement_, https://www.rfc-editor.org/rfc/rfc9946.html
 
 - ITU-T Recommendation Y.1540 (revised 03/2023): _Internet protocol data
 communication service - IP packet transfer and availability performance
@@ -56,7 +56,7 @@ legacy control port (via `-p 25000`).**
 
 ## Overview
 Utilizing an adaptive transmission rate, via a pre-built table of discreet
-sending rates (starting at 0.11 Mbps), UDP datagrams are sent from client
+sending rates (starting at ~0.12 Mbps), UDP datagrams are sent from client
 to server(s) or server(s) to client to determine the maximum available IP-layer
 capacity between them. The load traffic is only sent in one direction at a
 time and status feedback messages are sent periodically in the opposite
@@ -228,7 +228,7 @@ large-scale networks. Therefore, and as an alternative to infrequent testing
 alone, low-rate tests (via `-I 0`) can be utilized very regularly between
 maximum capacity tests. These tests, with a minimum sending rate, send a
 random size datagram every 50 ms. With the size still constrained by the `-j`
-and `-T` options, this equates to a traffic rate of only ~0.11 Mbps.
+and `-T` options, this equates to a traffic rate of only ~0.12 Mbps.
 The benefit of this testing is that it can still detect various network
 impairments (loss, delay, instability, etc.) while utilizing all of the
 existing infrastructure and support systems already in place for maximum
@@ -429,8 +429,8 @@ confirmation in the load or status PDU, it schedules an immediate end time for
 the connection which closes the socket and deallocates it.
 
 ## JSON Output (client test results)
-For examples of the JSON output fields see the included sample files named
-"udpst-*.json". Available JSON output options include `-f json` (unformatted),
+For examples of the JSON output fields see the included "json_examples"
+subdirectory. Available JSON output options include `-f json` (unformatted),
 `-f jsonb` (brief & unformatted), and `-f jsonf` (formatted). To significantly
 reduce the size of the JSON output, option `-s` (omit sub-interval results)
 can be combined with `-f jsonb` (omit static input fields). Also, the
@@ -1006,7 +1006,7 @@ only incremented and are never reset. There is also a process uptime
 an end time for the period covered by the file. The counters show the
 cumulative values as of the end time of the file.
 
-An example file is included with the software `server_performance_stats.json`
-as well as an abbreviated text version containing details about the various
-fields and metrics.
+An example file is included with the software in the "json_examples"
+subdirectory as well as an abbreviated text version containing details about
+the various fields and metrics.
 

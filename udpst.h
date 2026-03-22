@@ -48,7 +48,7 @@
 //
 // General
 //
-#define SOFTWARE_VER       "9.0.0(Dev7)"
+#define SOFTWARE_VER       "9.0.0(Dev8)"
 #define SOFTWARE_TITLE     "UDP Speed Test"
 #define USTEST_TEXT        "Upstream"
 #define DSTEST_TEXT        "Downstream"
@@ -320,20 +320,20 @@ struct serverId {
         int port;                   // Server control port number
 };
 struct testSummary {
-        unsigned int rxDatagrams; // Total rx datagrams
-        unsigned int seqErrLoss;  // Loss sum
-        unsigned int seqErrOoo;   // Out-of-Order sum
-        unsigned int seqErrDup;   // Duplicate sum
-        unsigned int delayVarMin; // Delay variation minimum
-        unsigned int delayVarMax; // Delay variation maximum
-        unsigned int delayVarSum; // Delay variation sum
-        unsigned int rttMinimum;  // RTT variation minimum
-        unsigned int rttMaximum;  // RTT variation maximum
-        unsigned int rttVarSum;   // RTT variation sum
-        unsigned int rttVarCnt;   // RTT variation count
-        double rateSumL3;         // Rate sum at L3
-        double rateSumIntf;       // Rate sum of local interface
-        unsigned int sampleCount; // Sample count
+        unsigned int rxDatagrams;   // Total rx datagrams
+        unsigned int seqErrLoss;    // Loss sum
+        unsigned int seqErrOoo;     // Out-of-Order sum
+        unsigned int seqErrDup;     // Duplicate sum
+        unsigned int delayVarMin;   // Delay variation minimum
+        unsigned int delayVarMax;   // Delay variation maximum
+        unsigned int delayVarSum;   // Delay variation sum
+        unsigned int rttVarMinimum; // RTT variation minimum
+        unsigned int rttVarMaximum; // RTT variation maximum
+        unsigned int rttVarSum;     // RTT variation sum
+        unsigned int rttVarCnt;     // RTT variation count
+        double rateSumL3;           // Rate sum at L3
+        double rateSumIntf;         // Rate sum of local interface
+        unsigned int sampleCount;   // Sample count
 };
 struct perfStatsMaximums {
         unsigned int connCount;       // Connection count

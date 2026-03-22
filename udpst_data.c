@@ -81,6 +81,7 @@
  *                                       export all as optional
  * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
  * Len Ciavattone          01/15/2026    Realign legacy status messages
+ * Len Ciavattone          03/20/2026    Renamed var(s) to match RFC 9946
  *
  */
 
@@ -986,10 +987,10 @@ int service_loadpdu(int connindex) {
                 // Update RTT variation for trial interval and RTT variation range for sub-interval
                 //
                 c->rttVarSample = uvar - c->rttMinimum;
-                if (c->rttVarSample < (unsigned int) c->sisAct.rttMinimum)
-                        c->sisAct.rttMinimum = (uint32_t) c->rttVarSample;
-                if (c->rttVarSample > (unsigned int) c->sisAct.rttMaximum)
-                        c->sisAct.rttMaximum = (uint32_t) c->rttVarSample;
+                if (c->rttVarSample < (unsigned int) c->sisAct.rttVarMinimum)
+                        c->sisAct.rttVarMinimum = (uint32_t) c->rttVarSample;
+                if (c->rttVarSample > (unsigned int) c->sisAct.rttVarMaximum)
+                        c->sisAct.rttVarMaximum = (uint32_t) c->rttVarSample;
                 c->rttVarSum += c->rttVarSample; // Update local RTT variation sum and count
                 c->rttVarCnt++;
                 tspeccpy(&c->spduTime, &tspecvar); // Save to detect updated value
@@ -1734,7 +1735,7 @@ int proc_subinterval(int connindex, BOOL initialize) {
         //
         memset(&c->sisAct, 0, sizeof(struct subIntStats));
         c->sisAct.delayVarMin = STATUS_NODEL;
-        c->sisAct.rttMinimum  = STATUS_NODEL;
+        c->sisAct.rttVarMinimum  = STATUS_NODEL;
         tspeccpy(&c->subIntClock, &repo.systemClock);
         if (initialize)
                 c->accumTime = 0;
@@ -1887,7 +1888,7 @@ int output_currate(int connindex) {
                         a->clockDeltaMin      = c->clockDeltaMin;
                         a->rttMinimum         = c->rttMinimum;
                         a->sisSav.delayVarMin = STATUS_NODEL;
-                        a->sisSav.rttMinimum  = STATUS_NODEL;
+                        a->sisSav.rttVarMinimum  = STATUS_NODEL;
                 } else {
                         if (c->clockDeltaMin < a->clockDeltaMin)
                                 a->clockDeltaMin = c->clockDeltaMin;
@@ -1906,10 +1907,10 @@ int output_currate(int connindex) {
                 a->sisSav.delayVarCnt += c->sisSav.delayVarCnt;
                 if (c->sisSav.delayVarMax > a->sisSav.delayVarMax)
                         a->sisSav.delayVarMax = c->sisSav.delayVarMax;
-                if (c->sisSav.rttMinimum < a->sisSav.rttMinimum)
-                        a->sisSav.rttMinimum = c->sisSav.rttMinimum;
-                if (c->sisSav.rttMaximum > a->sisSav.rttMaximum)
-                        a->sisSav.rttMaximum = c->sisSav.rttMaximum;
+                if (c->sisSav.rttVarMinimum < a->sisSav.rttVarMinimum)
+                        a->sisSav.rttVarMinimum = c->sisSav.rttVarMinimum;
+                if (c->sisSav.rttVarMaximum > a->sisSav.rttVarMaximum)
+                        a->sisSav.rttVarMaximum = c->sisSav.rttVarMaximum;
                 //
                 a->rttVarSum += c->rttVarSum; // Merge local RTT variation sum and count
                 a->rttVarCnt += c->rttVarCnt;
@@ -1936,8 +1937,8 @@ int output_currate(int connindex) {
                 dvavg = (unsigned int) ((((c->sisSav.delayVarSum * 10) / c->sisSav.delayVarCnt) + 5) / 10);
         }
         rttmin = 0;
-        if (c->sisSav.rttMinimum != STATUS_NODEL) {
-                rttmin = (unsigned int) c->sisSav.rttMinimum;
+        if (c->sisSav.rttVarMinimum != STATUS_NODEL) {
+                rttmin = (unsigned int) c->sisSav.rttVarMinimum;
         }
         rttavg = 0;
         if (c->rttVarCnt > 0) {
@@ -1961,7 +1962,7 @@ int output_currate(int connindex) {
                         dvar = (double) c->sisSav.accumTime / MSECINSEC;
                         var  = sprintf(scratch, scratch2, connid, c->subIntCount, i, dvar, delivered, c->sisSav.seqErrLoss,
                                        c->sisSav.seqErrOoo, c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin, rttavg,
-                                       c->sisSav.rttMaximum, mbps, intfrate);
+                                       c->sisSav.rttVarMaximum, mbps, intfrate);
                         send_proc(errConn, scratch, var);
                 } else if (conf.jsonOutput && connindex == aggConn) {
                         //
@@ -2014,9 +2015,9 @@ int output_currate(int connindex) {
                         cJSON_AddNumberPToObject(json_subint, "RTTMin", dvar, -9);
                         dvar = (double) rttavg / 1000.0;
                         cJSON_AddNumberPToObject(json_subint, "RTTAvg", dvar, -9); // Local RTT variation average
-                        dvar = (double) c->sisSav.rttMaximum / 1000.0;
+                        dvar = (double) c->sisSav.rttVarMaximum / 1000.0;
                         cJSON_AddNumberPToObject(json_subint, "RTTMax", dvar, -9);
-                        dvar = (double) (c->sisSav.rttMaximum - rttmin) / 1000.0;
+                        dvar = (double) (c->sisSav.rttVarMaximum - rttmin) / 1000.0;
                         cJSON_AddNumberPToObject(json_subint, "RTTRange", dvar, -9);
                         //
                         cJSON_AddNumberPToObject(json_subint, "IPLayerCapacity", mbps, 2);
@@ -2048,8 +2049,8 @@ int output_currate(int connindex) {
                         ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
                         ts->delayVarSum = dvavg; // Sum averages to prevent overflow
                         //
-                        ts->rttMinimum = rttmin;
-                        ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
+                        ts->rttVarMinimum = rttmin;
+                        ts->rttVarMaximum = (unsigned int) c->sisSav.rttVarMaximum;
                 } else {
                         if (dvmin < ts->delayVarMin)
                                 ts->delayVarMin = dvmin;
@@ -2057,10 +2058,10 @@ int output_currate(int connindex) {
                                 ts->delayVarMax = (unsigned int) c->sisSav.delayVarMax;
                         ts->delayVarSum += dvavg; // Sum averages to prevent overflow
                         //
-                        if (rttmin < ts->rttMinimum)
-                                ts->rttMinimum = rttmin;
-                        if (c->sisSav.rttMaximum > (uint32_t) ts->rttMaximum)
-                                ts->rttMaximum = (unsigned int) c->sisSav.rttMaximum;
+                        if (rttmin < ts->rttVarMinimum)
+                                ts->rttVarMinimum = rttmin;
+                        if (c->sisSav.rttVarMaximum > (uint32_t) ts->rttVarMaximum)
+                                ts->rttVarMaximum = (unsigned int) c->sisSav.rttVarMaximum;
                 }
                 ts->rttVarSum += c->rttVarSum; // Local RTT variation sum and count
                 ts->rttVarCnt += c->rttVarCnt;
@@ -2078,7 +2079,7 @@ int output_currate(int connindex) {
                 //
                 memset(&c->sisSav, 0, sizeof(struct subIntStats));
                 c->sisSav.delayVarMin = STATUS_NODEL;
-                c->sisSav.rttMinimum  = STATUS_NODEL;
+                c->sisSav.rttVarMinimum  = STATUS_NODEL;
                 repo.siAggRateL3      = 0.0;
                 repo.siAggRateL2      = 0.0;
                 repo.siAggRateL1      = 0.0;
@@ -2167,8 +2168,8 @@ int output_maxrate(int connindex) {
                                 snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
                         }
                         var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
-                                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttMinimum, ts->rttVarSum,
-                                      ts->rttMaximum, ts->rateSumL3, intfrate);
+                                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttVarMinimum, ts->rttVarSum,
+                                      ts->rttVarMaximum, ts->rateSumL3, intfrate);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (conf.bimodalCount == 0) {
@@ -2213,13 +2214,13 @@ int output_maxrate(int connindex) {
                         dvar = (double) (ts->delayVarMax - ts->delayVarMin) / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "PDVRangeSummary", dvar, -9);
                         //
-                        dvar = (double) ts->rttMinimum / 1000.0;
+                        dvar = (double) ts->rttVarMinimum / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "RTTMin", dvar, -9);
                         dvar = (double) ts->rttVarSum / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "RTTAvg", dvar, -9); // Local RTT variation average
-                        dvar = (double) ts->rttMaximum / 1000.0;
+                        dvar = (double) ts->rttVarMaximum / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "RTTMax", dvar, -9);
-                        dvar = (double) (ts->rttMaximum - ts->rttMinimum) / 1000.0;
+                        dvar = (double) (ts->rttVarMaximum - ts->rttVarMinimum) / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "RTTRangeSummary", dvar, -9);
                         //
                         cJSON_AddNumberPToObject(json_summary, "IPLayerCapacitySummary", ts->rateSumL3, 2);
@@ -2348,16 +2349,16 @@ int output_maxrate(int connindex) {
                         cJSON_AddNumberPToObject(json_atmax, "PDVRangeAtMax", dvar, -9);
                         //
                         rttmin = 0;
-                        if (repo.sisMax[i].rttMinimum != STATUS_NODEL) {
-                                rttmin = (unsigned int) repo.sisMax[i].rttMinimum;
+                        if (repo.sisMax[i].rttVarMinimum != STATUS_NODEL) {
+                                rttmin = (unsigned int) repo.sisMax[i].rttVarMinimum;
                         }
                         dvar = (double) rttmin / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTMin", dvar, -9);
                         dvar = (double) repo.rttAverage[i] / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTAvg", dvar, -9); // Local RTT variation average
-                        dvar = (double) repo.sisMax[i].rttMaximum / 1000.0;
+                        dvar = (double) repo.sisMax[i].rttVarMaximum / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTMax", dvar, -9);
-                        dvar = (double) (repo.sisMax[i].rttMaximum - rttmin) / 1000.0;
+                        dvar = (double) (repo.sisMax[i].rttVarMaximum - rttmin) / 1000.0;
                         cJSON_AddNumberPToObject(json_atmax, "RTTRangeAtMax", dvar, -9);
                         //
                         cJSON_AddNumberPToObject(json_atmax, "MaxIPLayerCapacity", repo.rateMaxL3[i], 2);
@@ -2721,8 +2722,8 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sisnet->delayVarMax = htonl(sishost->delayVarMax);
                 sisnet->delayVarSum = htonl(sishost->delayVarSum);
                 sisnet->delayVarCnt = htonl(sishost->delayVarCnt);
-                sisnet->rttMinimum  = htonl(sishost->rttMinimum);
-                sisnet->rttMaximum  = htonl(sishost->rttMaximum);
+                sisnet->rttVarMinimum  = htonl(sishost->rttVarMinimum);
+                sisnet->rttVarMaximum  = htonl(sishost->rttVarMaximum);
                 sisnet->accumTime   = htonl(sishost->accumTime);
         } else {
                 sishost->rxDatagrams = ntohl(sisnet->rxDatagrams);
@@ -2735,8 +2736,8 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
                 sishost->delayVarMax = ntohl(sisnet->delayVarMax);
                 sishost->delayVarSum = ntohl(sisnet->delayVarSum);
                 sishost->delayVarCnt = ntohl(sisnet->delayVarCnt);
-                sishost->rttMinimum  = ntohl(sisnet->rttMinimum);
-                sishost->rttMaximum  = ntohl(sisnet->rttMaximum);
+                sishost->rttVarMinimum  = ntohl(sisnet->rttVarMinimum);
+                sishost->rttVarMaximum  = ntohl(sisnet->rttVarMaximum);
                 sishost->accumTime   = ntohl(sisnet->accumTime);
         }
         return;

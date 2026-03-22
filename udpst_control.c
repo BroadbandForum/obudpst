@@ -72,6 +72,7 @@
  * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
  *                                       statistics, and improved idling
  * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
+ * Len Ciavattone          03/20/2026    Renamed var(s) to match RFC 9946
  *
  */
 
@@ -1054,6 +1055,10 @@ int service_actreq(int connindex) {
                 c->srAdjSuppCount = (int) ntohs(cHdrTA->reserved4); // Utilizes reserved alignment field
                 if (c->srAdjSuppCount < 0 || c->srAdjSuppCount >= ((c->testIntTime * MSECINSEC) / c->subIntPeriod))
                         c->srAdjSuppCount = 0;
+                if (c->srAdjSuppCount > 0) {
+                        if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart)
+                                sr = repo.sendingRates; // Reset to first row of table (start suppressed)
+                }
         }
         //
         // If upstream test, send back initial sending rate transmission parameters
@@ -1451,6 +1456,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "IPRREnable", 1);
                                 cJSON_AddNumberToObject(json_input, "RIPREnable", 1);
                                 cJSON_AddNumberToObject(json_input, "PreambleDuration", 0);
+                                cJSON_AddNumberToObject(json_input, "MaxRequiredBandwidth", conf.maxBandwidth);
                                 // Using "[Start]SendingRateIndex" instead of "StartSendingRate" for this implementation
                                 if (c->srIndexConf == CHTA_SRIDX_DEF || c->srIndexIsStart) {
                                         var = 0;
@@ -1465,6 +1471,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "NumberTestSubIntervals",
                                                         (c->testIntTime * MSECINSEC) / c->subIntPeriod);
                                 cJSON_AddNumberToObject(json_input, "NumberFirstModeTestSubIntervals", conf.bimodalCount);
+                                cJSON_AddNumberToObject(json_input, "NumberFirstModeSuppSubIntervals", conf.srAdjSuppCount);
                                 cJSON_AddNumberToObject(json_input, "TestSubInterval", c->subIntPeriod);
                                 cJSON_AddNumberToObject(json_input, "StatusFeedbackInterval", c->trialInt);
                                 cJSON_AddNumberToObject(json_input, "TimeoutNoTestTraffic", WARNING_NOTRAFFIC * MSECINSEC);
@@ -1480,6 +1487,7 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "SlowAdjThresh", c->slowAdjThresh);
                                 cJSON_AddNumberToObject(json_input, "HSpeedThresh", repo.hSpeedThresh * 1000000);
                                 cJSON_AddStringToObject(json_input, "RateAdjAlgorithm", rateAdjAlgo[c->rateAdjAlgo]);
+                                cJSON_AddNumberToObject(json_input, "InterfaceDeterminesMax", conf.intfForMax);
                                 //
                                 // Add input object to top-level object
                                 //

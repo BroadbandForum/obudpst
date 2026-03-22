@@ -9,10 +9,10 @@
 	"Input":	{
 		"Interface":	"",
 		"Role":	"Sender",
-		"ID":	50250,
+		"ID":	47226,
 		"Host":	"test-server1.com",
 		"HostIPAddress":	"192.168.1.224",
-		"Port":	40738,
+		"Port":	52120,
 		"NumberOfHosts":	4,
 		"HostList":	[{
 				"Host":	"test-server1.com",
@@ -32,7 +32,7 @@
 				"ControlPort":	24604
 			}],
 		"ClientIPAddress":	"192.168.1.238",
-		"ClientPort":	46676,
+		"ClientPort":	34556,
 		"JumboFramesPermitted":	0,
 		"NumberOfConnections":	4,
 		"MinNumOfConnections":	4,
@@ -47,10 +47,12 @@
 		"IPRREnable":	1,
 		"RIPREnable":	1,
 		"PreambleDuration":	0,
+		"MaxRequiredBandwidth":	0,
 		"StartSendingRateIndex":	0,
 		"SendingRateIndex":	-1,
 		"NumberTestSubIntervals":	10,
 		"NumberFirstModeTestSubIntervals":	0,
+		"NumberFirstModeSuppSubIntervals":	0,
 		"TestSubInterval":	1000,
 		"StatusFeedbackInterval":	50,
 		"TimeoutNoTestTraffic":	1000,
@@ -65,18 +67,19 @@
 		"HighSpeedDelta":	10,
 		"SlowAdjThresh":	3,
 		"HSpeedThresh":	1000000000,
-		"RateAdjAlgorithm":	"B"
+		"RateAdjAlgorithm":	"B",
+		"InterfaceDeterminesMax":	0
 	},
 	"Output":	{
-		"BOMTime":	"2025-12-15T18:42:36.453155Z",
+		"BOMTime":	"2026-03-22T16:01:47.588225Z",
 		"TmaxUsed":	1000,
 		"TestInterval":	10,
 		"TmaxRTTUsed":	3000,
 		"TimestampResolutionUsed":	1,
-		"EOMTime":	"2025-12-15T18:42:43.713413Z",
+		"EOMTime":	"2026-03-22T16:01:54.193928Z",
 		"Status":	"Error_Other"
 	},
 	"ErrorStatus":	200,
 	"ErrorMessage":	"ERROR: Minimum required connections (4) unavailable",
-	"ErrorMessage2":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 192.168.1.224:24604]"
+	"ErrorMessage2":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 192.168.1.224:24601]"
 }

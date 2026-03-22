@@ -3,14 +3,14 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification
 can be found at https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-## 2026-01-01: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
+## 2026-05-01: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
 
 **IMPORTANT: The default control port has changed from 25000 to 24601. For
 backward compatibility, 8.2.0 clients will either need to use the new control
 port via `-p 24601` or the server can be run with the legacy control port (via
 `-p 25000`).**
 
-The primary change in this release was making the software RFCxxx compatible.
+The primary change in this release was making the software RFC 9946 compatible.
 This included enhancing authentication to cover each message exchanged in the
 control phase as well as the use of a KDF (Key Derivation Function) to create
 unique keys for both the client and server for each test. Note, authentication
@@ -76,16 +76,25 @@ attempts to find a maximum, starting from zero. If a fixed rate is also
 specified (e.g., `-I 500`), the first mode uses sending rate index 0 and the
 second uses the specified fixed sending rate. In contrast, if a starting rate is
 specified (e.g., `-I @500`), the first mode uses the fixed starting rate and the
-second attempts to find a maximum, starting from that rate. In addition, bimodal
-usage is now accompanied by a change in the summary output info. The single text
-line "Summary" will now be two lines, one for each mode, output as "Sum[#-#]".
+second attempts to find a maximum, starting from that rate.
+
+Bimodal usage is now accompanied by a change in the summary output info. The single
+text line "Summary" will now be two lines, one for each mode, output as "Sum[#-#]".
 The JSON object "Summary" will now only cover the first mode and the second
 mode summary will be in an array called "ModalSummary". This is consistent with
-the existing "AtMax" and "ModalResult" structure for the maximum rate.
-* For better compliance with the protocol specified in the RFC, padding normally
-inserted by the C compiler in the subIntStats structure has been removed. This
-should improve interoperability with platforms and devices where C padding rules
-do not apply. This change does not impact backward compatibility with 8.2.0.
+the existing "AtMax" and "ModalResult" structure for the maximum rate. Also, the
+JSON "Input" object will now contain a field called "NumberFirstModeSuppSubIntervals"
+that contains the number of sub-intervals with sending rate adjustments suppressed.
+When the minus sign prefix is used, this will equal "NumberFirstModeTestSubIntervals".
+* For compliance with the protocol specified in RFC 9946, padding normally
+inserted by the C compiler in the subIntStats structure is removed via a pair of
+"#pragma pack" statements. This improves interoperability with platforms and
+devices where C padding rules do not apply. This change does not impact backward
+compatibility with 8.2.0.
+* The client's JSON output now contains a "MaxRequiredBandwidth" field in the
+"Input" object. This value shows the max bandwidth option (`-B mbps`) provided
+on the command line.
+* All JSON example files are now located in a "json_examples" subdirectory.
 
 # Changelog for UDPST 8.x.x Releases
 

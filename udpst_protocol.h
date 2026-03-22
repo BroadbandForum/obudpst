@@ -61,9 +61,9 @@ struct controlHdrSR {
         uint8_t mcCount;      // Multi-connection count
         uint16_t mcIdent;     // Multi-connection identifier
 #define CHSR_CREQ_NONE     0
-#define CHSR_CREQ_SETUPREQ 1   // Setup request
-#define CHSR_CREQ_SETUPRSP 2   // Setup response
-        uint8_t cmdRequest;    // Command request
+#define CHSR_CREQ_SETUPREQ 1   // Setup Request
+#define CHSR_CREQ_SETUPRSP 2   // Setup Response
+        uint8_t cmdRequest;    // Command Request
 #define CHSR_CRSP_NONE     0   // (used with request)
 #define CHSR_CRSP_ACKOK    1   // Acknowledgment
 #define CHSR_CRSP_BADVER   2   // Bad version
@@ -78,7 +78,7 @@ struct controlHdrSR {
 #define CHSR_CRSP_BADTMTU  11  // Trad. MTU mismatch
 #define CHSR_CRSP_MCINVPAR 12  // Multi-conn. invalid params
 #define CHSR_CRSP_CONNFAIL 13  // Conn. allocation failure
-        uint8_t cmdResponse;   // Command response
+        uint8_t cmdResponse;   // Command Response
 #define CHSR_USDIR_BIT 0x8000  // Upstream direction bit
         uint16_t maxBandwidth; // Required bandwidth in Mbps
         uint16_t testPort;     // Test port on server
@@ -109,10 +109,10 @@ struct controlHdrNR {
         uint16_t pduId;       // PDU ID
         uint16_t protocolVer; // Protocol version
 #define CHNR_CREQ_NONE    0
-#define CHNR_CREQ_NULLREQ 1  // Null request
-        uint8_t cmdRequest;  // Command request
+#define CHNR_CREQ_NULLREQ 1  // Null Request
+        uint8_t cmdRequest;  // Command Request
 #define CHNR_CRSP_NONE 0     // (used with request)
-        uint8_t cmdResponse; // Command response
+        uint8_t cmdResponse; // Command Response
         uint8_t reserved1;   // (reserved for alignment)
         // ========== Integrity Verification ==========
         uint8_t authMode;      // Authentication mode
@@ -129,7 +129,7 @@ struct controlHdrNR {
 #define MIN_INTERVAL_USEC 100        // Min interval/timer granularity (us)
 #define SRATE_RAND_BIT    0x80000000 // Randomization bit (remaining contain max)
 //
-// Sending rate structure for a single row of transmission parameters
+// Sending Rate structure for a single row of transmission parameters
 //
 struct sendingRate {
         uint32_t txInterval1; // Transmit interval (us)
@@ -150,24 +150,24 @@ struct controlHdrTA {
 #define CHTA_CREQ_NONE      0
 #define CHTA_CREQ_TESTACTUS 1        // Test activation upstream
 #define CHTA_CREQ_TESTACTDS 2        // Test activation downstream
-        uint8_t cmdRequest;          // Command request
+        uint8_t cmdRequest;          // Command Request
 #define CHTA_CRSP_NONE     0         // (used with request)
 #define CHTA_CRSP_ACKOK    1         // Acknowledgment
 #define CHTA_CRSP_BADPARAM 2         // Bad/invalid test params
-        uint8_t cmdResponse;         // Command response
+        uint8_t cmdResponse;         // Command Response
         uint16_t lowThresh;          // Low delay variation threshold (ms)
         uint16_t upperThresh;        // Upper delay variation threshold (ms)
         uint16_t trialInt;           // Status Feedback/trial interval (ms)
         uint16_t testIntTime;        // Test interval time (sec)
         uint8_t reserved1;           // (reserved for alignment)
-        uint8_t dscpEcn;             // DiffServ and ECN field for testing
+        uint8_t dscpEcn;             // Diffserv and ECN field for testing
 #define CHTA_SRIDX_DEF UINT16_MAX    // Request default server search
         uint16_t srIndexConf;        // Configured Sending Rate Table index
         uint8_t useOwDelVar;         // Use one-way delay, not RTT (BOOL)
         uint8_t highSpeedDelta;      // High-speed row adjustment delta
         uint16_t slowAdjThresh;      // Slow rate adjustment threshold
         uint16_t seqErrThresh;       // Sequence error threshold
-        uint8_t ignoreOooDup;        // Ignore Out-of-Order/Dup (BOOL)
+        uint8_t ignoreOooDup;        // Ignore out-of-order/Dup (BOOL)
 #define CHTA_SRIDX_ISSTART 0x01      // Use srIndexConf as starting index
 #define CHTA_RAND_PAYLOAD  0x02      // Randomize payload
         uint8_t modifierBitmap;      // Modifier bitmap
@@ -175,8 +175,8 @@ struct controlHdrTA {
 #define CHTA_RA_ALGO_C 1             // Algorithm C
         uint8_t rateAdjAlgo;         // Rate adjust. algorithm
         uint8_t reserved2;           // (reserved for alignment)
-        struct sendingRate srStruct; // Sending rate structure
-        uint16_t subIntPeriod;       // Sub-interval period (ms)
+        struct sendingRate srStruct; // Sending Rate structure
+        uint16_t subIntPeriod;       // Sub-Interval period (ms)
         uint16_t reserved3;          // (reserved for alignment)
         uint16_t reserved4;          // (reserved for alignment)
         uint8_t reserved5;           // (reserved for alignment)
@@ -209,37 +209,35 @@ struct loadHdr {
         uint16_t spduSeqErr;    // Status PDU sequence error count
         uint32_t spduTime_sec;  // Send time in last rx'd status PDU
         uint32_t spduTime_nsec; // Send time in last rx'd status PDU
-        uint32_t lpduTime_sec;  // Send time of this load PDU
-        uint32_t lpduTime_nsec; // Send time of this load PDU
+        uint32_t lpduTime_sec;  // Send time of this Load PDU
+        uint32_t lpduTime_nsec; // Send time of this Load PDU
         uint16_t rttRespDelay;  // Response delay for RTT (ms)
         uint16_t checkSum;      // Header checksum
 };
 #define TEST_ACT_MAX TEST_ACT_STOP2
 //----------------------------------------------------------------------------
 //
-// Sub-interval statistics structure for received traffic information
+// Sub-Interval statistics structure for received traffic information
 //
-#pragma pack(push, 1) // Begin: Force strict byte alignment
-// Without the #pragma pack() the C compiler would add 4 bytes of padding after
-// rxDatagrams and accumTime, increasing the size by 8 bytes (to a total of 64)
+#pragma pack(push, 1)
 struct subIntStats {
-        uint32_t rxDatagrams; // Received datagrams
-        uint64_t rxBytes;     // Received bytes (64 bits)
-        uint32_t deltaTime;   // Time delta (us)
-        uint32_t seqErrLoss;  // Loss sum
-        uint32_t seqErrOoo;   // Out-of-Order sum
-        uint32_t seqErrDup;   // Duplicate sum
-        uint32_t delayVarMin; // Delay variation minimum (ms)
-        uint32_t delayVarMax; // Delay variation maximum (ms)
-        uint32_t delayVarSum; // Delay variation sum (ms)
-        uint32_t delayVarCnt; // Delay variation count
-        uint32_t rttMinimum;  // Minimum round-trip time (ms)
-        uint32_t rttMaximum;  // Maximum round-trip time (ms)
-        uint32_t accumTime;   // Accumulated time (ms)
+        uint32_t rxDatagrams;   // Received datagrams
+        uint64_t rxBytes;       // Received bytes (64 bits)
+        uint32_t deltaTime;     // Time delta (us)
+        uint32_t seqErrLoss;    // Loss sum
+        uint32_t seqErrOoo;     // Out-of-order sum
+        uint32_t seqErrDup;     // Duplicate sum
+        uint32_t delayVarMin;   // Delay variation minimum (ms)
+        uint32_t delayVarMax;   // Delay variation maximum (ms)
+        uint32_t delayVarSum;   // Delay variation sum (ms)
+        uint32_t delayVarCnt;   // Delay variation count
+        uint32_t rttVarMinimum; // Minimum RTT variation (ms)
+        uint32_t rttVarMaximum; // Maximum RTT variation (ms)
+        uint32_t accumTime;     // Accumulated time (ms)
 };
-#pragma pack(pop) // End: Force strict byte alignment
+#pragma pack(pop)
 //
-// Status feedback header for UDP payload of status PDUs
+// Status Feedback header for UDP payload of status PDUs
 //
 struct statusHdr {
 #define STATUS_ID 0xFEED
@@ -247,11 +245,11 @@ struct statusHdr {
         uint8_t testAction;          // Test action
         uint8_t rxStopped;           // Receive traffic stopped (BOOL)
         uint32_t spduSeqNo;          // Status PDU sequence number
-        struct sendingRate srStruct; // Sending rate structure
-        uint32_t subIntSeqNo;        // Sub-interval sequence number
-        struct subIntStats sisSav;   // Sub-interval saved stats
+        struct sendingRate srStruct; // Sending Rate structure
+        uint32_t subIntSeqNo;        // Sub-Interval sequence number
+        struct subIntStats sisSav;   // Sub-Interval stats saved
         uint32_t seqErrLoss;         // Loss sum
-        uint32_t seqErrOoo;          // Out-of-Order sum
+        uint32_t seqErrOoo;          // Out-of-order sum
         uint32_t seqErrDup;          // Duplicate sum
         uint32_t clockDeltaMin;      // Clock delta minimum (ms)
         uint32_t delayVarMin;        // Delay variation minimum (ms)
