@@ -48,7 +48,7 @@
 //
 // General
 //
-#define SOFTWARE_VER       "9.0.0(Dev8)"
+#define SOFTWARE_VER       "9.0.0(Dev9)"
 #define SOFTWARE_TITLE     "UDP Speed Test"
 #define USTEST_TEXT        "Upstream"
 #define DSTEST_TEXT        "Downstream"
@@ -99,6 +99,8 @@
 #define WARN_LOC_STOPPED 3 // Locally received traffic has stopped
 #define WARN_REM_STOPPED 4 // Remotely received traffic has stopped
 #define WARN_RX_INVPDU   5 // Received invalid PDU
+#define WARN_LOC_ECNBLCH 6 // Locally received ECN bleaching detected
+#define WARN_REM_ECNBLCH 7 // Remotely received ECN bleaching detected
 // Configuration errors (offset of STATUS_CONF_ERRBASE)
 #define ERROR_CONF_GENERIC 0 // Generic configuration issue
 #define ERROR_CONF_KEYFILE 1 // Configuration issue with/within key file
@@ -183,6 +185,9 @@
 #define DEF_KEY_ID           0              // Key ID
 #define MIN_KEY_ID           0              //
 #define MAX_KEY_ID           UINT8_MAX      //
+#define DEF_ECN_CE_TH        0              // ECN CE threshold
+#define MIN_ECN_CE_TH        1              //
+#define MAX_ECN_CE_TH        UINT8_MAX      //
 
 //----------------------------------------------------------------------------
 //
@@ -304,6 +309,7 @@ struct configuration {
         char *outputFile;                // Name of output (export) file
         BOOL outputFileAll;              // Output (export) all metadata
         char *psFile;                    // Name of performance statistics file
+        int ecnCEThresh;                 // ECN CE threshold
 };
 //----------------------------------------------------------------------------
 //
@@ -331,6 +337,7 @@ struct testSummary {
         unsigned int rttVarMaximum; // RTT variation maximum
         unsigned int rttVarSum;     // RTT variation sum
         unsigned int rttVarCnt;     // RTT variation count
+        unsigned int rxCECount;     // Receive CE count total
         double rateSumL3;           // Rate sum at L3
         double rateSumIntf;         // Rate sum of local interface
         unsigned int sampleCount;   // Sample count
@@ -414,6 +421,7 @@ struct repository {
         char *sndBufRand;                     // Send buffer for randomized load PDUs
         char *rcvDataPtr;                     // Received data pointer for load PDUs
         int rcvDataSize;                      // Received data size in default buffer
+        int rcvEcnBits;                       // Received ECN bits in packet header
         struct sockaddr_storage remSas;       // Remote IP sockaddr storage
         socklen_t remSasLen;                  // Remote IP sockaddr storage length
         BOOL isServer;                        // Execute as server
@@ -449,6 +457,7 @@ struct repository {
         struct perfStatsAverages psAverages;  // Performance statistics (Averages)
         int actConnections[2];                // Active testing connections (bimodal)
         struct subIntStats sisMax[2];         // Sub-interval maximum stats (bimodal)
+        unsigned int sisMaxCECount[2];        // Sub-interval maximum CE counts (bimodal)
         double rateMaxL3[2];                  // L3 rate maximums (bimodal)
         double rateMaxL2[2];                  // L2 rate maximums (bimodal)
         double rateMaxL1[2];                  // L1 rate maximums (bimodal)
@@ -525,6 +534,8 @@ struct connection {
         int seqErrThresh;    // Sequence error threshold
         BOOL randPayload;    // Payload randomization
         int rateAdjAlgo;     // Rate adjustment algorithm
+        int ecnCEThresh;     // ECN CE threshold
+        int ecnBleachCount;  // ECN bleach count (-1 after warning generated)
         //
         int algoCRetryCount;  // AlgoC: Waiting timer till next multiplicative retry
         int algoCRetryThresh; // AlgoC: Threshold for multiplicative retry
@@ -550,6 +561,8 @@ struct connection {
         struct subIntStats sisAct;   // Sub-interval active stats
         struct subIntStats sisSav;   // Sub-interval saved stats
         int subIntCount;             // Sub-interval count
+        unsigned int sisActCECount;  // Sub-interval active CE count
+        unsigned int sisSavCECount;  // Sub-interval saved CE count
         //
 #define LPDU_HISTORY_SIZE 32 // Size must be power of 2
 #define LPDU_HISTORY_MASK (LPDU_HISTORY_SIZE - 1)
@@ -576,6 +589,7 @@ struct connection {
         unsigned int tiDeltaTime;      // Trial interval delta time
         unsigned int tiRxDatagrams;    // Trial interval receive datagrams
         unsigned int tiRxBytes;        // Trial interval receive bytes
+        unsigned int tiRxCECount;      // Trial interval receive CE count
         //
         int infoCount;             // Info message count
         int warningCount;          // Warning message count

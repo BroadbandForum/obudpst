@@ -82,6 +82,7 @@
  * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
  * Len Ciavattone          01/15/2026    Realign legacy status messages
  * Len Ciavattone          03/20/2026    Renamed var(s) to match RFC 9946
+ * Len Ciavattone          04/19/2026    Add ECN CE support
  *
  */
 
@@ -157,16 +158,20 @@ extern char json_errbuf[STRING_SIZE], json_errbuf2[STRING_SIZE];
 //
 // Global data
 //
+#define CE_LABEL_TEXT  "/CE"
 #define LOSSRATIO_TEXT "LossRatio: %.2E, "
 #define DELIVERED_TEXT "Delivered(%%): %6.2f, "
-#define SUMMARY_TEXT   "Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u/%u/%u, Mbps(L3/IP): %.2f%s\n"
+#define SUMMARY_TEXT   "Loss/OoO/Dup%s: %u/%u/%u%s, OWDVar(ms): %u/%u/%u, RTTVar(ms): %u/%u/%u, Mbps(L3/IP): %.2f%s\n"
 #define MINIMUM_TEXT   "Minimum One-Way Delay(ms): %d [w/clock diff], Round-Trip Time(ms): %u"
 #define MINIMUM_FINAL  MINIMUM_TEXT ", Active Connections: %d\n"
-#define DEBUG_STATS    "[Loss/OoO/Dup: %u/%u/%u, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
+#define DEBUG_STATS    "[Loss/OoO/Dup%s: %u/%u/%u%s, OWDVar(ms): %u/%u/%u, RTTVar(ms): %d]"
 #define CLIENT_DEBUG   "[%d]DEBUG Status Feedback " DEBUG_STATS " Mbps(L3/IP): %.2f\n"
 #define SERVER_DEBUG   "[%d]DEBUG Rate Adjustment " DEBUG_STATS " SRIndex: %d\n"
 static char scratch2[STRING_SIZE + 32]; // Allow for log file timestamp prefix
 static int mmsgDataSize[RECVMMSG_SIZE]; // Received data size of each message
+#define RECV_CMSG_SIZE (CMSG_SPACE(sizeof(int)))
+static char rxCmsgBuf[RECVMMSG_SIZE * RECV_CMSG_SIZE]; // Ancillary data buffer
+static int mmsgEcnBits[RECVMMSG_SIZE];                 // Received ECN bits of each message
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -865,6 +870,18 @@ int service_loadpdu(int connindex) {
         c->sisAct.rxBytes += (uint64_t) payload;
         c->tiRxDatagrams++;
         c->tiRxBytes += payload;
+        if (c->ecnCEThresh > 0) {
+                //
+                // Process received ECN bits
+                //
+                if (repo.rcvEcnBits == IPTOS_ECN_NOT_ECT) {
+                        if (c->ecnBleachCount >= 0)
+                                c->ecnBleachCount++;
+                } else if (repo.rcvEcnBits == IPTOS_ECN_CE) {
+                        c->sisActCECount++;
+                        c->tiRxCECount++;
+                }
+        }
 
         //
         // Check sequence number for loss, also reordering/duplication (end processing if so)
@@ -931,9 +948,9 @@ int service_loadpdu(int connindex) {
         tspecminus(&repo.systemClock, &tspecvar, &tspecdelta);
         delta = (int) tspecmsec(&tspecdelta);
         if (c->outputFPtr != NULL) { // Start output data with one-way values (store in scratch2 for below)
-                sprintf(scratch2, "%u,%u,%ld.%06ld,%ld.%06ld,%d,%.2f,%.2f", seqno, payload, (long) tspecvar.tv_sec,
-                        tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec, repo.systemClock.tv_nsec / NSECINUSEC, delta,
-                        repo.intfMbps, repo.intfMbpsAlt);
+                sprintf(scratch2, "%u,%u,%d,%ld.%06ld,%ld.%06ld,%d,%.2f,%.2f", seqno, payload, repo.rcvEcnBits,
+                        (long) tspecvar.tv_sec, tspecvar.tv_nsec / NSECINUSEC, (long) repo.systemClock.tv_sec,
+                        repo.systemClock.tv_nsec / NSECINUSEC, delta, repo.intfMbps, repo.intfMbpsAlt);
         }
         if (var > 0) {
                 if (c->outputFPtr != NULL && conf.outputFileAll) { // Finalize output data with nulls (use scratch2 from above)
@@ -1047,6 +1064,7 @@ int send_statuspdu(int connindex) {
         struct sendingRate *sr;
         struct statusHdr *sHdr        = (struct statusHdr *) repo.defBuffer;
         struct perfStatsAverages *psA = &repo.psAverages;
+        struct statusAuthReuse *sAR   = (struct statusAuthReuse *) &sHdr->reserved3;
 
         //
         // Check for test stop in progress, else reset status send timer
@@ -1181,20 +1199,31 @@ int send_statuspdu(int connindex) {
         sHdr->spduTime_nsec = htonl((uint32_t) repo.systemClock.tv_nsec);
 
         //
-        // Authentication
+        // Authentication (not supported for status PDUs) and ECN CE fields
+        // Uses struct statusAuthReuse...
         //
-        if (c->protocolVer >= EXTAUTH_PVER) {
-                sHdr->reserved3    = 0;
-                sHdr->reserved4    = 0;
-                sHdr->authMode     = (uint8_t) c->authMode;
-                sHdr->authUnixTime = 0;
-                memset(&sHdr->authDigest, 0, AUTH_DIGEST_LENGTH);
-                sHdr->keyId         = 0;
-                sHdr->reservedAuth1 = 0;
+        if (c->protocolVer >= AUTH_ECN_PVER) {
+                memset(sAR, 0, sizeof(struct statusAuthReuse));
+                sAR->authMode = (uint8_t) c->authMode;
                 //
-                sHdr->checkSum = 0;
+                // Include ECN CE count and generate warning if bleaching detected
+                //
+                if (c->ecnCEThresh > 0) {
+                        sAR->tiRxCECount   = htonl((uint32_t) c->tiRxCECount);
+                        sAR->sisSavCECount = htonl((uint32_t) c->sisSavCECount);
+                        if (c->ecnBleachCount != 0) {
+                                sAR->modifierBitmap |= STATUS_ECN_BLEACH; // Set bleaching detected
+                                if (c->ecnBleachCount > 0) {
+                                        if (c->warningCount < WARNING_MSG_LIMIT) {
+                                                c->warningCount++;
+                                                output_warning(connindex, WARN_LOC_ECNBLCH);
+                                        }
+                                        c->ecnBleachCount = -1; // Indicate warning already processed
+                                }
+                        }
+                }
 #ifdef ADD_HEADER_CSUM
-                sHdr->checkSum = checksum(sHdr, STATUS_SIZE_CVER);
+                sAR->checkSum = checksum(sHdr, STATUS_SIZE_CVER);
 #endif
         } else {
                 sHdr->reserved2 = 0;
@@ -1251,11 +1280,12 @@ int send_statuspdu(int connindex) {
         c->tiDeltaTime   = 0;
         c->tiRxDatagrams = 0;
         c->tiRxBytes     = 0;
+        c->tiRxCECount   = 0;
 
         //
         // Send status message
         //
-        if (c->protocolVer >= EXTAUTH_PVER) {
+        if (c->protocolVer >= AUTH_ECN_PVER) {
                 var = STATUS_SIZE_CVER;
         } else {
                 //
@@ -1306,6 +1336,7 @@ int service_statuspdu(int connindex) {
         struct timespec tspecvar;
         struct statusHdr *sHdr        = (struct statusHdr *) repo.defBuffer;
         struct perfStatsAverages *psA = &repo.psAverages;
+        struct statusAuthReuse *sAR   = (struct statusAuthReuse *) &sHdr->reserved3;
 
         //
         // Verify PDU
@@ -1322,7 +1353,7 @@ int service_statuspdu(int connindex) {
         //
         // Realign legacy status message into current format
         //
-        if (c->protocolVer < EXTAUTH_PVER) {
+        if (c->protocolVer < AUTH_ECN_PVER) {
                 sHdr = (struct statusHdr *) align_statuspdu((unsigned char *) sHdr, TRUE);
         }
 
@@ -1438,6 +1469,29 @@ int service_statuspdu(int connindex) {
         c->spduTime.tv_nsec = (long) ntohl(sHdr->spduTime_nsec);
 
         //
+        // Authentication (not supported for status PDUs) and ECN CE fields
+        // Uses struct statusAuthReuse...
+        //
+        if (c->protocolVer >= AUTH_ECN_PVER) {
+                //
+                // Save ECN CE count and generate warning if bleaching detected
+                //
+                if (c->ecnCEThresh > 0) {
+                        c->tiRxCECount = (unsigned int) ntohl(sAR->tiRxCECount);
+                        if (sAR->modifierBitmap & STATUS_ECN_BLEACH) {
+                                if (c->ecnBleachCount >= 0) {
+                                        c->ecnBleachCount++;
+                                        if (c->warningCount < WARNING_MSG_LIMIT) {
+                                                c->warningCount++;
+                                                output_warning(connindex, WARN_REM_ECNBLCH);
+                                        }
+                                        c->ecnBleachCount = -1; // Indicate warning already processed
+                                }
+                        }
+                }
+        }
+
+        //
         // Update performance statistics with this trial interval data
         // A received status message covers datagrams transmitted (and delivered)
         //
@@ -1490,6 +1544,10 @@ int service_statuspdu(int connindex) {
         if (uvar != c->subIntSeqNo) {
                 c->subIntSeqNo = uvar; // Save it to detect updated stats
                 sis_copy(&c->sisSav, &sHdr->sisSav, FALSE);
+                if (c->protocolVer >= AUTH_ECN_PVER) {
+                        if (c->ecnCEThresh > 0)
+                                c->sisSavCECount = (unsigned int) ntohl(sAR->sisSavCECount);
+                }
                 //
                 // Process and output the latest rate info indicated by receiver
                 //
@@ -1522,8 +1580,10 @@ int service_statuspdu(int connindex) {
 //
 int adjust_sending_rate(int connindex) {
         register struct connection *c = &conn[connindex];
-        unsigned int dvmin, dvavg;
+        unsigned int uvar, dvmin, dvavg;
         int var, delay, seqerr;
+        BOOL cethresh = FALSE;
+        char celabel[8], cedata[16];
 
         //
         // Select algorithm parameters
@@ -1549,6 +1609,14 @@ int adjust_sending_rate(int connindex) {
                         delay = (int) c->rttVarSample;
                 }
         }
+        if (c->ecnCEThresh > 0) {
+                if (c->tiRxCECount > 0) {
+                        // Use configured threshold to calculate required CE count, check if actual value exceeded it
+                        uvar = ((((c->ecnCEThresh - 1) * c->tiRxDatagrams * 10) / MAX_ECN_CE_TH) + 5) / 10;
+                        if (c->tiRxCECount > uvar)
+                                cethresh = TRUE;
+                }
+        }
 
         //
         // Adjust sending rate as needed
@@ -1565,7 +1633,7 @@ int adjust_sending_rate(int connindex) {
                 // This section of code corresponds to the flowchart in TR-471 section 5.2.1,
                 // Sending Rate Search Algorithm, and ITU-T Recommendation Y.1540, Annex B
                 //
-                if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
+                if (seqerr <= c->seqErrThresh && delay < c->lowThresh && !cethresh) {
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) {
                                 if (c->srIndex + c->highSpeedDelta > repo.hSpeedThresh)
                                         c->srIndex = repo.hSpeedThresh;
@@ -1576,7 +1644,7 @@ int adjust_sending_rate(int connindex) {
                                 if (c->srIndex < repo.maxSendingRates - 1)
                                         c->srIndex++;
                         }
-                } else if (seqerr > c->seqErrThresh || delay > c->upperThresh) {
+                } else if (seqerr > c->seqErrThresh || delay > c->upperThresh || cethresh) {
                         c->slowAdjCount++;
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount == c->slowAdjThresh) {
                                 if (c->srIndex > c->highSpeedDelta * HS_DELTA_BACKUP)
@@ -1596,7 +1664,7 @@ int adjust_sending_rate(int connindex) {
                 // This section of code provides an optional algorithm, with the properties of faster search to the
                 // max region, meaning less time when errors might end a fast search, and retry fast if that happens.
                 //
-                if (seqerr <= c->seqErrThresh && delay < c->lowThresh) {
+                if (seqerr <= c->seqErrThresh && delay < c->lowThresh && !cethresh) {
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount < c->slowAdjThresh) { // Congestion not detected
                                 if (c->srIndex * 2 > repo.hSpeedThresh) { // If no room to jump within high-speed threshold
                                         c->srIndex = repo.hSpeedThresh;   // Truncate jump at high-speed threshold
@@ -1624,7 +1692,7 @@ int adjust_sending_rate(int connindex) {
                                             RETRY_THRESH_ALGOC; // Use higher wait threshold for the next fast ramp-up
                                 }
                         }
-                } else if (seqerr > c->seqErrThresh || delay > c->upperThresh) {
+                } else if (seqerr > c->seqErrThresh || delay > c->upperThresh || cethresh) {
                         c->slowAdjCount++;
                         if (c->srIndex < repo.hSpeedThresh && c->slowAdjCount == c->slowAdjThresh) { // Congestion detected
                                 if (c->srIndex > c->highSpeedDelta * HS_DELTA_BACKUP) {              // If room to jump backward
@@ -1692,8 +1760,13 @@ int adjust_sending_rate(int connindex) {
                 var = -1;
                 if (c->rttVarSample != STATUS_NODEL)
                         var = (int) c->rttVarSample;
-                var = sprintf(scratch, SERVER_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg,
-                              c->delayVarMax, var, c->srIndex);
+                *celabel = *cedata = '\0';
+                if (c->ecnCEThresh > 0) {
+                        strcpy(celabel, CE_LABEL_TEXT);
+                        sprintf(cedata, "/%u", c->tiRxCECount);
+                }
+                var = sprintf(scratch, SERVER_DEBUG, connindex, celabel, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, cedata, dvmin,
+                              dvavg, c->delayVarMax, var, c->srIndex);
                 send_proc(monConn, scratch, var);
         }
         return 0;
@@ -1719,6 +1792,7 @@ int proc_subinterval(int connindex, BOOL initialize) {
                 c->accumTime += (unsigned int) tspecmsec(&tspecvar);
                 c->sisAct.accumTime = (uint32_t) c->accumTime;
                 memcpy(&c->sisSav, &c->sisAct, sizeof(struct subIntStats));
+                c->sisSavCECount = c->sisActCECount;
 
                 //
                 // Process and output our latest rate info as receiver
@@ -1734,11 +1808,12 @@ int proc_subinterval(int connindex, BOOL initialize) {
         // (Re)initialize active sub-interval statistics after saving
         //
         memset(&c->sisAct, 0, sizeof(struct subIntStats));
-        c->sisAct.delayVarMin = STATUS_NODEL;
-        c->sisAct.rttVarMinimum  = STATUS_NODEL;
+        c->sisAct.delayVarMin   = STATUS_NODEL;
+        c->sisAct.rttVarMinimum = STATUS_NODEL;
         tspeccpy(&c->subIntClock, &repo.systemClock);
         if (initialize)
                 c->accumTime = 0;
+        c->sisActCECount = 0;
 
         return 0;
 }
@@ -1803,7 +1878,7 @@ int output_currate(int connindex) {
         int i, var;
         unsigned int dvmin, dvavg, rttmin, rttavg;
         double dvar, mbps, sent, delivered = 0.0, intfmbps = 0.0;
-        char connid[8], intfrate[16];
+        char connid[8], intfrate[16], celabel[8], cedata[16];
         struct testSummary *ts;
 
         //
@@ -1865,11 +1940,12 @@ int output_currate(int connindex) {
                         tspeccpy(&repo.timeOfMax[i], &repo.systemClock);
                         repo.actConnections[i] = repo.actConnCount;
                         memcpy(&repo.sisMax[i], &c->sisSav, sizeof(struct subIntStats));
-                        repo.rateMaxL3[i] = mbps;
-                        repo.rateMaxL2[i] = repo.siAggRateL2;
-                        repo.rateMaxL1[i] = repo.siAggRateL1;
-                        repo.rateMaxL0[i] = repo.siAggRateL0;
-                        repo.intfMax[i]   = intfmbps;
+                        repo.sisMaxCECount[i] = c->sisSavCECount;
+                        repo.rateMaxL3[i]     = mbps;
+                        repo.rateMaxL2[i]     = repo.siAggRateL2;
+                        repo.rateMaxL1[i]     = repo.siAggRateL1;
+                        repo.rateMaxL0[i]     = repo.siAggRateL0;
+                        repo.intfMax[i]       = intfmbps;
                         //
                         repo.rttAverage[i] = 0; // Local RTT variation average
                         if (c->rttVarCnt > 0) {
@@ -1885,10 +1961,11 @@ int output_currate(int connindex) {
                 a = &conn[aggConn]; // Aggregate connection pointer
                 if (repo.sisConnCount == 1 && a->subIntCount == 0) {
                         // Initialize if first non-aggregate connection AND prior to first aggregate sub-interval
-                        a->clockDeltaMin      = c->clockDeltaMin;
-                        a->rttMinimum         = c->rttMinimum;
-                        a->sisSav.delayVarMin = STATUS_NODEL;
-                        a->sisSav.rttVarMinimum  = STATUS_NODEL;
+                        a->clockDeltaMin        = c->clockDeltaMin;
+                        a->rttMinimum           = c->rttMinimum;
+                        a->sisSav.delayVarMin   = STATUS_NODEL;
+                        a->sisSav.rttVarMinimum = STATUS_NODEL;
+                        a->ecnCEThresh          = c->ecnCEThresh;
                 } else {
                         if (c->clockDeltaMin < a->clockDeltaMin)
                                 a->clockDeltaMin = c->clockDeltaMin;
@@ -1915,6 +1992,10 @@ int output_currate(int connindex) {
                 a->rttVarSum += c->rttVarSum; // Merge local RTT variation sum and count
                 a->rttVarCnt += c->rttVarCnt;
                 //
+                a->sisSavCECount += c->sisSavCECount; // Merge CE count
+                if (c->ecnBleachCount != 0) {
+                        a->ecnBleachCount = -1; // Merge ECN bleaching detection
+                }
                 a->sisSav.accumTime = c->sisSav.accumTime; // Use accumulated time of last test connection processed
         }
 
@@ -1959,10 +2040,15 @@ int output_currate(int connindex) {
                         if (repo.intfFD >= 0 && connindex == aggConn) { // Append interface rate to L3/IP rate
                                 snprintf(intfrate, sizeof(intfrate), " [%.2f]", intfmbps);
                         }
-                        dvar = (double) c->sisSav.accumTime / MSECINSEC;
-                        var  = sprintf(scratch, scratch2, connid, c->subIntCount, i, dvar, delivered, c->sisSav.seqErrLoss,
-                                       c->sisSav.seqErrOoo, c->sisSav.seqErrDup, dvmin, dvavg, c->sisSav.delayVarMax, rttmin, rttavg,
-                                       c->sisSav.rttVarMaximum, mbps, intfrate);
+                        dvar     = (double) c->sisSav.accumTime / MSECINSEC;
+                        *celabel = *cedata = '\0';
+                        if (c->ecnCEThresh > 0) {
+                                strcpy(celabel, CE_LABEL_TEXT);
+                                sprintf(cedata, "/%u", c->sisSavCECount);
+                        }
+                        var = sprintf(scratch, scratch2, connid, c->subIntCount, i, dvar, delivered, celabel, c->sisSav.seqErrLoss,
+                                      c->sisSav.seqErrOoo, c->sisSav.seqErrDup, cedata, dvmin, dvavg, c->sisSav.delayVarMax, rttmin,
+                                      rttavg, c->sisSav.rttVarMaximum, mbps, intfrate);
                         send_proc(errConn, scratch, var);
                 } else if (conf.jsonOutput && connindex == aggConn) {
                         //
@@ -1998,9 +2084,15 @@ int output_currate(int connindex) {
                                 cJSON_AddNumberPToObject(json_subint, "ReorderedRatio", 0.0, 9);
                                 cJSON_AddNumberPToObject(json_subint, "ReplicatedRatio", 0.0, 9);
                         }
+                        dvar = 0.0;
+                        if (c->sisSav.rxDatagrams > 0) // Uses delivered not sent
+                                dvar = ((double) c->sisSavCECount * 100.0) / (double) c->sisSav.rxDatagrams;
+                        cJSON_AddNumberPToObject(json_subint, "CEPercentOfDelivered", dvar, 2);
+                        //
                         cJSON_AddNumberToObject(json_subint, "LossCount", c->sisSav.seqErrLoss);
                         cJSON_AddNumberToObject(json_subint, "ReorderedCount", c->sisSav.seqErrOoo);
                         cJSON_AddNumberToObject(json_subint, "ReplicatedCount", c->sisSav.seqErrDup);
+                        cJSON_AddNumberToObject(json_subint, "CECountOfDelivered", c->sisSavCECount);
                         //
                         dvar = (double) dvmin / 1000.0;
                         cJSON_AddNumberPToObject(json_subint, "PDVMin", dvar, -9);
@@ -2063,13 +2155,13 @@ int output_currate(int connindex) {
                         if (c->sisSav.rttVarMaximum > (uint32_t) ts->rttVarMaximum)
                                 ts->rttVarMaximum = (unsigned int) c->sisSav.rttVarMaximum;
                 }
-                ts->rttVarSum += c->rttVarSum; // Local RTT variation sum and count
-                ts->rttVarCnt += c->rttVarCnt;
-                //
                 ts->rxDatagrams += (unsigned int) c->sisSav.rxDatagrams;
                 ts->seqErrLoss += (unsigned int) c->sisSav.seqErrLoss;
                 ts->seqErrOoo += (unsigned int) c->sisSav.seqErrOoo;
                 ts->seqErrDup += (unsigned int) c->sisSav.seqErrDup;
+                ts->rttVarSum += c->rttVarSum; // Local RTT variation sum and count
+                ts->rttVarCnt += c->rttVarCnt;
+                ts->rxCECount += c->sisSavCECount; // Total CE count
                 ts->rateSumL3 += (double) mbps;
                 ts->rateSumIntf += (double) intfmbps;
                 ts->sampleCount++;
@@ -2078,12 +2170,13 @@ int output_currate(int connindex) {
                 // Re-initialize stats for next sub-interval
                 //
                 memset(&c->sisSav, 0, sizeof(struct subIntStats));
-                c->sisSav.delayVarMin = STATUS_NODEL;
-                c->sisSav.rttVarMinimum  = STATUS_NODEL;
-                repo.siAggRateL3      = 0.0;
-                repo.siAggRateL2      = 0.0;
-                repo.siAggRateL1      = 0.0;
-                repo.siAggRateL0      = 0.0;
+                c->sisSav.delayVarMin   = STATUS_NODEL;
+                c->sisSav.rttVarMinimum = STATUS_NODEL;
+                c->sisSavCECount        = 0;
+                repo.siAggRateL3        = 0.0;
+                repo.siAggRateL2        = 0.0;
+                repo.siAggRateL1        = 0.0;
+                repo.siAggRateL0        = 0.0;
         }
         //
         // Re-initialize local RTT variation sum and count
@@ -2099,7 +2192,7 @@ int output_currate(int connindex) {
 //
 int output_maxrate(int connindex) {
         register struct connection *c = &conn[connindex];
-        char *testtype, connid[8], labeltext[32], intfrate[16];
+        char *testtype, connid[8], labeltext[32], intfrate[16], celabel[8], cedata[16];
         int i, sibegin, siend, var;
         unsigned int dvmin, dvavg, rttmin;
         double dvar, sent, delivered = 0.0;
@@ -2167,9 +2260,14 @@ int output_maxrate(int connindex) {
                         if (repo.intfFD >= 0) { // Append interface rate to L3/IP rate
                                 snprintf(intfrate, sizeof(intfrate), " [%.2f]", ts->rateSumIntf);
                         }
-                        var = sprintf(scratch, scratch2, connid, testtype, delivered, ts->seqErrLoss, ts->seqErrOoo, ts->seqErrDup,
-                                      ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttVarMinimum, ts->rttVarSum,
-                                      ts->rttVarMaximum, ts->rateSumL3, intfrate);
+                        *celabel = *cedata = '\0';
+                        if (c->ecnCEThresh > 0) {
+                                strcpy(celabel, CE_LABEL_TEXT);
+                                sprintf(cedata, "/%u", ts->rxCECount);
+                        }
+                        var = sprintf(scratch, scratch2, connid, testtype, delivered, celabel, ts->seqErrLoss, ts->seqErrOoo,
+                                      ts->seqErrDup, cedata, ts->delayVarMin, ts->delayVarSum, ts->delayVarMax, ts->rttVarMinimum,
+                                      ts->rttVarSum, ts->rttVarMaximum, ts->rateSumL3, intfrate);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (conf.bimodalCount == 0) {
@@ -2201,9 +2299,15 @@ int output_maxrate(int connindex) {
                                 cJSON_AddNumberPToObject(json_summary, "ReorderedRatioSummary", 0.0, 9);
                                 cJSON_AddNumberPToObject(json_summary, "ReplicatedRatioSummary", 0.0, 9);
                         }
+                        dvar = 0.0;
+                        if (ts->rxDatagrams > 0) // Uses delivered not sent
+                                dvar = ((double) ts->rxCECount * 100.0) / (double) ts->rxDatagrams;
+                        cJSON_AddNumberPToObject(json_summary, "CEPercentOfDelivered", dvar, 2);
+                        //
                         cJSON_AddNumberToObject(json_summary, "LossCount", ts->seqErrLoss);
                         cJSON_AddNumberToObject(json_summary, "ReorderedCount", ts->seqErrOoo);
                         cJSON_AddNumberToObject(json_summary, "ReplicatedCount", ts->seqErrDup);
+                        cJSON_AddNumberToObject(json_summary, "CECountOfDelivered", ts->rxCECount);
                         //
                         dvar = (double) ts->delayVarMin / 1000.0;
                         cJSON_AddNumberPToObject(json_summary, "PDVMin", dvar, -9);
@@ -2329,9 +2433,15 @@ int output_maxrate(int connindex) {
                                 cJSON_AddNumberPToObject(json_atmax, "ReorderedRatioAtMax", 0.0, 9);
                                 cJSON_AddNumberPToObject(json_atmax, "ReplicatedRatioAtMax", 0.0, 9);
                         }
+                        dvar = 0.0;
+                        if (repo.sisMax[i].rxDatagrams > 0) // Uses delivered not sent
+                                dvar = ((double) repo.sisMaxCECount[i] * 100.0) / (double) repo.sisMax[i].rxDatagrams;
+                        cJSON_AddNumberPToObject(json_atmax, "CEPercentOfDelivered", dvar, 2);
+                        //
                         cJSON_AddNumberToObject(json_atmax, "LossCount", repo.sisMax[i].seqErrLoss);
                         cJSON_AddNumberToObject(json_atmax, "ReorderedCount", repo.sisMax[i].seqErrOoo);
                         cJSON_AddNumberToObject(json_atmax, "ReplicatedCount", repo.sisMax[i].seqErrDup);
+                        cJSON_AddNumberToObject(json_atmax, "CECountOfDelivered", repo.sisMaxCECount[i]);
                         //
                         dvmin = dvavg = 0;
                         if (repo.sisMax[i].delayVarCnt > 0) {
@@ -2385,6 +2495,10 @@ int output_maxrate(int connindex) {
                         //
                         if (conf.bimodalCount == 0 || i == 1) {
                                 cJSON_AddItemToObject(json_output, "ModalResult", json_modalArray);
+                                var = 0;
+                                if (c->ecnBleachCount != 0)
+                                        var = 1;
+                                cJSON_AddNumberToObject(json_output, "ECNBleachingDetected", var);
                         }
                 }
                 if (conf.bimodalCount == 0 || conf.bimodalCount >= c->subIntCount)
@@ -2451,15 +2565,18 @@ int stop_test(int connindex) {
 // Service recvmmsg() data buffers for load PDUs
 //
 int service_recvmmsg(int connindex) {
+        register struct connection *c = &conn[connindex];
         int i;
         struct perfStatsAverages *psA = &repo.psAverages;
         struct perfStatsMaximums *psM = &repo.psMaximums;
 
-        repo.rcvDataPtr = repo.defBuffer;
+        repo.rcvDataPtr = repo.defBuffer; // Global data pointer
         for (i = 0; i < RECVMMSG_SIZE; i++) {
                 if (mmsgDataSize[i] == 0)
                         break;
-                repo.rcvDataSize = mmsgDataSize[i];
+                repo.rcvDataSize = mmsgDataSize[i]; // Global data size
+                if (c->ecnCEThresh > 0)
+                        repo.rcvEcnBits = mmsgEcnBits[i]; // Global ECN value
                 service_loadpdu(connindex);
                 repo.rcvDataPtr += RCV_HEADER_SIZE;
         }
@@ -2481,7 +2598,7 @@ int recv_proc(int connindex) {
         register struct connection *c = &conn[connindex];
         static struct mmsghdr mmsg[RECVMMSG_SIZE]; // Static array
         static struct iovec iov[RECVMMSG_SIZE];    // Static array
-        char *rcvbuf;
+        char *rcvbuf, *nextcmsg;
         int i, var, recvsize;
 
         //
@@ -2492,7 +2609,8 @@ int recv_proc(int connindex) {
         } else {
                 recvsize = DEF_BUFFER_SIZE;
         }
-        repo.rcvDataPtr = repo.defBuffer; // Default to start of general I/O buffer
+        repo.rcvDataPtr = repo.defBuffer;    // Default global data pointer to start of general I/O buffer
+        repo.rcvEcnBits = IPTOS_ECN_NOT_ECT; // Default global ECN value to Not-ECT
 
         //
         // Issue read
@@ -2506,15 +2624,22 @@ int recv_proc(int connindex) {
                         // Prepare message structures
                         //
                         memset(mmsg, 0, sizeof(mmsg));
-                        rcvbuf = repo.defBuffer;
+                        rcvbuf   = repo.defBuffer;
+                        nextcmsg = rxCmsgBuf;
                         for (i = 0; i < RECVMMSG_SIZE; i++) {
                                 iov[i].iov_base            = rcvbuf;
                                 iov[i].iov_len             = recvsize;
                                 mmsg[i].msg_hdr.msg_iov    = &iov[i];
                                 mmsg[i].msg_hdr.msg_iovlen = 1;
-                                //
-                                rcvbuf += recvsize;  // Next buffer
-                                mmsgDataSize[i] = 0; // Initialize as empty
+                                if (c->ecnCEThresh > 0) {
+                                        //
+                                        // Ancillary data to receive ECN bits
+                                        //
+                                        mmsg[i].msg_hdr.msg_control    = nextcmsg;
+                                        mmsg[i].msg_hdr.msg_controllen = RECV_CMSG_SIZE;
+                                        nextcmsg += RECV_CMSG_SIZE;
+                                }
+                                rcvbuf += recvsize; // Next buffer
                         }
 #ifdef HAVE_RECVMMSG
                         //
@@ -2523,7 +2648,24 @@ int recv_proc(int connindex) {
                         repo.rcvDataSize = recvmmsg(c->fd, mmsg, RECVMMSG_SIZE, MSG_TRUNC, NULL); // Returns number of messages
                         for (i = 0; i < repo.rcvDataSize; i++) {
                                 mmsgDataSize[i] = (int) mmsg[i].msg_len; // Save actual received length (although truncated)
+                                if (c->ecnCEThresh > 0) {
+                                        mmsgEcnBits[i] = IPTOS_ECN_NOT_ECT; // Default to Not-ECT
+                                        //
+                                        // Extract ECN bits
+                                        //
+                                        struct cmsghdr *cmsg;
+                                        struct msghdr *msg = &mmsg[i].msg_hdr;
+                                        for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
+                                                if ((cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_TOS) ||
+                                                    (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_TCLASS)) {
+                                                        var            = *(int *) CMSG_DATA(cmsg);
+                                                        mmsgEcnBits[i] = IPTOS_ECN(var); // Save actual ECN value
+                                                }
+                                        }
+                                }
                         }
+                        if (i < RECVMMSG_SIZE)
+                                mmsgDataSize[i] = 0; // Terminate list
                         if (repo.rcvDataSize < RECVMMSG_SIZE) {
                                 c->dataReady = FALSE; // Indicate all data has been read from this connection
                         }
@@ -2712,33 +2854,33 @@ void sis_copy(struct subIntStats *sishost, struct subIntStats *sisnet, BOOL hton
         // Copy based on direction
         //
         if (hton) {
-                sisnet->rxDatagrams = htonl(sishost->rxDatagrams);
-                sisnet->rxBytes     = (uint64_t) htonll(sishost->rxBytes);
-                sisnet->deltaTime   = htonl(sishost->deltaTime);
-                sisnet->seqErrLoss  = htonl(sishost->seqErrLoss);
-                sisnet->seqErrOoo   = htonl(sishost->seqErrOoo);
-                sisnet->seqErrDup   = htonl(sishost->seqErrDup);
-                sisnet->delayVarMin = htonl(sishost->delayVarMin);
-                sisnet->delayVarMax = htonl(sishost->delayVarMax);
-                sisnet->delayVarSum = htonl(sishost->delayVarSum);
-                sisnet->delayVarCnt = htonl(sishost->delayVarCnt);
-                sisnet->rttVarMinimum  = htonl(sishost->rttVarMinimum);
-                sisnet->rttVarMaximum  = htonl(sishost->rttVarMaximum);
-                sisnet->accumTime   = htonl(sishost->accumTime);
+                sisnet->rxDatagrams   = htonl(sishost->rxDatagrams);
+                sisnet->rxBytes       = (uint64_t) htonll(sishost->rxBytes);
+                sisnet->deltaTime     = htonl(sishost->deltaTime);
+                sisnet->seqErrLoss    = htonl(sishost->seqErrLoss);
+                sisnet->seqErrOoo     = htonl(sishost->seqErrOoo);
+                sisnet->seqErrDup     = htonl(sishost->seqErrDup);
+                sisnet->delayVarMin   = htonl(sishost->delayVarMin);
+                sisnet->delayVarMax   = htonl(sishost->delayVarMax);
+                sisnet->delayVarSum   = htonl(sishost->delayVarSum);
+                sisnet->delayVarCnt   = htonl(sishost->delayVarCnt);
+                sisnet->rttVarMinimum = htonl(sishost->rttVarMinimum);
+                sisnet->rttVarMaximum = htonl(sishost->rttVarMaximum);
+                sisnet->accumTime     = htonl(sishost->accumTime);
         } else {
-                sishost->rxDatagrams = ntohl(sisnet->rxDatagrams);
-                sishost->rxBytes     = (uint64_t) ntohll(sisnet->rxBytes);
-                sishost->deltaTime   = ntohl(sisnet->deltaTime);
-                sishost->seqErrLoss  = ntohl(sisnet->seqErrLoss);
-                sishost->seqErrOoo   = ntohl(sisnet->seqErrOoo);
-                sishost->seqErrDup   = ntohl(sisnet->seqErrDup);
-                sishost->delayVarMin = ntohl(sisnet->delayVarMin);
-                sishost->delayVarMax = ntohl(sisnet->delayVarMax);
-                sishost->delayVarSum = ntohl(sisnet->delayVarSum);
-                sishost->delayVarCnt = ntohl(sisnet->delayVarCnt);
-                sishost->rttVarMinimum  = ntohl(sisnet->rttVarMinimum);
-                sishost->rttVarMaximum  = ntohl(sisnet->rttVarMaximum);
-                sishost->accumTime   = ntohl(sisnet->accumTime);
+                sishost->rxDatagrams   = ntohl(sisnet->rxDatagrams);
+                sishost->rxBytes       = (uint64_t) ntohll(sisnet->rxBytes);
+                sishost->deltaTime     = ntohl(sisnet->deltaTime);
+                sishost->seqErrLoss    = ntohl(sisnet->seqErrLoss);
+                sishost->seqErrOoo     = ntohl(sisnet->seqErrOoo);
+                sishost->seqErrDup     = ntohl(sisnet->seqErrDup);
+                sishost->delayVarMin   = ntohl(sisnet->delayVarMin);
+                sishost->delayVarMax   = ntohl(sisnet->delayVarMax);
+                sishost->delayVarSum   = ntohl(sisnet->delayVarSum);
+                sishost->delayVarCnt   = ntohl(sisnet->delayVarCnt);
+                sishost->rttVarMinimum = ntohl(sisnet->rttVarMinimum);
+                sishost->rttVarMaximum = ntohl(sisnet->rttVarMaximum);
+                sishost->accumTime     = ntohl(sisnet->accumTime);
         }
         return;
 }
@@ -2780,6 +2922,14 @@ void output_warning(int connindex, int type) {
                         if (*location == '\0')
                                 strcpy(location, "REMOTE");
                         var = sprintf(scratch, "%s%s WARNING: Incoming traffic has completely stopped", connid, location);
+                        break;
+                case WARN_LOC_ECNBLCH:
+                        strcpy(location, "LOCAL");
+                        /* FALLTHROUGH */ // Eventually replace comment with [[fallthrough]];
+                case WARN_REM_ECNBLCH:
+                        if (*location == '\0')
+                                strcpy(location, "REMOTE");
+                        var = sprintf(scratch, "%s%s WARNING: Incoming ECN bleaching detected", connid, location);
                         break;
                 }
                 if (var > 0) {
@@ -2911,6 +3061,7 @@ void output_debug(int connindex) {
         register struct connection *c = &conn[connindex];
         int var;
         unsigned int dvmin, dvavg;
+        char celabel[8], cedata[16];
 
         dvmin = dvavg = 0;
         if (c->delayVarCnt > 0) {
@@ -2920,8 +3071,13 @@ void output_debug(int connindex) {
         var = -1;
         if (c->rttVarSample != STATUS_NODEL)
                 var = (int) c->rttVarSample;
-        var = sprintf(scratch, CLIENT_DEBUG, connindex, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, dvmin, dvavg, c->delayVarMax,
-                      var, get_rate(connindex, NULL, L3DG_OVERHEAD));
+        *celabel = *cedata = '\0';
+        if (c->ecnCEThresh > 0) {
+                strcpy(celabel, CE_LABEL_TEXT);
+                sprintf(cedata, "/%u", c->tiRxCECount);
+        }
+        var = sprintf(scratch, CLIENT_DEBUG, connindex, celabel, c->seqErrLoss, c->seqErrOoo, c->seqErrDup, cedata, dvmin, dvavg,
+                      c->delayVarMax, var, get_rate(connindex, NULL, L3DG_OVERHEAD));
         send_proc(monConn, scratch, var);
 
         return;
@@ -2994,7 +3150,7 @@ BOOL verify_datapdu(int connindex, struct loadHdr *lHdr, struct statusHdr *sHdr)
                         }
                 }
         } else {
-                if (c->protocolVer >= EXTAUTH_PVER) {
+                if (c->protocolVer >= AUTH_ECN_PVER) {
                         csumptr = (uint16_t *) &sHdr->checkSum;
                 } else {
                         csumptr = (uint16_t *) (((unsigned char *) sHdr) + STATUS_CSOFF_MVER);

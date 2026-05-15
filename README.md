@@ -53,6 +53,8 @@ legacy control port (via `-p 25000`).**
 - [Optional Header Checksum and Integrity Checks](#optional-header-checksum-and-integrity-checks)
 - [Local Backpressure](#local-backpressure)
 - [Server Performance Statistics](#server-performance-statistics)
+- [Dual-Phase Testing](#dual-phase-testing)
+- [Explicit Congestion Notification (ECN)](#explicit-congestion-notification-ecn)
 
 ## Overview
 Utilizing an adaptive transmission rate, via a pre-built table of discreet
@@ -181,7 +183,7 @@ with further testing, and may be revised in the future.
 There are circumstances when changes to the defaults are warranted, such as
 extremely long paths with unknown cross traffic, high levels of competing
 traffic, testing over radio links with highly variable loss and delay, and test 
-paths that exhibit bi-modal rate behavior in repeated tests.
+paths that exhibit bimodal rate behavior in repeated tests.
 
 An option in Release 7.5.0 allows the client to request the algorithm used for
 load adjustment when conducting a search for the Maximum IP-Layer Capacity.
@@ -210,16 +212,17 @@ Although the primary function of the software is to "find" the maximum IP-layer
 capacity between two endpoints, fixed-rate and low-rate testing can also be
 quite valuable. This is because "finding" the maximum capacity involves ramping
 up traffic to induce congestion (i.e., loss and/or delay). However, there are
-scenarios where simply measuring the traffic conditions is desirable.
+scenarios where simply measuring the traffic conditions and checking for
+impairments is desirable.
 
 Fixed-rate testing via the `-I [@]index` option (used without the '@' prefix)
-allows for the sending of load traffic at a static rate, below the actual
-maximum. This can be helpful as part of the test and turn-up of new service
-or the verification of service after repair. For example, a 1 Gbps service
-should theoretically provide an IP capacity of ~972.76 Mbps (1500 MTU, 1 VLAN
-Tag). Testing with a sending rate of ~90% of that maximum (via `-I 875`), would
-allow confirmation that the connectivity is stable, error-free, and with low
-delay variation.
+allows for the sending of load traffic at a static rate, usually below the
+provisioned maximum. This can be helpful as part of the test &amp; turn-up of
+new service or the verification of service after repair. For example, a 1 Gbps
+service should theoretically provide an IP capacity of ~972.76 Mbps (1500 MTU,
+1 VLAN Tag). Testing with a sending rate of ~90% of that maximum (via `-I 875`)
+would allow confirmation that the connectivity is stable, error-free, and
+operates with low delay variation.
 
 Similarly, for ongoing monitoring, low-rate testing can be used.
 Due to the significant amount of traffic typically required to "find" a
@@ -227,12 +230,15 @@ maximum, it can be impractical to run frequent capacity tests in
 large-scale networks. Therefore, and as an alternative to infrequent testing
 alone, low-rate tests (via `-I 0`) can be utilized very regularly between
 maximum capacity tests. These tests, with a minimum sending rate, send a
-random size datagram every 50 ms. With the size still constrained by the `-j`
-and `-T` options, this equates to a traffic rate of only ~0.12 Mbps.
+random size datagram every 50 ms (with the size still constrained by the `-j`
+and `-T` options). This equates to a traffic rate of only ~0.12 Mbps.
 The benefit of this testing is that it can still detect various network
 impairments (loss, delay, instability, etc.) while utilizing all of the
 existing infrastructure and support systems already in place for maximum
 capacity measurements.
+
+For different ways of combining test types into a single test execution, see:
+[Dual-Phase Testing](#dual-phase-testing)
 
 ## Multiple Connections and Distributed Servers
 As of Release 8.0.0, the client can now test using multiple connections (i.e.,
@@ -806,6 +812,9 @@ The CSV output file will contain the following columns:
 - SeqNo : The sequence number of the datagram as assigned by the sender.
 Datagrams are listed in the order they are received.
 - PayLoad : The payload size of the datagram in bytes.
+- ECNValue : The value of the ECN bits in the received load PDU when a CE
+threshold has been specified. Values include 0 [not enabled or ECN bleached],
+1 [ECT(1)/L4S], 2 [ECT(0)/Classic], or 3 [CE(Congestion Experienced)].
 - SrcTxTime : The source transmit timestamp of the datagram (based on the
 sender's clock).
 - DstRxTime : The destination receive timestamp of the datagram (based on the
@@ -1009,4 +1018,56 @@ cumulative values as of the end time of the file.
 An example file is included with the software in the "json_examples"
 subdirectory as well as an abbreviated text version containing details about
 the various fields and metrics.
+
+## Dual-Phase Testing
+The software has supported basic bimodal testing for quite some time. When
+utilized, by specifying an initial sub-interval count via the `-i [-]count`
+option (without using the minus sign prefix), a separate test summary and maxima
+are reported for each of the two sets of sub-intervals. This has proven useful
+for network services that allow a higher initial performance capability before
+stabilizing to a more sustainable rate (i.e., a burst-then-normalize type of
+service).
+
+In the 9.0.0 release, this functionality has been extended (by using the minus
+sign prefix) to allow dual-phase testing. When enabled, this suppresses sending
+rate adjustments during the initial mode. This allows for testing where the
+initial mode uses one rate while the second mode uses another (either fixed or
+variable). By default, the initial mode uses sending rate index 0 (~0.12 Mbps)
+and the second mode attempts to find a maximum, starting from index 0. If a
+fixed sending rate is also specified (e.g., `-I 500`), the first mode uses
+sending rate index 0 and the second uses the specified fixed sending rate. In
+contrast, if a **starting rate** is specified (e.g., `-I @500`), the first mode
+uses the starting rate as a fixed rate and the second mode attempts to find a
+maximum, starting from that rate.
+
+For additional information on the different test types available, see:
+[Fixed-Rate and Low-Rate Testing](#fixed-rate-and-low-rate-testing)
+
+## Explicit Congestion Notification (ECN)
+Release 9.0.0 introduces support for Explicit Congestion Notification (ECN).
+This extends the rate adjustment algorithm to respond to packets marked as
+Congestion Experienced (CE) [binary 11]. This functionality is activated by
+specifying a CE threshold via the `-Z thresh` option.
+
+When enabled, the algorithm will increase traffic if the proportion of CE
+packets received is not above the threshold (provided loss and delay are within
+their limits), and decrease traffic if the proportion exceeds it. The threshold
+is a scaled integer from 1 to 255 and is triggered when the CE percentage is
+effectively >0%, >0.4%, >0.8%,... >99.6%.
+
+To utilize this feature, users must also specify a packet-marking octet using
+the `-m value` option to set the appropriate ECN bits upon transmission.
+Packets are identified as ECN-capable by setting the bits to either
+ECT(0)/Classic [binary 10] or ECT(1)/L4S [binary 01].
+
+The effectiveness of this feature depends on the network's ability to preserve
+markings. Users should be aware of ECN bleaching, where intermediate routers or
+firewalls clear the ECN bits. If the software detects packets arriving as
+Not-ECT [binary 00] instead of the expected ECT or CE values, a warning will be
+generated and the test will continue without ECN-based congestion indications
+for those flows.
+
+*Note: The CE threshold is an additional input to the existing rate adjustment
+algorithm. The software does not attempt to replicate a standard Classic ECN or
+L4S response; it remains focused on identifying a maximum IP capacity.*
 

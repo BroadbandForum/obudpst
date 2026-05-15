@@ -51,7 +51,7 @@ servers=("test-server1.com:24601"
 ../udpst -u -j -T -f jsonf -I 220 ${servers[*]} >client_example_05.json
 
 #
-# Execute a bi-modal test with an initial mode of 5 sub-intervals and a total test time of 15
+# Execute a bimodal test with an initial mode of 5 sub-intervals and a total test time of 15
 # seconds (resulting in a second mode of 10 sub-intervals). This is helpful when a network service
 # is expected to have initial performance characteristics, optimized for short duration flows, that
 # change later for extended duration flows. The different maximums for both modes are of interest.
@@ -83,15 +83,24 @@ servers=("test-server1.com:24601"
 ../udpst -u -j -T -f jsonf -i -5 -t 15 -I @220 ${servers[*]} >client_example_09.json
 
 #
+# Execute a test that sets and reacts to the ECN (Explicit Congestion Notification) bits in the
+# IP header. The sender sets the ECN bits of the packet-marking octet to ECT(1)/L4S [binary 01]
+# (DSCP is left as zero in this example). This indicates that the packets are ECN-capable.
+# It also sets a CE threshold of 1, the minimum value, to direct the rate adjustment algorithm to
+# consider any number of CE-marked packets as an indication of congestion.
+#
+../udpst -u -j -T -f jsonf -m 0x01 -Z 1 ${servers[*]} >client_example_10.json
+
+#
 # This demonstrates the JSON output and error info when an in-progress test fails.
 #
 echo "Invoke manual server failure 5 seconds after continuation."
 read -p "Press Enter to continue..."
-../udpst -u -j -T -f jsonf ${servers[*]} >client_example_10.json
+../udpst -u -j -T -f jsonf ${servers[*]} >client_example_11.json
 
 #
 # This scenario shows the JSON output when the minimum number of servers are unreachable and
 # testing never begins.
 #
-../udpst -u -j -T -f jsonf ${servers[*]} >client_example_11.json
+../udpst -u -j -T -f jsonf ${servers[*]} >client_example_12.json
 

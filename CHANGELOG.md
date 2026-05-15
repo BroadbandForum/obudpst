@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification
 can be found at https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-## 2026-05-01: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
+## 2026-07-01: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
 
 **IMPORTANT: The default control port has changed from 25000 to 24601. For
 backward compatibility, 8.2.0 clients will either need to use the new control
@@ -69,20 +69,14 @@ change in the default operation should drastically reduce the number of
 metadata entries written when testing at higher speeds.
 * The count parameter for the bimodal option now accepts a minus sign prefix
 (`-i [-]count`). This prefix suppresses sending rate adjustments during the
-initial mode. This allows for dual-phase testing where the initial mode uses
+initial mode. This allows for **Dual-Phase Testing** where the initial mode uses
 one rate and the second mode uses another (either fixed or variable).
-By default, the initial mode uses sending rate index 0 and the second mode
-attempts to find a maximum, starting from zero. If a fixed rate is also
-specified (e.g., `-I 500`), the first mode uses sending rate index 0 and the
-second uses the specified fixed sending rate. In contrast, if a starting rate is
-specified (e.g., `-I @500`), the first mode uses the fixed starting rate and the
-second attempts to find a maximum, starting from that rate.
-
-Bimodal usage is now accompanied by a change in the summary output info. The single
-text line "Summary" will now be two lines, one for each mode, output as "Sum[#-#]".
-The JSON object "Summary" will now only cover the first mode and the second
-mode summary will be in an array called "ModalSummary". This is consistent with
-the existing "AtMax" and "ModalResult" structure for the maximum rate. Also, the
+See README file for additional details.
+* Overall, bimodal usage is now accompanied by a change in the summary output info.
+The single text line "Summary" will now be two lines, one for each mode, output as
+"Sum[#-#]". The JSON object "Summary" will now only cover the first mode and the
+second mode summary will be in an array called "ModalSummary". This is consistent
+with the existing "AtMax" and "ModalResult" structure for the maximum rate. Also, the
 JSON "Input" object will now contain a field called "NumberFirstModeSuppSubIntervals"
 that contains the number of sub-intervals with sending rate adjustments suppressed.
 When the minus sign prefix is used, this will equal "NumberFirstModeTestSubIntervals".
@@ -95,6 +89,18 @@ compatibility with 8.2.0.
 "Input" object. This value shows the max bandwidth option (`-B mbps`) provided
 on the command line.
 * All JSON example files are now located in a "json_examples" subdirectory.
+* Support for Explicit Congestion Notification (ECN) has been added. The rate
+adjustment algorithm will now consider the proportion of packets received with
+ECN bits set to CE (Congestion Experienced) [binary 11]. This metric is only
+utilized if a CE threshold is specified via the `-Z thresh` option. If the
+proportion of CE packets is not above this threshold, traffic may increase
+(contingent on loss and delay limits); if the proportion exceeds the threshold,
+traffic is decreased. To use this functionality, a packet-marking octet must be
+defined via `-m value` to signal that packets are ECN-capable, using either
+ECT(0)/Classic [binary 10] or ECT(1)/L4S [binary 01]. Lastly, the JSON output
+now includes fields for the ECN value and CE threshold as well as a count and
+percentage of received CE packets in each section of test results. The text
+output will include CE counts when a CE threshold is specified.
 
 # Changelog for UDPST 8.x.x Releases
 

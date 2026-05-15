@@ -72,6 +72,7 @@
  *                                       statistics, and improved idling
  * Len Ciavattone          10/30/2025    Add export all as optional
  * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
+ * Len Ciavattone          04/19/2026    Add ECN CE support
  *
  */
 
@@ -89,6 +90,7 @@
 #include <signal.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -841,7 +843,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, j, var, value;
-        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:y:K:m:G:nI:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:y:K:m:G:nI:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:Z:?";
 
         //
         // Clear configuration and global repository data
@@ -1139,9 +1141,10 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
                         }
-                        conf.bimodalCount = value;
-                        if (lbuf != optarg)
+                        if (lbuf != optarg) {
                                 conf.srAdjSuppCount = value; // Set suppression count equal to bimodal count if prefix is present
+                        }
+                        conf.bimodalCount = value;
                         break;
                 case 'o':
                         if (repo.isServer) {
@@ -1403,6 +1406,24 @@ int proc_parameters(int argc, char **argv, int fd) {
                         }
                         conf.logFileMax = value * 1000;
                         break;
+                case 'Z':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: ECN CE threshold only set by client\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+#ifndef HAVE_RECVMMSG
+                        var = sprintf(scratch, "ERROR: ECN CE threshold requires RecvMMsg() optimization\n");
+                        var = write(fd, scratch, var);
+                        return ERROR_CONF_GENERIC;
+#endif
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_ECN_CE_TH, MAX_ECN_CE_TH)) > 0) {
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        conf.ecnCEThresh = value;
+                        break;
                 case '?':
                         var = sprintf(scratch,
                                       "%s\nUsage: %s [option]... [server[:<port>]]...\n\n"
@@ -1418,26 +1439,28 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(e)    -e           Disable suppression of socket (send/receive) errors\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT);
                         var = write(fd, scratch, var);
-                        var = sprintf(scratch, "       -v           Enable verbose output messaging\n"
-                                               "       -s           Summary/Max output only (no sub-interval output)\n"
-                                               "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
-                                               "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
-                                               "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
-                                               "       -D           Enable debug output messaging (requires '-v')\n"
-                                               "(m)    -X           Randomize datagram payload (else zeroes)\n"
-                                               "       -S           Show server sending rate table and exit\n"
-                                               "(o)    -O [+]file   Output (export) file of received load metadata\n"
-                                               "       -B mbps      Max bandwidth required by client OR available to server\n"
-                                               "       -r           Display loss ratio instead of delivered percentage\n"
-                                               "(c,b)  -i [-]count  Display bimodal maxima (specify initial sub-intervals)\n"
-                                               "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
-                                               "(c)    -R           Include Out-of-Order/Duplicate datagrams\n");
+                        var = sprintf(scratch,
+                                      "       -v           Enable verbose output messaging\n"
+                                      "       -s           Summary/Max output only (no sub-interval output)\n"
+                                      "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
+                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
+                                      "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
+                                      "       -D           Enable debug output messaging (requires '-v')\n"
+                                      "(m)    -X           Randomize datagram payload (else zeroes)\n"
+                                      "       -S           Show server sending rate table and exit\n"
+                                      "(o)    -O [+]file   Output (export) file of received load metadata\n"
+                                      "       -B mbps      Max bandwidth required by client OR available to server\n"
+                                      "       -r           Display loss ratio instead of delivered percentage\n"
+                                      "(c,b)  -i [-]count  Display bimodal maxima (specify initial sub-intervals)\n"
+                                      "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
+                                      "(m,v)  -m value     Packet marking octet (DSCP+ECN) [Default %d]\n",
+                                      DEF_DSCPECN_BYTE);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(c)    -y keyid     Key ID used with authentication key [Default %d]\n"
                                       "       -K file      Key file containing authentication keys\n"
-                                      "(m,v)  -m value     Packet marking octet (DSCP+ECN) [Default %d]\n"
                                       "(s)    -G file      Periodic server performance statistics (JSON)\n"
                                       "       -n           No adjustment to sequence numbers from backpressure\n"
                                       "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
@@ -1446,9 +1469,9 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "       -p port      Default port number used for control [Default %d]\n"
                                       "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
                                       "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n",
-                                      AUTH_KEY_SIZE, DEF_KEY_ID, DEF_DSCPECN_BYTE, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX,
-                                      DEF_TESTINT_TIME, MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT,
-                                      rateAdjAlgo[CHTA_RA_ALGO_MIN], rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO]);
+                                      AUTH_KEY_SIZE, DEF_KEY_ID, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME,
+                                      MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
+                                      rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO]);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
                                       "(c)    -L delvar    Low delay variation threshold in ms [Default %d]\n"
@@ -1460,14 +1483,18 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n"
                                       "(c)    -M           Use local interface rate to determine maximum\n"
                                       "(s)    -l logfile   Log file name when executing as daemon\n"
-                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n"
+                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n"
+                                      "(c,z)  -Z thresh    ECN CE threshold (%d - %d) [(threshold-1)/%d]\n\n"
                                       "Parameters:\n"
                                       "   server[:<port>]  Hostname/IP of server OR local interface IP if server\n"
                                       "                    - Optional port number overrides configured control port\n"
                                       "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n",
                                       DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
-                                      DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX);
+                                      DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX, MIN_ECN_CE_TH, MAX_ECN_CE_TH, MAX_ECN_CE_TH);
                         var = write(fd, scratch, var);
+                        // Calculate CE threshold as percentage
+                        double dvar = ((double) MIN_ECN_CE_TH * 100.0) / (double) MAX_ECN_CE_TH;
+                        //
                         var = sprintf(scratch,
                                       "Notes:\n"
                                       "(c) = Used only by client.\n"
@@ -1479,8 +1506,9 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n"
                                       "(i) = Static OR starting (with '%c' prefix) sending rate index.\n"
                                       "(o) = Prefix '+' exports all metadata (not just RTT entries).\n"
-                                      "(b) = Prefix '-' suppresses rate adjustments during initial mode.\n",
-                                      SRIDX_ISSTART_PREFIX);
+                                      "(b) = Prefix '-' suppresses rate adjustments during initial mode.\n"
+                                      "(z) = CE thresholds trigger at >0%%, >%0.1f%%, >%0.1f%%,... >%0.1f%%.\n",
+                                      SRIDX_ISSTART_PREFIX, dvar, dvar * 2.0, dvar * (double) (MAX_ECN_CE_TH - 1));
                         var = write(fd, scratch, var);
                         return ERROR_CONF_GENERIC;
                 }
@@ -1551,6 +1579,12 @@ int proc_parameters(int argc, char **argv, int fd) {
         }
         if (conf.keyId != DEF_KEY_ID && (*conf.authKey == '\0' && conf.keyFile == NULL)) {
                 var = sprintf(scratch, "ERROR: Authentication key ID requires authentication key or key file\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
+        var = IPTOS_ECN(conf.dscpEcn);
+        if (conf.ecnCEThresh != DEF_ECN_CE_TH && var != IPTOS_ECN_ECT0 && var != IPTOS_ECN_ECT1) {
+                var = sprintf(scratch, "ERROR: Packet marking octet must set ECN bits to ECT(0)/Classic [10] or ECT(1)/L4S [01]\n");
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }

@@ -73,6 +73,7 @@
  *                                       statistics, and improved idling
  * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
  * Len Ciavattone          03/20/2026    Renamed var(s) to match RFC 9946
+ * Len Ciavattone          04/19/2026    Add ECN CE support
  *
  */
 
@@ -88,6 +89,7 @@
 #include <time.h>
 #include <netdb.h>
 #include <net/if.h>
+#include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/file.h>
@@ -153,9 +155,9 @@ extern cJSON *json_top, *json_output;
 #define RTT_TEXT    "RTT"
 #define ZERO_TEXT   "zeroes"
 #define RAND_TEXT   "random"
-#define TESTHDR_LINE                                                                                                     \
-        "%s%s Test Int(sec): %d, DelayVar Thresh(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n" \
-        "  ID: %d, SR Index: %s, Cong. Thresh: %d, HS Delta: %d, SeqErr Thresh: %d, Algo: %s, Conn: %d, DSCP+ECN: %d%s\n"
+#define TESTHDR_LINE                                                                                                 \
+        "%s%s Test Int(sec): %d, DelayVar Th(ms): %d-%d [%s], Trial Int(ms): %d, Ignore OoO/Dup: %s, Payload: %s,\n" \
+        "  ID: %d, SR Index: %s, Cong. Th: %d, HS Delta: %d, SeqErr Th: %d, Algo: %s, Conn: %d, DSCP+ECN: %d, CE Th: %d%s\n"
 
 //----------------------------------------------------------------------------
 // Function definitions
@@ -520,7 +522,7 @@ int service_setupreq(int connindex) {
                         errmsg += sprintf(&scratch[errmsg], " %s:%s\n", addrstr, portstr);
                         send_proc(errConn, scratch, errmsg);
                 }
-                if (pver >= EXTAUTH_PVER) {
+                if (pver >= AUTH_ECN_PVER) {
                         insert_auth((int) cHdrSR->keyId, skey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
                                     (size_t) repo.rcvDataSize);
                 }
@@ -573,7 +575,7 @@ int service_setupreq(int connindex) {
         //
         cHdrSR->cmdResponse = CHSR_CRSP_ACKOK;
         cHdrSR->testPort    = htons((uint16_t) conn[i].locPort);
-        if (pver >= EXTAUTH_PVER) {
+        if (pver >= AUTH_ECN_PVER) {
                 insert_auth((int) cHdrSR->keyId, skey, (unsigned char *) &cHdrSR->authMode, (unsigned char *) cHdrSR,
                             (size_t) repo.rcvDataSize);
         }
@@ -597,7 +599,7 @@ int service_setupreq(int connindex) {
         //       error message on them, it would allow a newer server to no longer require that all its ephemeral ports
         //       be configured as reachable through its firewall.
         //
-        if (pver >= EXTAUTH_PVER) {
+        if (pver >= AUTH_ECN_PVER) {
                 cHdrNR->pduId       = htons(CHNR_ID);
                 cHdrNR->protocolVer = htons((uint16_t) pver);
                 cHdrNR->cmdRequest  = CHNR_CREQ_NULLREQ;
@@ -795,6 +797,8 @@ int service_setupresp(int connindex) {
         cHdrTA->subIntPeriod = htons((uint16_t) c->subIntPeriod);
         c->srAdjSuppCount    = conf.srAdjSuppCount;
         cHdrTA->reserved4    = htons((uint16_t) c->srAdjSuppCount); // Utilizes reserved alignment field
+        c->ecnCEThresh       = conf.ecnCEThresh;
+        cHdrTA->reserved2    = (uint8_t) c->ecnCEThresh; // Utilizes reserved alignment field
 
         //
         // Send test activation request to server
@@ -848,7 +852,7 @@ int service_actreq(int connindex) {
         //
         // Validate authentication based on mode of original setup request
         //
-        if (c->authMode == AUTHMODE_1 && c->protocolVer >= EXTAUTH_PVER) {
+        if (c->authMode == AUTHMODE_1 && c->protocolVer >= AUTH_ECN_PVER) {
                 var = 0;
                 i   = validate_auth(c->protocolVer, c->clientKey, c->serverKey, (unsigned char *) &cHdrTA->authMode,
                                     (unsigned char *) cHdrTA, (size_t) repo.rcvDataSize);
@@ -961,13 +965,13 @@ int service_actreq(int connindex) {
                 c->dscpEcn      = conf.dscpEcn;
                 cHdrTA->dscpEcn = (uint8_t) c->dscpEcn;
         }
-        if (c->dscpEcn != 0) {
-                if (c->ipProtocol == IPPROTO_IPV6)
+        if (c->dscpEcn != DEF_DSCPECN_BYTE) {
+                if (c->ipProtocol == IPPROTO_IPV6) // Set IP packet marking
                         var = IPV6_TCLASS;
                 else
                         var = IP_TOS;
                 if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &c->dscpEcn, sizeof(c->dscpEcn)) < 0) {
-                        c->dscpEcn      = 0;
+                        c->dscpEcn      = DEF_DSCPECN_BYTE;
                         cHdrTA->dscpEcn = (uint8_t) c->dscpEcn;
                 }
         }
@@ -1053,11 +1057,39 @@ int service_actreq(int connindex) {
         //
         if (c->protocolVer >= SRASUPP_PVER) {
                 c->srAdjSuppCount = (int) ntohs(cHdrTA->reserved4); // Utilizes reserved alignment field
-                if (c->srAdjSuppCount < 0 || c->srAdjSuppCount >= ((c->testIntTime * MSECINSEC) / c->subIntPeriod))
+                if (c->srAdjSuppCount < 0 || c->srAdjSuppCount >= ((c->testIntTime * MSECINSEC) / c->subIntPeriod)) {
                         c->srAdjSuppCount = 0;
+                        cHdrTA->reserved4 = htons((uint16_t) c->srAdjSuppCount); // Utilizes reserved alignment field
+                }
                 if (c->srAdjSuppCount > 0) {
                         if (c->srIndexConf != CHTA_SRIDX_DEF && !c->srIndexIsStart)
                                 sr = repo.sendingRates; // Reset to first row of table (start suppressed)
+                }
+        }
+        //
+        // ECN CE threshold (also set socket option)
+        //
+        if (c->protocolVer >= AUTH_ECN_PVER) {
+                c->ecnCEThresh = (int) cHdrTA->reserved2; // Utilizes reserved alignment field
+                if (c->ecnCEThresh < MIN_ECN_CE_TH || c->ecnCEThresh > MAX_ECN_CE_TH) {
+                        c->ecnCEThresh    = DEF_ECN_CE_TH;
+                        cHdrTA->reserved2 = (uint8_t) c->ecnCEThresh; // Utilizes reserved alignment field
+                }
+                var = IPTOS_ECN(c->dscpEcn); // Check that packet marking octet has proper ECN bits set, disable if not
+                if (c->ecnCEThresh != DEF_ECN_CE_TH && var != IPTOS_ECN_ECT0 && var != IPTOS_ECN_ECT1) {
+                        c->ecnCEThresh    = DEF_ECN_CE_TH;
+                        cHdrTA->reserved2 = (uint8_t) c->ecnCEThresh; // Utilizes reserved alignment field
+                }
+                if (c->ecnCEThresh != DEF_ECN_CE_TH) {
+                        if (c->ipProtocol == IPPROTO_IPV6) // Enable reception of IP packet marking
+                                var = IPV6_RECVTCLASS;
+                        else
+                                var = IP_RECVTOS;
+                        i = 1;
+                        if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &i, sizeof(i)) < 0) {
+                                c->ecnCEThresh    = DEF_ECN_CE_TH;
+                                cHdrTA->reserved2 = (uint8_t) c->ecnCEThresh; // Utilizes reserved alignment field
+                        }
                 }
         }
         //
@@ -1138,7 +1170,7 @@ int service_actreq(int connindex) {
         //
         // Send test activation response to client
         //
-        if (c->protocolVer >= EXTAUTH_PVER) {
+        if (c->protocolVer >= AUTH_ECN_PVER) {
                 insert_auth((int) cHdrTA->keyId, c->serverKey, (unsigned char *) &cHdrTA->authMode, (unsigned char *) cHdrTA,
                             (size_t) repo.rcvDataSize);
                 cHdrTA->checkSum = 0;
@@ -1270,8 +1302,8 @@ int service_actresp(int connindex) {
         c->testIntTime  = (int) ntohs(cHdrTA->testIntTime);
         c->subIntPeriod = (int) ntohs(cHdrTA->subIntPeriod);
         c->dscpEcn      = (int) cHdrTA->dscpEcn;
-        if (c->dscpEcn != 0) {
-                if (c->ipProtocol == IPPROTO_IPV6)
+        if (c->dscpEcn != DEF_DSCPECN_BYTE) {
+                if (c->ipProtocol == IPPROTO_IPV6) // Set IP packet marking
                         var = IPV6_TCLASS;
                 else
                         var = IP_TOS;
@@ -1295,7 +1327,22 @@ int service_actresp(int connindex) {
         if (!(cHdrTA->modifierBitmap & CHTA_RAND_PAYLOAD)) {
                 c->randPayload = FALSE; // Payload randomization rejected by server
         }
-        c->rateAdjAlgo = (int) cHdrTA->rateAdjAlgo;
+        c->rateAdjAlgo    = (int) cHdrTA->rateAdjAlgo;
+        c->srAdjSuppCount = (int) ntohs(cHdrTA->reserved4); // Utilizes reserved alignment field
+        c->ecnCEThresh    = (int) cHdrTA->reserved2;        // Utilizes reserved alignment field
+        if (c->ecnCEThresh != DEF_ECN_CE_TH) {
+                if (c->ipProtocol == IPPROTO_IPV6) // Enable reception of IP packet marking
+                        var = IPV6_RECVTCLASS;
+                else
+                        var = IP_RECVTOS;
+                i = 1;
+                if (setsockopt(c->fd, c->ipProtocol, var, (const void *) &i, sizeof(i)) < 0) {
+                        var = sprintf(scratch, "ERROR: Failure setting IP_RECVTOS/IPV6_RECVTCLASS %s\n", strerror(errno));
+                        send_proc(errConn, scratch, var);
+                        tspeccpy(&c->endTime, &repo.systemClock); // Set for immediate close/exit
+                        return 0;
+                }
+        }
 
         //
         // Set connection test action as testing and initialize PDU received time
@@ -1382,7 +1429,7 @@ int service_actresp(int connindex) {
                         var = sprintf(scratch, TESTHDR_LINE, connid, testtype, c->testIntTime, c->lowThresh, c->upperThresh,
                                       delusage, c->trialInt, boolText[c->ignoreOooDup], payload, c->mcIdent, sritext,
                                       c->slowAdjThresh, c->highSpeedDelta, c->seqErrThresh, rateAdjAlgo[c->rateAdjAlgo], c->mcCount,
-                                      c->dscpEcn, intflabel);
+                                      c->dscpEcn, c->ecnCEThresh, intflabel);
                         send_proc(errConn, scratch, var);
                 } else {
                         if (!conf.jsonBrief) {
@@ -1419,6 +1466,8 @@ int service_actresp(int connindex) {
                                 cJSON_AddNumberToObject(json_input, "NumberOfConnections", conf.maxConnCount);
                                 cJSON_AddNumberToObject(json_input, "MinNumOfConnections", conf.minConnCount);
                                 cJSON_AddNumberToObject(json_input, "DSCP", c->dscpEcn >> 2);
+                                cJSON_AddNumberToObject(json_input, "ECN", IPTOS_ECN(c->dscpEcn));
+                                cJSON_AddNumberToObject(json_input, "CEThreshold", c->ecnCEThresh);
                                 if (conf.ipv4Only) {
                                         cJSON_AddStringToObject(json_input, "ProtocolVersion", "IPv4");
                                 } else if (conf.ipv6Only) {
@@ -2031,8 +2080,9 @@ int open_outputfile(int connindex) {
         //
         // Initialize with header
         //
-        fputs("SeqNo,PayLoad,SrcTxTime,DstRxTime,OWD,IntfMbps,IntfMbpsAlt,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n",
-              c->outputFPtr);
+        fputs(
+            "SeqNo,PayLoad,ECNValue,SrcTxTime,DstRxTime,OWD,IntfMbps,IntfMbpsAlt,RTTTxTime,RTTRxTime,RTTRespDelay,RTT,StatusLoss\n",
+            c->outputFPtr);
 
         return 0;
 }
@@ -2102,7 +2152,7 @@ int validate_auth(int pver, unsigned char *ckey, unsigned char *skey, unsigned c
         // Use KDF keys if already available
         //
         key = NULL;
-        if (pver >= EXTAUTH_PVER) {
+        if (pver >= AUTH_ECN_PVER) {
                 if (memcmp(ckey, skey, SHA256_KEY_LEN) != 0) { // Check if not identical (not initialized to zero)
                         kdf = TRUE;
                         if (repo.isServer)
@@ -2129,7 +2179,7 @@ int validate_auth(int pver, unsigned char *ckey, unsigned char *skey, unsigned c
                         //
                         // Create and use KDF keys if needed, else use shared key directly
                         //
-                        if (pver >= EXTAUTH_PVER) {
+                        if (pver >= AUTH_ECN_PVER) {
                                 if (!kdf) {
 #ifdef AUTH_KEY_ENABLE
                                         // If creating KDF keys via shared key and timestamp, identical authUnixTime values
@@ -2270,12 +2320,12 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
                         bvar = TRUE;
                         psC->ctrlInvalidFormat++;
 
-                } else if ((pver >= EXTAUTH_PVER) && (cHdrTA->checkSum != 0)) {
+                } else if ((pver >= AUTH_ECN_PVER) && (cHdrTA->checkSum != 0)) {
                         if (checksum(cHdrTA, repo.rcvDataSize)) {
                                 bvar = TRUE;
                                 psC->ctrlInvalidChksum++;
                         }
-                } else if ((pver < EXTAUTH_PVER) && (cHdrTA->reserved3 != 0)) { // Location within previous PDU version
+                } else if ((pver < AUTH_ECN_PVER) && (cHdrTA->reserved3 != 0)) { // Location within previous PDU version
                         if (checksum(cHdrTA, repo.rcvDataSize)) {
                                 bvar = TRUE;
                                 psC->ctrlInvalidChksum++;
@@ -2312,7 +2362,7 @@ BOOL verify_ctrlpdu(int connindex, struct controlHdrSR *cHdrSR, struct controlHd
                                 var += sprintf(&scratch[var], " (%d,0x%04X:0x%04X,0x%04X)", repo.rcvDataSize, ntohs(cHdrSR->pduId),
                                                ntohs(cHdrSR->protocolVer), cHdrSR->checkSum);
                         } else {
-                                if (pver >= EXTAUTH_PVER)
+                                if (pver >= AUTH_ECN_PVER)
                                         csum = cHdrTA->checkSum;
                                 else
                                         csum = cHdrTA->reserved3; // Location within previous PDU version

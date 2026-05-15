@@ -46,7 +46,7 @@
 #define PROTOCOL_VER  20 // Current protocol version between client and server
 #define PROTOCOL_MIN  11 // Minimum protocol version for backward compatibility
 #define MSSUBINT_PVER 20 // Protocol version required for ms sub-interval support
-#define EXTAUTH_PVER  20 // Protocol version required for extended auth. support
+#define AUTH_ECN_PVER 20 // Protocol version required for new authentication & ECN support
 #define SRASUPP_PVER  20 // Protocol version required for sending rate adj. suppression
 
 //----------------------------------------------------------------------------
@@ -295,9 +295,25 @@ struct authOverlay {           // Start on 32-bit boundary
         uint8_t reservedAuth1; // (reserved for alignment)
         uint16_t checkSum;     // Header checksum
 };
-#define AO_MODE_OFFSET 3                          // Byte offset of authMode (for alignment)
-#define AO_SIZE_CVER   sizeof(struct authOverlay) // Current protocol version
-#define AO_SIZE_MVER   (AO_SIZE_CVER)             // Minimum protocol version
+#define AO_MODE_OFFSET 3 // Byte offset of authMode (for alignment)
+//----------------------------------------------------------------------------
+//
+// Structure to reuse authentication portion of status header (given AUTHMODE_2 is not supported)
+//
+struct statusAuthReuse {        // Start on 32-bit boundary
+        uint16_t reserved3;     // (reserved for alignment)
+        uint8_t reserved4;      // (reserved for alignment)
+        uint8_t authMode;       // Authentication mode - DO NOT OVERWRITE
+        uint32_t reserved5;     // (reserved for alignment) [previously authUnixTime]
+        uint32_t reserved6;     // (reserved for alignment) [previously authDigest]
+        uint32_t reserved7;     // (reserved for alignment) [previously authDigest]
+        uint32_t tiRxCECount;   // Trial interval receive CE count [previously authDigest]
+        uint32_t sisSavCECount; // Sub-interval saved CE count [previously authDigest]
+        uint8_t reserved8;      // (reserved for alignment) [previously keyId]
+#define STATUS_ECN_BLEACH 0x01  // ECN bleaching detected
+        uint8_t modifierBitmap; // Modifier bitmap [previously reservedAuth1]
+        uint16_t checkSum;      // Header checksum - DO NOT OVERWRITE
+};
 //----------------------------------------------------------------------------
 
 #endif /* UDPST_PROTOCOL_H */
