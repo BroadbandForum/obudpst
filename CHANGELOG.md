@@ -3,7 +3,7 @@
 *The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification
 can be found at https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-## 2026-07-01: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
+## 2026-07-14: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
 
 **IMPORTANT: The default control port has changed from 25000 to 24601. For
 backward compatibility, 8.2.0 clients will either need to use the new control
