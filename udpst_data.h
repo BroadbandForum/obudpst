@@ -50,7 +50,7 @@ extern int stop_test(int);
 extern int recv_proc(int);
 extern int send_proc(int, char *, int);
 extern void sr_copy(struct sendingRate *, struct sendingRate *, BOOL);
-extern int create_timestamp(struct timespec *);
+extern int create_timestamp(struct timespec *, BOOL);
 extern int getuniform(int, int);
 extern unsigned short checksum(void *, int);
 

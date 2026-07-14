@@ -1,7 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define SOFTWARE_VER "@SOFTWARE_VER@"
 #cmakedefine HAVE_GETIFADDRS
 #cmakedefine HAVE_LIBSSL
 #cmakedefine HAVE_LIBZ

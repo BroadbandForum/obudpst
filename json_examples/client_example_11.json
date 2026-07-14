@@ -1,56 +1,60 @@
 {
 	"IPLayerMaxConnections":	24,
-	"IPLayerMaxIncrementalResult":	3600,
+	"IPLayerMaxIncrementalResult":	36000,
 	"IPLayerCapSupported":	{
-		"SoftwareVersion":	"8.1.0",
-		"ControlProtocolVersion":	10,
+		"SoftwareVersion":	"9.0.0",
+		"ControlProtocolVersion":	20,
 		"Metrics":	"IPLR,Sampled_RTT,IPDV,IPRR,RIPR"
 	},
 	"Input":	{
 		"Interface":	"",
-		"Role":	"Receiver",
-		"ID":	11342,
+		"Role":	"Sender",
+		"ID":	11707,
 		"Host":	"test-server1.com",
-		"HostIPAddress":	"10.0.0.1",
-		"Port":	38513,
+		"HostIPAddress":	"192.168.1.224",
+		"Port":	52690,
 		"NumberOfHosts":	4,
 		"HostList":	[{
 				"Host":	"test-server1.com",
-				"HostIPAddress":	"10.0.0.1",
-				"ControlPort":	25000
+				"HostIPAddress":	"192.168.1.224",
+				"ControlPort":	24601
 			}, {
-				"Host":	"test-server2.com",
-				"HostIPAddress":	"10.0.0.2",
-				"ControlPort":	25000
+				"Host":	"test-server1.com",
+				"HostIPAddress":	"192.168.1.224",
+				"ControlPort":	24602
 			}, {
-				"Host":	"test-server3.com",
-				"HostIPAddress":	"10.0.0.3",
-				"ControlPort":	25000
+				"Host":	"test-server1.com",
+				"HostIPAddress":	"192.168.1.224",
+				"ControlPort":	24603
 			}, {
-				"Host":	"test-server4.com",
-				"HostIPAddress":	"10.0.0.4",
-				"ControlPort":	25000
+				"Host":	"test-server1.com",
+				"HostIPAddress":	"192.168.1.224",
+				"ControlPort":	24604
 			}],
-		"ClientIPAddress":	"192.168.1.192",
-		"ClientPort":	45546,
-		"JumboFramesPermitted":	1,
+		"ClientIPAddress":	"192.168.1.238",
+		"ClientPort":	45094,
+		"JumboFramesPermitted":	0,
 		"NumberOfConnections":	4,
 		"MinNumOfConnections":	4,
 		"DSCP":	0,
+		"ECN":	0,
+		"CEThreshold":	0,
 		"ProtocolVersion":	"Any",
 		"UDPPayloadMin":	52,
-		"UDPPayloadMax":	8972,
-		"UDPPayloadDefault":	1222,
+		"UDPPayloadMax":	1472,
+		"UDPPayloadDefault":	1472,
 		"UDPPayloadContent":	"zeroes",
 		"TestType":	"Search",
 		"IPDVEnable":	0,
 		"IPRREnable":	1,
 		"RIPREnable":	1,
 		"PreambleDuration":	0,
+		"MaxRequiredBandwidth":	0,
 		"StartSendingRateIndex":	0,
 		"SendingRateIndex":	-1,
 		"NumberTestSubIntervals":	10,
 		"NumberFirstModeTestSubIntervals":	0,
+		"NumberFirstModeSuppSubIntervals":	0,
 		"TestSubInterval":	1000,
 		"StatusFeedbackInterval":	50,
 		"TimeoutNoTestTraffic":	1000,
@@ -65,18 +69,19 @@
 		"HighSpeedDelta":	10,
 		"SlowAdjThresh":	3,
 		"HSpeedThresh":	1000000000,
-		"RateAdjAlgorithm":	"B"
+		"RateAdjAlgorithm":	"B",
+		"InterfaceDeterminesMax":	0
 	},
 	"Output":	{
-		"BOMTime":	"2023-03-06T17:04:19.003175Z",
+		"BOMTime":	"2026-05-08T14:50:21.183716Z",
 		"TmaxUsed":	1000,
 		"TestInterval":	10,
 		"TmaxRTTUsed":	3000,
 		"TimestampResolutionUsed":	1,
-		"EOMTime":	"2023-03-06T17:04:27.213064Z",
+		"EOMTime":	"2026-05-08T14:50:32.044154Z",
 		"Status":	"Error_Other"
 	},
 	"ErrorStatus":	200,
 	"ErrorMessage":	"ERROR: Minimum required connections (4) unavailable",
-	"ErrorMessage2":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 10.0.0.3:25000]"
+	"ErrorMessage2":	"LOCAL WARNING: Incoming traffic has completely stopped [Server 192.168.1.224:24602]"
 }

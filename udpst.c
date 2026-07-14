@@ -68,6 +68,11 @@
  * Len Ciavattone          10/01/2023    Updated ErrorStatus values
  * Len Ciavattone          03/03/2024    Add multi-key support
  * Len Ciavattone          04/12/2024    Add checksum info to banner
+ * Len Ciavattone          09/15/2025    Add RFC compatibility, performance
+ *                                       statistics, and improved idling
+ * Len Ciavattone          10/30/2025    Add export all as optional
+ * Len Ciavattone          12/12/2025    Add sending rate adj. suppression
+ * Len Ciavattone          04/19/2026    Add ECN CE support
  *
  */
 
@@ -85,6 +90,7 @@
 #include <signal.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -116,15 +122,17 @@ void signal_exit(int);
 int proc_parameters(int, char **, int);
 int param_error(int, int, int);
 int read_keyfile(int);
+int server_finish(int);
 int json_finish(void);
+int proc_pstats_file(int, BOOL);
+int proc_pstats_max(int);
+int proc_pstats_rec(int);
 
 //----------------------------------------------------------------------------
 //
 // Global data
 //
-#define ENDTEXT_BASIC "[%d]End time reached"
-#define ENDTEXT_NEWBW ENDTEXT_BASIC " (New USBW: %d, DSBW: %d)\n"
-#define NOAUTH_TEXT   "ERROR: Built without authentication functionality\n"
+#define NOAUTH_TEXT "ERROR: Built without authentication functionality\n"
 int errConn = -1, monConn = -1, aggConn = -1; // Error, monitoring, and aggregate
 char scratch[STRING_SIZE];                    // General purpose scratch buffer
 struct configuration conf;                    // Configuration data structure
@@ -152,6 +160,8 @@ int main(int argc, char **argv) {
         struct itimerval itime;
         struct sigaction saction;
         struct stat statbuf;
+        struct perfStatsMaximums *psM = &repo.psMaximums;
+        struct perfStatsAverages *psA = &repo.psAverages;
 
         //
         // Sanity check that rate adjustment algorithm identifiers align with protocol
@@ -244,6 +254,7 @@ int main(int argc, char **argv) {
         // Initialize local copy of system time clock and seed RNG
         //
         clock_gettime(CLOCK_REALTIME, &repo.systemClock);
+        tspeccpy(&repo.startTime, &repo.systemClock);
         srandom((unsigned int) repo.systemClock.tv_nsec);
 
         //
@@ -305,7 +316,8 @@ int main(int argc, char **argv) {
                 //
                 if (!conf.jsonBrief) {
                         cJSON_AddNumberToObject(json_top, "IPLayerMaxConnections", MAX_MC_COUNT);
-                        cJSON_AddNumberToObject(json_top, "IPLayerMaxIncrementalResult", MAX_TESTINT_TIME / MIN_SUBINT_PERIOD);
+                        cJSON_AddNumberToObject(json_top, "IPLayerMaxIncrementalResult",
+                                                (MAX_TESTINT_TIME * MSECINSEC) / MIN_SUBINT_PERIOD);
                         cJSON *json_supported = cJSON_CreateObject();
                         cJSON_AddStringToObject(json_supported, "SoftwareVersion", SOFTWARE_VER);
                         cJSON_AddNumberToObject(json_supported, "ControlProtocolVersion", PROTOCOL_VER);
@@ -504,10 +516,19 @@ int main(int argc, char **argv) {
                         if ((i = new_conn(-1, repo.server[0].ip, repo.server[0].port, T_UDP, &recv_proc, &service_setupreq)) < 0) {
                                 appstatus = STATUS_INIT_ERRBASE + ERROR_INIT_GENERIC;
                                 sig_exit  = TRUE;
-                        } else if (conf.verbose) {
-                                var =
-                                    sprintf(scratch, "[%d]Awaiting setup requests on %s:%d\n", i, conn[i].locAddr, conn[i].locPort);
-                                send_proc(monConn, scratch, var);
+                        } else {
+                                if (conf.psFile != NULL) { // Initialize performance statistics
+                                        if ((var = proc_pstats_file(i, TRUE)) > 0) {
+                                                send_proc(errConn, scratch, var);
+                                                appstatus = STATUS_INIT_ERRBASE + ERROR_INIT_GENERIC;
+                                                sig_exit  = TRUE;
+                                        }
+                                }
+                                if (!sig_exit && conf.verbose) {
+                                        var = sprintf(scratch, "[%d]Awaiting setup requests on %s:%d\n", i, conn[i].locAddr,
+                                                      conn[i].locPort);
+                                        send_proc(monConn, scratch, var);
+                                }
                         }
                 } else {
                         var2 = 0; // Server index (distribute connections across servers)
@@ -538,6 +559,7 @@ int main(int argc, char **argv) {
         //
         // Primary control loop
         //
+        repo.idleConnIndex = repo.maxConnIndex; // Save idle connection index
         while (!sig_exit) {
 #ifdef DISABLE_INT_TIMER
                 sig_alrm = 1; // Simulate expiry of system interval timer
@@ -554,6 +576,12 @@ int main(int argc, char **argv) {
                 // Process FD(s)
                 //
                 if (readyfds > 0) {
+                        if (conf.psFile != NULL) { // Update performance statistics
+                                psA->fdReadyCount++;
+                                psA->fdReadyTotal += (unsigned int) readyfds;
+                                if ((unsigned int) readyfds > psM->fdReadySize)
+                                        psM->fdReadySize = (unsigned int) readyfds;
+                        }
                         fdpass = 0;
                         do {
                                 //
@@ -625,6 +653,14 @@ int main(int argc, char **argv) {
                 // Process timers
                 //
                 if (sig_alrm > 0) {
+                        if (conf.psFile != NULL) { // Update performance statistics
+                                if ((var = (int) sig_alrm) > 1) {
+                                        psA->timCoalesceCount++;
+                                        psA->timCoalesceTotal += (unsigned int) var;
+                                        if ((unsigned int) var > psM->timCoalesceSize)
+                                                psM->timCoalesceSize = (unsigned int) var;
+                                }
+                        }
                         //
                         // Clear alarm signal counter
                         //
@@ -644,26 +680,10 @@ int main(int argc, char **argv) {
                                 //
                                 if (tspecisset(&conn[i].endTime)) {
                                         if (tspeccmp(&repo.systemClock, &conn[i].endTime, >)) {
+                                                var2 = 0; // End time message length already output
                                                 if (repo.isServer) {
-                                                        if (conf.maxBandwidth > 0) {
-                                                                // Adjust current upstream/downstream bandwidth
-                                                                if (conn[i].testType == TEST_TYPE_US) {
-                                                                        if ((repo.usBandwidth -= conn[i].maxBandwidth) < 0)
-                                                                                repo.usBandwidth = 0;
-                                                                } else {
-                                                                        if ((repo.dsBandwidth -= conn[i].maxBandwidth) < 0)
-                                                                                repo.dsBandwidth = 0;
-                                                                }
-                                                                if (conf.verbose) {
-                                                                        var = sprintf(scratch, ENDTEXT_NEWBW, i, repo.usBandwidth,
-                                                                                      repo.dsBandwidth);
-                                                                        send_proc(monConn, scratch, var);
-                                                                }
-                                                        } else if (conf.verbose) {
-                                                                var = sprintf(scratch, ENDTEXT_BASIC "\n", i);
-                                                                send_proc(monConn, scratch, var);
-                                                        }
-                                                        if (conf.oneTest) { // Shutdown server after one test
+                                                        var2 = server_finish(i); // Finalize server processing
+                                                        if (conf.oneTest) {      // Shutdown server after one test
                                                                 appstatus = repo.endTimeStatus;
                                                                 sig_exit  = TRUE;
                                                         }
@@ -680,10 +700,10 @@ int main(int argc, char **argv) {
                                                                 if (--repo.actConnCount < 0)
                                                                         repo.actConnCount = 0;
                                                         }
-                                                        if (conf.verbose) {
-                                                                var = sprintf(scratch, ENDTEXT_BASIC "\n", i);
-                                                                send_proc(monConn, scratch, var);
-                                                        }
+                                                }
+                                                if (var2 == 0 && conf.verbose) {
+                                                        var = sprintf(scratch, "[%d]End time reached\n", i);
+                                                        send_proc(monConn, scratch, var);
                                                 }
                                                 init_conn(i, TRUE);
                                                 continue;
@@ -722,6 +742,31 @@ int main(int argc, char **argv) {
                                         clock_gettime(CLOCK_REALTIME, &repo.systemClock);
                                 }
                         }
+
+                        //
+                        // Adjust system interval timer (if needed) based on server connection count
+                        //
+#ifndef DISABLE_INT_TIMER
+                        if (repo.isServer) {
+                                var2 = 0;
+                                if (repo.maxConnIndex > repo.idleConnIndex) {
+                                        if (itime.it_interval.tv_usec != MIN_INTERVAL_USEC)
+                                                var2 = MIN_INTERVAL_USEC; // Set interval timer for testing
+                                } else {
+                                        if (itime.it_interval.tv_usec != IDLE_INTERVAL_USEC)
+                                                var2 = IDLE_INTERVAL_USEC; // Set interval timer for idling
+                                }
+                                if (var2 > 0) {
+                                        itime.it_interval.tv_sec = itime.it_value.tv_sec = 0;
+                                        itime.it_interval.tv_usec = itime.it_value.tv_usec = (suseconds_t) var2;
+                                        if (setitimer(ITIMER_REAL, &itime, NULL) != 0) {
+                                                var = sprintf(scratch, "ITIMER ERROR: %s\n", strerror(errno));
+                                                send_proc(errConn, scratch, var);
+                                                sig_exit = TRUE;
+                                        }
+                                }
+                        }
+#endif
                 }
         }
 
@@ -734,6 +779,8 @@ int main(int argc, char **argv) {
                 close(repo.epollFD);
         if (repo.intfFD >= 0)
                 close(repo.intfFD);
+        if (repo.intfFDAlt >= 0)
+                close(repo.intfFDAlt);
 
         //
         // Cleanup and free memory
@@ -744,6 +791,8 @@ int main(int argc, char **argv) {
         free(repo.randData);
         free(repo.sndBufRand);
         free(conn);
+        if (repo.psBuffer != NULL)
+                free(repo.psBuffer);
 
         //
         // Stop system timer
@@ -794,7 +843,7 @@ void signal_exit(int signal) {
 //
 int proc_parameters(int argc, char **argv, int fd) {
         int i, j, var, value;
-        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:y:K:m:I:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:?";
+        char *lbuf, *optstring = "ud46C:x1evsf:jTDXSO:B:ri:oRa:y:K:m:G:nI:t:P:p:A:b:L:U:F:c:h:q:E:Ml:k:Z:?";
 
         //
         // Clear configuration and global repository data
@@ -910,14 +959,15 @@ int proc_parameters(int argc, char **argv, int fd) {
         conf.rateAdjAlgo  = DEF_RA_ALGO;
         conf.useOwDelVar  = DEF_USE_OWDELVAR;
         conf.ignoreOooDup = DEF_IGNORE_OOODUP;
+        conf.seqNumAdjust = DEF_SEQNUM_ADJ;
         if (!repo.isServer) {
                 // Default values
-                conf.ipTosByte   = DEF_IPTOS_BYTE;
+                conf.dscpEcn     = DEF_DSCPECN_BYTE;
                 conf.srIndexConf = DEF_SRINDEX_CONF;
                 conf.testIntTime = DEF_TESTINT_TIME;
         } else {
                 // Configured maximums
-                conf.ipTosByte   = MAX_IPTOS_BYTE;
+                conf.dscpEcn     = MAX_DSCPECN_BYTE;
                 conf.srIndexConf = MAX_SRINDEX_CONF;
                 conf.testIntTime = MAX_TESTINT_TIME;
         }
@@ -938,6 +988,7 @@ int proc_parameters(int argc, char **argv, int fd) {
         repo.maxConnIndex  = -1;           // No connections allocated
         repo.endTimeStatus = STATUS_ERROR; // Default to unspecified error, require explicit success
         repo.intfFD        = -1;           // No file descriptor
+        repo.intfFDAlt     = -1;           // No file descriptor
         repo.keyIndex      = -1;           // No key index (used when client)
 
         //
@@ -1052,7 +1103,12 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
                         }
-                        conf.outputFile = optarg;
+                        lbuf = optarg;
+                        if (*lbuf == '+') {
+                                lbuf++;
+                                conf.outputFileAll = TRUE; // Export metadata for all load PDUs
+                        }
+                        conf.outputFile = lbuf;
                         break;
                 case 'B':
                         if (repo.isServer) {
@@ -1065,16 +1121,28 @@ int proc_parameters(int argc, char **argv, int fd) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
                         }
-                        conf.maxBandwidth = value;
+                        conf.maxBandwidth = value; // Zero value allowed but is same as default of not specified
                         break;
                 case 'r':
                         conf.showLossRatio = TRUE;
                         break;
                 case 'i':
-                        value = atoi(optarg);
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Bimodal option only available to client\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        lbuf = optarg;
+                        if (*lbuf == '-') {
+                                lbuf++;
+                        }
+                        value = atoi(lbuf);
                         if ((var = param_error(value, MIN_BIMODAL_COUNT, MAX_BIMODAL_COUNT)) > 0) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
+                        }
+                        if (lbuf != optarg) {
+                                conf.srAdjSuppCount = value; // Set suppression count equal to bimodal count if prefix is present
                         }
                         conf.bimodalCount = value;
                         break;
@@ -1140,11 +1208,22 @@ int proc_parameters(int argc, char **argv, int fd) {
                 case 'm':
                         // Server will use as configured maximum
                         value = (int) strtol(optarg, NULL, 0); // Allow hex values (0x00-0xff)
-                        if ((var = param_error(value, MIN_IPTOS_BYTE, MAX_IPTOS_BYTE)) > 0) {
+                        if ((var = param_error(value, MIN_DSCPECN_BYTE, MAX_DSCPECN_BYTE)) > 0) {
                                 var = write(fd, scratch, var);
                                 return ERROR_CONF_GENERIC;
                         }
-                        conf.ipTosByte = value;
+                        conf.dscpEcn = value;
+                        break;
+                case 'G':
+                        if (!repo.isServer) {
+                                var = sprintf(scratch, "ERROR: Performance statistics file only valid when server\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        conf.psFile = optarg;
+                        break;
+                case 'n':
+                        conf.seqNumAdjust = !DEF_SEQNUM_ADJ; // Not the default
                         break;
                 case 'I':
                         // Server will use as configured maximum
@@ -1327,6 +1406,24 @@ int proc_parameters(int argc, char **argv, int fd) {
                         }
                         conf.logFileMax = value * 1000;
                         break;
+                case 'Z':
+                        if (repo.isServer) {
+                                var = sprintf(scratch, "ERROR: ECN CE threshold only set by client\n");
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+#ifndef HAVE_RECVMMSG
+                        var = sprintf(scratch, "ERROR: ECN CE threshold requires RecvMMsg() optimization\n");
+                        var = write(fd, scratch, var);
+                        return ERROR_CONF_GENERIC;
+#endif
+                        value = atoi(optarg);
+                        if ((var = param_error(value, MIN_ECN_CE_TH, MAX_ECN_CE_TH)) > 0) {
+                                var = write(fd, scratch, var);
+                                return ERROR_CONF_GENERIC;
+                        }
+                        conf.ecnCEThresh = value;
+                        break;
                 case '?':
                         var = sprintf(scratch,
                                       "%s\nUsage: %s [option]... [server[:<port>]]...\n\n"
@@ -1339,57 +1436,66 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(c)    -C cnt[-max] Multi-connection count [Default %d per server]\n"
                                       "(s)    -x           Execute server as background (daemon) process\n"
                                       "(s)    -1           Server exits after one test execution\n"
-                                      "(e)    -e           Disable suppression of socket (send/receive) errors\n"
-                                      "       -v           Enable verbose output messaging\n"
-                                      "       -s           Summary/Max output only (no sub-interval output)\n"
-                                      "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
-                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n",
+                                      "(e)    -e           Disable suppression of socket (send/receive) errors\n",
                                       SOFTWARE_TITLE, argv[0], USTEST_TEXT, DSTEST_TEXT, DEF_MC_COUNT);
                         var = write(fd, scratch, var);
                         var = sprintf(scratch,
+                                      "       -v           Enable verbose output messaging\n"
+                                      "       -s           Summary/Max output only (no sub-interval output)\n"
+                                      "       -f format    JSON output (json, jsonb [brief], jsonf [formatted])\n"
+                                      "(j)    -j           Disable jumbo datagram sizes above 1 Gbps\n"
                                       "       -T           Use datagram sizes for traditional (1500 byte) MTU\n"
                                       "       -D           Enable debug output messaging (requires '-v')\n"
                                       "(m)    -X           Randomize datagram payload (else zeroes)\n"
                                       "       -S           Show server sending rate table and exit\n"
-                                      "       -O file      Output (export) file of received load metadata\n"
+                                      "(o)    -O [+]file   Output (export) file of received load metadata\n"
                                       "       -B mbps      Max bandwidth required by client OR available to server\n"
                                       "       -r           Display loss ratio instead of delivered percentage\n"
-                                      "       -i count     Display bimodal maxima (specify initial sub-intervals)\n"
+                                      "(c,b)  -i [-]count  Display bimodal maxima (specify initial sub-intervals)\n"
                                       "(c)    -o           Use One-Way Delay instead of RTT for delay variation\n"
+                                      "(m,v)  -m value     Packet marking octet (DSCP+ECN) [Default %d]\n",
+                                      DEF_DSCPECN_BYTE);
+                        var = write(fd, scratch, var);
+                        var = sprintf(scratch,
                                       "(c)    -R           Include Out-of-Order/Duplicate datagrams\n"
                                       "       -a key       Authentication key (%d characters max)\n"
                                       "(c)    -y keyid     Key ID used with authentication key [Default %d]\n"
                                       "       -K file      Key file containing authentication keys\n"
-                                      "(m,v)  -m value     Packet marking octet (IP_TOS/IPV6_TCLASS) [Default %d]\n",
-                                      AUTH_KEY_SIZE, DEF_KEY_ID, DEF_IPTOS_BYTE);
-                        var = write(fd, scratch, var);
-                        var = sprintf(scratch,
+                                      "(s)    -G file      Periodic server performance statistics (JSON)\n"
+                                      "       -n           No adjustment to sequence numbers from backpressure\n"
                                       "(m,i)  -I [%c]index  Index of sending rate (see '-S') [Default %c0 = <Auto>]\n"
                                       "(m)    -t time      Test interval time in seconds [Default %d, Max %d]\n"
-                                      "(c)    -P period    Sub-interval period in seconds [Default %d]\n"
+                                      "(c)    -P period    Sub-interval period in ms [Default %d]\n"
                                       "       -p port      Default port number used for control [Default %d]\n"
                                       "(c)    -A algo      Rate adjustment algorithm (%s - %s) [Default %s]\n"
-                                      "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n"
+                                      "       -b buffer    Socket buffer request size (SO_SNDBUF/SO_RCVBUF)\n",
+                                      AUTH_KEY_SIZE, DEF_KEY_ID, SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME,
+                                      MAX_TESTINT_TIME, DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
+                                      rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO]);
+                        var = write(fd, scratch, var);
+                        var = sprintf(scratch,
                                       "(c)    -L delvar    Low delay variation threshold in ms [Default %d]\n"
                                       "(c)    -U delvar    Upper delay variation threshold in ms [Default %d]\n"
                                       "(c)    -F interval  Status feedback/trial interval in ms [Default %d]\n"
                                       "(c)    -c thresh    Congestion slow adjustment threshold [Default %d]\n"
                                       "(c)    -h delta     High-speed (row adjustment) delta [Default %d]\n"
                                       "(c)    -q seqerr    Sequence error threshold [Default %d]\n"
-                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n",
-                                      SRIDX_ISSTART_PREFIX, SRIDX_ISSTART_PREFIX, DEF_TESTINT_TIME, MAX_TESTINT_TIME,
-                                      DEF_SUBINT_PERIOD, DEF_CONTROL_PORT, rateAdjAlgo[CHTA_RA_ALGO_MIN],
-                                      rateAdjAlgo[CHTA_RA_ALGO_MAX], rateAdjAlgo[DEF_RA_ALGO], DEF_LOW_THRESH, DEF_UPPER_THRESH,
-                                      DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA, DEF_SEQ_ERR_TH);
-                        var = write(fd, scratch, var);
-                        var = sprintf(scratch,
+                                      "(c)    -E intf      Show local interface traffic rate (ex. eth0)\n"
                                       "(c)    -M           Use local interface rate to determine maximum\n"
                                       "(s)    -l logfile   Log file name when executing as daemon\n"
-                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n\n"
+                                      "(s)    -k logsize   Log file maximum size in KBytes [Default %d]\n"
+                                      "(c,z)  -Z thresh    ECN CE threshold (%d - %d) [(threshold-1)/%d]\n\n"
                                       "Parameters:\n"
                                       "   server[:<port>]  Hostname/IP of server OR local interface IP if server\n"
                                       "                    - Optional port number overrides configured control port\n"
-                                      "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n"
+                                      "                    - Format for IPv6 address w/port number = '[<IPv6>]:<port>'\n",
+                                      DEF_LOW_THRESH, DEF_UPPER_THRESH, DEF_TRIAL_INT, DEF_SLOW_ADJ_TH, DEF_HS_DELTA,
+                                      DEF_SEQ_ERR_TH, DEF_LOGFILE_MAX, MIN_ECN_CE_TH, MAX_ECN_CE_TH, MAX_ECN_CE_TH);
+                        var = write(fd, scratch, var);
+                        // Calculate CE threshold as percentage
+                        double dvar = ((double) MIN_ECN_CE_TH * 100.0) / (double) MAX_ECN_CE_TH;
+                        //
+                        var = sprintf(scratch,
                                       "Notes:\n"
                                       "(c) = Used only by client.\n"
                                       "(s) = Used only by server.\n"
@@ -1398,8 +1504,11 @@ int proc_parameters(int argc, char **argv, int fd) {
                                       "(m) = Used as a request by the client or a maximum by the server. Client\n"
                                       "      requests that exceed server maximum are automatically coerced down.\n"
                                       "(v) = Values can be specified as decimal (0 - 255) or hex (0x00 - 0xff).\n"
-                                      "(i) = Static OR starting (with '%c' prefix) sending rate index.\n",
-                                      DEF_LOGFILE_MAX, SRIDX_ISSTART_PREFIX);
+                                      "(i) = Static OR starting (with '%c' prefix) sending rate index.\n"
+                                      "(o) = Prefix '+' exports all metadata (not just RTT entries).\n"
+                                      "(b) = Prefix '-' suppresses rate adjustments during initial mode.\n"
+                                      "(z) = CE thresholds trigger at >0%%, >%0.1f%%, >%0.1f%%,... >%0.1f%%.\n",
+                                      SRIDX_ISSTART_PREFIX, dvar, dvar * 2.0, dvar * (double) (MAX_ECN_CE_TH - 1));
                         var = write(fd, scratch, var);
                         return ERROR_CONF_GENERIC;
                 }
@@ -1428,8 +1537,18 @@ int proc_parameters(int argc, char **argv, int fd) {
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }
-        if (conf.subIntPeriod > conf.testIntTime) {
+        if (conf.subIntPeriod > conf.testIntTime * MSECINSEC) {
                 var = sprintf(scratch, "ERROR: Sub-interval period is greater than test interval time\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
+        if (conf.subIntPeriod < conf.trialInt * 2) {
+                var = sprintf(scratch, "ERROR: Sub-interval period must be at least 2x status feedback/trial interval\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
+        if (conf.subIntPeriod % conf.trialInt != 0) {
+                var = sprintf(scratch, "ERROR: Sub-interval period must be a multiple of status feedback/trial interval\n");
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }
@@ -1438,7 +1557,7 @@ int proc_parameters(int argc, char **argv, int fd) {
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }
-        if (conf.bimodalCount >= conf.testIntTime / conf.subIntPeriod) {
+        if (conf.bimodalCount >= (conf.testIntTime * MSECINSEC) / conf.subIntPeriod) {
                 var = sprintf(scratch, "ERROR: Bimodal count must be less than total sub-intervals\n");
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
@@ -1460,6 +1579,12 @@ int proc_parameters(int argc, char **argv, int fd) {
         }
         if (conf.keyId != DEF_KEY_ID && (*conf.authKey == '\0' && conf.keyFile == NULL)) {
                 var = sprintf(scratch, "ERROR: Authentication key ID requires authentication key or key file\n");
+                var = write(fd, scratch, var);
+                return ERROR_CONF_GENERIC;
+        }
+        var = IPTOS_ECN(conf.dscpEcn);
+        if (conf.ecnCEThresh != DEF_ECN_CE_TH && var != IPTOS_ECN_ECT0 && var != IPTOS_ECN_ECT1) {
+                var = sprintf(scratch, "ERROR: Packet marking octet must set ECN bits to ECT(0)/Classic [10] or ECT(1)/L4S [01]\n");
                 var = write(fd, scratch, var);
                 return ERROR_CONF_GENERIC;
         }
@@ -1492,7 +1617,7 @@ int read_keyfile(int fd) {
         int i, var, value, line, status = -1;
         FILE *f;
         char *lbuffer, localbuffer[STRING_SIZE];
-        char *tokens[KEY_ENTRY_FIELDS], *endptr;
+        char *tokens[KEY_ENTRY_FIELDS], *endptr, *saveptr = NULL;
 
         //
         // Open file
@@ -1527,7 +1652,7 @@ int read_keyfile(int fd) {
                 //
                 lbuffer = localbuffer;
                 for (i = 0; i < KEY_ENTRY_FIELDS; i++) {
-                        if ((tokens[i] = strtok(lbuffer, ", \t")) == NULL)
+                        if ((tokens[i] = strtok_r(lbuffer, ", \t", &saveptr)) == NULL)
                                 break;
                         lbuffer = NULL;
                 }
@@ -1634,6 +1759,36 @@ int read_keyfile(int fd) {
 }
 //----------------------------------------------------------------------------
 //
+// Finish server processing of client connection
+//
+int server_finish(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        struct perfStatsCounters *psC = &repo.psCounters;
+
+        if (!c->connected)
+                psC->timeoutAwaitingAct++;
+
+        var = 0;
+        if (conf.maxBandwidth > 0) {
+                // Adjust current upstream/downstream bandwidth
+                if (c->testType == TEST_TYPE_US) {
+                        if ((repo.usBandwidth -= c->maxBandwidth) < 0)
+                                repo.usBandwidth = 0;
+                } else {
+                        if ((repo.dsBandwidth -= c->maxBandwidth) < 0)
+                                repo.dsBandwidth = 0;
+                }
+                if (conf.verbose) {
+                        var = sprintf(scratch, "[%d]End time reached (New USBW: %d, DSBW: %d)\n", connindex, repo.usBandwidth,
+                                      repo.dsBandwidth);
+                        send_proc(monConn, scratch, var);
+                }
+        }
+        return var;
+}
+//----------------------------------------------------------------------------
+//
 // Finish JSON processing and output
 //
 int json_finish() {
@@ -1644,7 +1799,7 @@ int json_finish() {
         // Add final items to output object and add it to top-level object
         //
         if (json_output) {
-                create_timestamp(&repo.systemClock);
+                create_timestamp(&repo.systemClock, TRUE);
                 cJSON_AddStringToObject(json_output, "EOMTime", scratch);
                 //
                 if (repo.endTimeStatus == STATUS_SUCCESS) {
@@ -1677,5 +1832,416 @@ int json_finish() {
         cJSON_Delete(json_top);
 
         return repo.endTimeStatus;
+}
+//----------------------------------------------------------------------------
+//
+// Process performance statistics file
+//
+// Populate scratch buffer and return length on error
+//
+int proc_pstats_file(int connindex, BOOL init) {
+        register struct connection *c = &conn[connindex];
+        time_t ttime;
+        struct timespec tspecvar;
+        char fname[STRING_SIZE];
+
+        //
+        // Set next file write expiry time
+        //
+        repo.psFileTime    = repo.systemClock.tv_sec + STATS_FILE_INT;
+        repo.psRecordCount = 0; // Reset record count
+
+        //
+        // Replace date/time conversion specifications in file name with current values
+        //
+        ttime = (repo.systemClock.tv_sec / STATS_FILE_INT) * STATS_FILE_INT; // Truncate to file interval
+        if (strftime(scratch, STRING_SIZE, conf.psFile, localtime(&ttime)) == 0) {
+                return sprintf(scratch, "ERROR: Performance statistics file name length exceeds maximum\n");
+        }
+
+        //
+        // Create temporary file name used while open for writing
+        //
+        strcpy(fname, scratch);
+        strcat(fname, ".tmp");
+
+        //
+        // Open file (clear JSON buffer if failure)
+        //
+        if ((repo.psFilePtr = fopen(fname, "w")) == NULL) {
+                if (!init) {
+                        repo.psBufSize = 0;
+                        *repo.psBuffer = '\0';
+                }
+                return sprintf(scratch, "FOPEN ERROR: <%.*s> %s\n", NAME_MAX, fname, strerror(errno));
+        }
+
+        //
+        // If initializing...
+        //
+        if (init) {
+                //
+                // Close and remove temp file now that access is confirmed
+                //
+                fclose(repo.psFilePtr);
+                remove(fname);
+                //
+                // Randomize file writes to reduce I/O sync (for running alongside many instances)
+                //
+                repo.psFileTime -= getuniform(0, STATS_FILE_INT - STATS_RECORD_INT);
+                //
+                // Start interval timer for processing global maximums
+                //
+                tspecvar.tv_sec  = 0;
+                tspecvar.tv_nsec = STATS_GMAX_TIMER * NSECINMSEC;
+                tspecplus(&repo.systemClock, &tspecvar, &c->timer1Thresh);
+                c->timer1Action = &proc_pstats_max;
+                //
+                // Start interval timer for processing records
+                //
+                tspecvar.tv_sec  = STATS_RECORD_INT;
+                tspecvar.tv_nsec = 0;
+                tspecplus(&repo.systemClock, &tspecvar, &c->timer2Thresh);
+                c->timer2Action = &proc_pstats_rec;
+                //
+                // Save time for initial record
+                //
+                tspeccpy(&repo.psRecordTime, &repo.systemClock);
+                //
+                // Allocate JSON output buffer
+                //
+                repo.psBuffer  = malloc(STATS_BUFFER_SIZE);
+                repo.psBufSize = 0;
+                *repo.psBuffer = '\0';
+
+                return 0;
+        }
+
+        //
+        // Write JSON buffer to temp file and close it
+        //
+        fputs(repo.psBuffer, repo.psFilePtr);
+        fclose(repo.psFilePtr);
+
+        //
+        // Rename temp file to original name and clear JSON buffer
+        //
+        rename(fname, scratch);
+        repo.psBufSize = 0;
+        *repo.psBuffer = '\0';
+
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
+// Process performance statistics for global maximums
+//
+int proc_pstats_max(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int var;
+        struct timespec tspecvar;
+        struct perfStatsMaximums *psM = &repo.psMaximums;
+
+        //
+        // Reset interval timer
+        //
+        tspecvar.tv_sec  = 0;
+        tspecvar.tv_nsec = STATS_GMAX_TIMER * NSECINMSEC;
+        tspecplus(&repo.systemClock, &tspecvar, &c->timer1Thresh);
+
+        //
+        // Check current maximums
+        //
+        if ((unsigned int) (var = repo.maxConnIndex - repo.idleConnIndex) > psM->connCount)
+                psM->connCount = (unsigned int) var;
+        if ((unsigned int) repo.usBandwidth > psM->usBandwidth)
+                psM->usBandwidth = (unsigned int) repo.usBandwidth;
+        if ((unsigned int) repo.dsBandwidth > psM->dsBandwidth)
+                psM->dsBandwidth = (unsigned int) repo.dsBandwidth;
+
+        return 0;
+}
+//----------------------------------------------------------------------------
+//
+// Process performance statistics record
+//
+// When acting as a server write JSON directly to avoid additional overhead
+// and memory allocation churn of JSON library
+//
+int proc_pstats_rec(int connindex) {
+        register struct connection *c = &conn[connindex];
+        int i, var;
+        BOOL bvar;
+        double dvar, delta;
+        struct timespec tspecvar;
+        char *pvar, *booltext[2] = {"false", "true"};
+        struct perfStatsCounters *psC = &repo.psCounters;
+        struct perfStatsMaximums *psM = &repo.psMaximums;
+        struct perfStatsAverages *psA = &repo.psAverages;
+
+        //
+        // Reset interval timer
+        //
+        tspecvar.tv_sec  = STATS_RECORD_INT;
+        tspecvar.tv_nsec = 0;
+        tspecplus(&repo.systemClock, &tspecvar, &c->timer2Thresh);
+
+        //
+        // Do initialization on first record
+        //
+        i = repo.psBufSize; // Obtain saved buffer size
+        if (repo.psRecordCount == 0) {
+                //
+                // Add static header information
+                //
+                repo.psBuffer[i++] = '{';
+                repo.psBuffer[i++] = '\n';
+                if ((pvar = repo.server[0].name) == NULL)
+                        pvar = "";
+                i += sprintf(&repo.psBuffer[i], "\"host_name\": \"%s\",\n", pvar);
+                i += sprintf(&repo.psBuffer[i], "\"host_ip_address\": \"%s\",\n", repo.server[0].ip);
+                i += sprintf(&repo.psBuffer[i], "\"control_port\": %d,\n", repo.server[0].port);
+                i += sprintf(&repo.psBuffer[i], "\"process_id\": %d,\n", getpid());
+                i += sprintf(&repo.psBuffer[i], "\"software_version\": \"%s\",\n", SOFTWARE_VER);
+                i += sprintf(&repo.psBuffer[i], "\"protocol_version\": %d,\n", PROTOCOL_VER);
+                i += sprintf(&repo.psBuffer[i], "\"schema_version\": %.1f,\n", STATS_SCHEMA_VER);
+                i += sprintf(&repo.psBuffer[i], "\"jumbo_datagrams\": %s,\n", booltext[conf.jumboStatus]);
+                i += sprintf(&repo.psBuffer[i], "\"traditional_mtu\": %s,\n", booltext[conf.traditionalMTU]);
+                bvar = FALSE;
+#ifdef HAVE_GSO
+                bvar = TRUE;
+#endif
+                i += sprintf(&repo.psBuffer[i], "\"gso_enabled\": %s,\n", booltext[bvar]);
+                i += sprintf(&repo.psBuffer[i], "\"max_connections\": %d,\n", conf.maxConnections - repo.idleConnIndex - 1);
+                i += sprintf(&repo.psBuffer[i], "\"max_bandwidth\": %d,\n", conf.maxBandwidth);
+
+                //
+                // Add start time info for file
+                //
+                i += sprintf(&repo.psBuffer[i], "\"start_timestamp\": %ld.%06ld,\n", repo.psRecordTime.tv_sec,
+                             repo.psRecordTime.tv_nsec / NSECINUSEC);
+                create_timestamp(&repo.psRecordTime, FALSE);
+                i += sprintf(&repo.psBuffer[i], "\"start_datetime\": \"%s\",\n", scratch);
+
+                //
+                // Start arrary of records
+                //
+                i += sprintf(&repo.psBuffer[i], "\"data_records\": [");
+        } else {
+                //
+                // Introduce next array element
+                //
+                repo.psBuffer[i++] = ',';
+                repo.psBuffer[i++] = ' ';
+        }
+
+        //
+        // Add start time info for this record
+        //
+        repo.psBuffer[i++] = '{';
+        repo.psBuffer[i++] = '\n';
+        i += sprintf(&repo.psBuffer[i], "\t\"start_timestamp\": %ld.%06ld,\n", repo.psRecordTime.tv_sec,
+                     repo.psRecordTime.tv_nsec / NSECINUSEC);
+        create_timestamp(&repo.psRecordTime, FALSE);
+        i += sprintf(&repo.psBuffer[i], "\t\"start_datetime\": \"%s\",\n", scratch);
+
+        //
+        // Add maximums for this record
+        //
+        i += sprintf(&repo.psBuffer[i], "\t\"maximum\": {\n");
+        //
+        i += sprintf(&repo.psBuffer[i], "\t\t\"allocated\": {\n");
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"connection_count\": %u,\n", psM->connCount);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"downstream_bandwidth\": %u,\n", psM->dsBandwidth);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"upstream_bandwidth\": %u\n", psM->usBandwidth);
+        //----------------------------------------------------------------------
+        i += sprintf(&repo.psBuffer[i], "\t\t},\n\t\t\"system\": {\n");
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_overrun_size\": %u,\n", psM->txOverrunSize);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_burst_size\": %u,\n", psM->txBurstSize);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_burst_size\": %u,\n", psM->rxBurstSize);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"fd_ready_size\": %u,\n", psM->fdReadySize);
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"timer_coalesce_size\": %u\n", psM->timCoalesceSize);
+        i += sprintf(&repo.psBuffer[i], "\t\t}\n");
+        //
+        i += sprintf(&repo.psBuffer[i], "\t},\n");
+        memset(&repo.psMaximums, 0, sizeof(struct perfStatsMaximums));
+
+        //
+        // Calculate time delta since last record for averaging
+        //
+        tspecminus(&repo.systemClock, &repo.psRecordTime, &tspecvar);
+        delta = (double) tspecmsec(&tspecvar);
+
+        //
+        // Add averages for this record
+        //
+        i += sprintf(&repo.psBuffer[i], "\t\"average\": {\n");
+        //
+        i += sprintf(&repo.psBuffer[i], "\t\t\"queued\": {\n");
+        dvar = ((double) psA->qdBytes * 8.0) / delta / MSECINSEC;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_ip_rate_mbps\": %.2f,\n", dvar);
+        dvar = ((double) psA->qdDatagrams * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_datagram_rate\": %.2f\n", dvar);
+        //----------------------------------------------------------------------
+        i += sprintf(&repo.psBuffer[i], "\t\t},\n\t\t\"delivered\": {\n");
+        dvar = ((double) psA->txBytes * 8.0) / delta / MSECINSEC;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_ip_rate_mbps\": %.2f,\n", dvar);
+        dvar = ((double) psA->txDatagrams * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_datagram_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->txSeqErrLoss * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_loss_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->txSeqErrOooDup * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_ooo_dup_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxBytes * 8.0) / delta / MSECINSEC;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_ip_rate_mbps\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxDatagrams * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_datagram_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxSeqErrLoss * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_loss_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxSeqErrOooDup * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_ooo_dup_rate\": %.2f\n", dvar);
+        //----------------------------------------------------------------------
+        i += sprintf(&repo.psBuffer[i], "\t\t},\n\t\t\"system\": {\n");
+        dvar = ((double) psA->txOverrunCount * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_overrun_rate\": %.2f,\n", dvar);
+        dvar = 0;
+        if (psA->txOverrunCount > 0)
+                dvar = (double) psA->txOverrunTotal / (double) psA->txOverrunCount;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_overrun_size\": %.2f,\n", dvar);
+        dvar = ((double) psA->txBurstCount * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_burst_rate\": %.2f,\n", dvar);
+        dvar = 0;
+        if (psA->txBurstCount > 0)
+                dvar = (double) psA->txBurstTotal / (double) psA->txBurstCount;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_burst_size\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxBurstCount * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_burst_rate\": %.2f,\n", dvar);
+        dvar = 0;
+        if (psA->rxBurstCount > 0)
+                dvar = (double) psA->rxBurstTotal / (double) psA->rxBurstCount;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_burst_size\": %.2f,\n", dvar);
+        dvar = ((double) psA->fdReadyCount * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"fd_ready_rate\": %.2f,\n", dvar);
+        dvar = 0;
+        if (psA->fdReadyCount > 0)
+                dvar = (double) psA->fdReadyTotal / (double) psA->fdReadyCount;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"fd_ready_size\": %.2f,\n", dvar);
+        dvar = ((double) psA->timCoalesceCount * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"timer_coalesce_rate\": %.2f,\n", dvar);
+        dvar = 0;
+        if (psA->timCoalesceCount > 0)
+                dvar = (double) psA->timCoalesceTotal / (double) psA->timCoalesceCount;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"timer_coalesce_size\": %.2f\n", dvar);
+        //----------------------------------------------------------------------
+        i += sprintf(&repo.psBuffer[i], "\t\t},\n\t\t\"status\": {\n");
+        dvar = ((double) psA->txStatusMsgs * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"tx_message_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->rxStatusMsgs * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rx_message_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->locStatusLoss * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"loc_message_loss_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->remStatusLoss * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rem_message_loss_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->locTrafficStop * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"loc_traffic_stop_rate\": %.2f,\n", dvar);
+        dvar = ((double) psA->remTrafficStop * MSECINSEC) / delta;
+        i += sprintf(&repo.psBuffer[i], "\t\t\t\"rem_traffic_stop_rate\": %.2f\n", dvar);
+        i += sprintf(&repo.psBuffer[i], "\t\t}\n");
+        //
+        i += sprintf(&repo.psBuffer[i], "\t},\n");
+        memset(&repo.psAverages, 0, sizeof(struct perfStatsAverages));
+
+        //
+        // Add end time info for this record
+        //
+        i += sprintf(&repo.psBuffer[i], "\t\"end_timestamp\": %ld.%06ld,\n", repo.systemClock.tv_sec,
+                     repo.systemClock.tv_nsec / NSECINUSEC);
+        create_timestamp(&repo.systemClock, FALSE);
+        i += sprintf(&repo.psBuffer[i], "\t\"end_datetime\": \"%s\"\n", scratch);
+        repo.psBuffer[i++] = '}';
+
+        //
+        // Finalize record processing
+        //
+        repo.psBufSize = i;   // Restore saved buffer size for next record
+        repo.psRecordCount++; // Increment record count
+        tspeccpy(&repo.psRecordTime, &repo.systemClock);
+
+        //
+        // Finalize performance statistics file if file time exceeded
+        //
+        if (repo.systemClock.tv_sec >= repo.psFileTime) {
+                //
+                // End arrary of records and add record count
+                //
+                repo.psBuffer[i++] = ']';
+                repo.psBuffer[i++] = ',';
+                repo.psBuffer[i++] = '\n';
+                i += sprintf(&repo.psBuffer[i], "\"data_record_count\": %d,\n", repo.psRecordCount);
+
+                //
+                // Add counters
+                //
+                i += sprintf(&repo.psBuffer[i], "\"counters\": {\n");
+                //
+                i += sprintf(&repo.psBuffer[i], "\t\"setup\": {\n");
+                i += sprintf(&repo.psBuffer[i], "\t\t\"requests_received\": %u,\n", psC->setupRequestCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"accepts_sent\": %u,\n", psC->setupAcceptCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"rejects_sent\": %u,\n", psC->setupRejectCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"invalid_protocol_ver\": %u,\n", psC->invalidProtocolVer);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"invalid_setup_option\": %u,\n", psC->invalidSetupOption);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"bandwidth_exceeded\": %u,\n", psC->bandwidthExceeded);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"connection_create_fail\": %u,\n", psC->connCreateFail);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"legacy_protocol_ver\": %u\n", psC->legacyProtocolVer);
+                //----------------------------------------------------------------------
+                i += sprintf(&repo.psBuffer[i], "\t},\n\t\"activation\": {\n");
+                i += sprintf(&repo.psBuffer[i], "\t\t\"timeout_waiting\": %u,\n", psC->timeoutAwaitingAct);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"requests_received\": %u,\n", psC->actRequestCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"accepts_sent\": %u,\n", psC->actAcceptCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"rejects_sent\": %u,\n", psC->actRejectCnt);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"bad_parameter\": %u\n", psC->badActParameter);
+                //----------------------------------------------------------------------
+                i += sprintf(&repo.psBuffer[i], "\t},\n\t\"control\": {\n");
+                i += sprintf(&repo.psBuffer[i], "\t\t\"invalid_size\": %u,\n", psC->ctrlInvalidSize);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"invalid_format\": %u,\n", psC->ctrlInvalidFormat);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"invalid_checksum\": %u,\n", psC->ctrlInvalidChksum);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"auth_failure\": %u,\n", psC->ctrlAuthFailure);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"bad_auth_time\": %u\n", psC->ctrlBadAuthTime);
+                //----------------------------------------------------------------------
+                i += sprintf(&repo.psBuffer[i], "\t},\n\t\"data\": {\n");
+                i += sprintf(&repo.psBuffer[i], "\t\t\"load_invalid_size\": %u,\n", psC->loadInvalidSize);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"load_invalid_format\": %u,\n", psC->loadInvalidFormat);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"load_invalid_checksum\": %u,\n", psC->loadInvalidChksum);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"status_invalid_size\": %u,\n", psC->statusInvalidSize);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"status_invalid_format\": %u,\n", psC->statusInvalidFormat);
+                i += sprintf(&repo.psBuffer[i], "\t\t\"status_invalid_checksum\": %u\n", psC->statusInvalidChksum);
+                i += sprintf(&repo.psBuffer[i], "\t}\n");
+                //
+                i += sprintf(&repo.psBuffer[i], "},\n");
+
+                //
+                // Add end time info for file
+                //
+                tspecminus(&repo.systemClock, &repo.startTime, &tspecvar);
+                i += sprintf(&repo.psBuffer[i], "\"process_uptime\": %ld,\n", tspecvar.tv_sec);
+                //
+                i += sprintf(&repo.psBuffer[i], "\"end_timestamp\": %ld.%06ld,\n", repo.systemClock.tv_sec,
+                             repo.systemClock.tv_nsec / NSECINUSEC);
+                create_timestamp(&repo.systemClock, FALSE);
+                i += sprintf(&repo.psBuffer[i], "\"end_datetime\": \"%s\"\n", scratch);
+                repo.psBuffer[i++] = '}';
+                repo.psBuffer[i++] = '\n';
+                repo.psBuffer[i++] = '\0'; // Terminate completed buffer
+
+                //
+                // Write to output file
+                //
+                repo.psBufSize = i; // Restore saved buffer size for completed buffer
+                if ((var = proc_pstats_file(connindex, FALSE)) > 0) {
+                        send_proc(errConn, scratch, var);
+                        return 0;
+                }
+        }
+        return 0;
 }
 //----------------------------------------------------------------------------

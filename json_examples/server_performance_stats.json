@@ -1,0 +1,1705 @@
+{
+"host_name": "ny4-vm2",
+"host_ip_address": "192.168.1.238",
+"control_port": 24601,
+"process_id": 3198,
+"software_version": "9.0.0",
+"protocol_version": 20,
+"schema_version": 1.0,
+"jumbo_datagrams": false,
+"traditional_mtu": true,
+"gso_enabled": true,
+"max_connections": 254,
+"max_bandwidth": 10000,
+"start_timestamp": 1760973720.882273,
+"start_datetime": "2025-10-20T11:22:00.882273-04:00",
+"data_records": [{
+	"start_timestamp": 1760973720.882273,
+	"start_datetime": "2025-10-20T11:22:00.882273-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 10,
+			"downstream_bandwidth": 1544,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 10,
+			"rx_burst_size": 0,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 436.74,
+			"tx_datagram_rate": 37790.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 442.72,
+			"tx_datagram_rate": 38297.70,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 17335.90,
+			"tx_burst_size": 2.18,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 29.60,
+			"fd_ready_size": 1.25,
+			"timer_coalesce_rate": 122.90,
+			"timer_coalesce_size": 2.00
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 36.40,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973730.882323,
+	"end_datetime": "2025-10-20T11:22:10.882323-04:00"
+}, {
+	"start_timestamp": 1760973730.882323,
+	"start_datetime": "2025-10-20T11:22:10.882323-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 364,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 3
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 312.01,
+			"tx_datagram_rate": 28000.70
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 312.35,
+			"tx_datagram_rate": 28031.50,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 4000.10,
+			"tx_burst_size": 7.00,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 66.20,
+			"fd_ready_size": 1.21,
+			"timer_coalesce_rate": 17.10,
+			"timer_coalesce_size": 2.01
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 80.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973740.882420,
+	"end_datetime": "2025-10-20T11:22:20.882420-04:00"
+}, {
+	"start_timestamp": 1760973740.882420,
+	"start_datetime": "2025-10-20T11:22:20.882420-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 612
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 194,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 9
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1.85,
+			"tx_datagram_rate": 165.90
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 2.75,
+			"tx_datagram_rate": 247.10,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 3142.06,
+			"rx_datagram_rate": 265295.40,
+			"rx_loss_rate": 0.70,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 23.70,
+			"tx_burst_size": 7.00,
+			"rx_burst_rate": 36374.50,
+			"rx_burst_size": 7.31,
+			"fd_ready_rate": 35618.00,
+			"fd_ready_size": 1.02,
+			"timer_coalesce_rate": 2.70,
+			"timer_coalesce_size": 2.44
+		},
+		"status": {
+			"tx_message_rate": 75.20,
+			"rx_message_rate": 0.80,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973750.882430,
+	"end_datetime": "2025-10-20T11:22:30.882430-04:00"
+}, {
+	"start_timestamp": 1760973750.882430,
+	"start_datetime": "2025-10-20T11:22:30.882430-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 638
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 0,
+			"rx_burst_size": 14,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 2
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 641.38,
+			"rx_datagram_rate": 54266.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 0.00,
+			"tx_burst_size": 0.00,
+			"rx_burst_rate": 9229.80,
+			"rx_burst_size": 5.83,
+			"fd_ready_rate": 9224.00,
+			"fd_ready_size": 1.00,
+			"timer_coalesce_rate": 0.30,
+			"timer_coalesce_size": 2.00
+		},
+		"status": {
+			"tx_message_rate": 19.60,
+			"rx_message_rate": 0.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973760.882509,
+	"end_datetime": "2025-10-20T11:22:40.882509-04:00"
+}, {
+	"start_timestamp": 1760973760.882509,
+	"start_datetime": "2025-10-20T11:22:40.882509-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 3,
+			"downstream_bandwidth": 396,
+			"upstream_bandwidth": 638
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 4,
+			"rx_burst_size": 33,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 6
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 908.49,
+			"tx_datagram_rate": 76800.60
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 906.93,
+			"tx_datagram_rate": 76668.60,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 295.66,
+			"rx_datagram_rate": 25021.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 20605.50,
+			"tx_burst_size": 3.73,
+			"rx_burst_rate": 5072.90,
+			"rx_burst_size": 4.91,
+			"fd_ready_rate": 5090.80,
+			"fd_ready_size": 1.00,
+			"timer_coalesce_rate": 0.70,
+			"timer_coalesce_size": 2.71
+		},
+		"status": {
+			"tx_message_rate": 10.20,
+			"rx_message_rate": 37.60,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973770.882594,
+	"end_datetime": "2025-10-20T11:22:50.882594-04:00"
+}, {
+	"start_timestamp": 1760973770.882594,
+	"start_datetime": "2025-10-20T11:22:50.882594-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 994,
+			"upstream_bandwidth": 453
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 5,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 840.27,
+			"tx_datagram_rate": 70302.50
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 840.93,
+			"tx_datagram_rate": 70359.50,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 118.08,
+			"rx_datagram_rate": 10310.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 12607.60,
+			"tx_burst_size": 5.58,
+			"rx_burst_rate": 9384.40,
+			"rx_burst_size": 1.10,
+			"fd_ready_rate": 9405.80,
+			"fd_ready_size": 1.00,
+			"timer_coalesce_rate": 0.60,
+			"timer_coalesce_size": 2.83
+		},
+		"status": {
+			"tx_message_rate": 18.80,
+			"rx_message_rate": 23.20,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973780.882595,
+	"end_datetime": "2025-10-20T11:23:00.882595-04:00"
+}, {
+	"start_timestamp": 1760973780.882595,
+	"start_datetime": "2025-10-20T11:23:00.882595-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 598,
+			"upstream_bandwidth": 453
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 51,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 85.17,
+			"tx_datagram_rate": 7115.40
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 86.07,
+			"tx_datagram_rate": 7190.40,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1791.15,
+			"rx_datagram_rate": 151040.80,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 1185.90,
+			"tx_burst_size": 6.00,
+			"rx_burst_rate": 30453.50,
+			"rx_burst_size": 4.96,
+			"fd_ready_rate": 25122.20,
+			"fd_ready_size": 1.21,
+			"timer_coalesce_rate": 3.60,
+			"timer_coalesce_size": 2.36
+		},
+		"status": {
+			"tx_message_rate": 61.40,
+			"rx_message_rate": 2.20,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973790.882678,
+	"end_datetime": "2025-10-20T11:23:10.882678-04:00"
+}, {
+	"start_timestamp": 1760973790.882678,
+	"start_datetime": "2025-10-20T11:23:10.882678-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 10,
+			"downstream_bandwidth": 2275,
+			"upstream_bandwidth": 340
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 143,
+			"fd_ready_size": 7,
+			"timer_coalesce_size": 12
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1630.67,
+			"tx_datagram_rate": 135991.40
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1623.19,
+			"tx_datagram_rate": 135367.10,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 746.65,
+			"rx_datagram_rate": 62944.50,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 34353.90,
+			"tx_burst_size": 3.96,
+			"rx_burst_rate": 11076.20,
+			"rx_burst_size": 5.68,
+			"fd_ready_rate": 8702.30,
+			"fd_ready_size": 1.28,
+			"timer_coalesce_rate": 2760.40,
+			"timer_coalesce_size": 2.10
+		},
+		"status": {
+			"tx_message_rate": 24.80,
+			"rx_message_rate": 101.10,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973800.882833,
+	"end_datetime": "2025-10-20T11:23:20.882833-04:00"
+}, {
+	"start_timestamp": 1760973800.882833,
+	"start_datetime": "2025-10-20T11:23:20.882833-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 10,
+			"downstream_bandwidth": 2275,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1626.64,
+			"tx_datagram_rate": 137682.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1625.17,
+			"tx_datagram_rate": 137538.90,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 40341.40,
+			"tx_burst_size": 3.41,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 72.60,
+			"fd_ready_size": 1.31,
+			"timer_coalesce_rate": 1590.20,
+			"timer_coalesce_size": 2.02
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 94.10,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973810.882874,
+	"end_datetime": "2025-10-20T11:23:30.882874-04:00"
+}, {
+	"start_timestamp": 1760973810.882874,
+	"start_datetime": "2025-10-20T11:23:30.882874-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 874,
+			"upstream_bandwidth": 1000
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 4,
+			"rx_burst_size": 40,
+			"fd_ready_size": 5,
+			"timer_coalesce_size": 6
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1418.68,
+			"tx_datagram_rate": 121729.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1427.64,
+			"tx_datagram_rate": 122498.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 813.37,
+			"rx_datagram_rate": 68644.90,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 35494.40,
+			"tx_burst_size": 3.43,
+			"rx_burst_rate": 11144.20,
+			"rx_burst_size": 6.21,
+			"fd_ready_rate": 9256.00,
+			"fd_ready_size": 1.21,
+			"timer_coalesce_rate": 1388.80,
+			"timer_coalesce_size": 2.01
+		},
+		"status": {
+			"tx_message_rate": 26.10,
+			"rx_message_rate": 77.80,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973820.882919,
+	"end_datetime": "2025-10-20T11:23:40.882919-04:00"
+}, {
+	"start_timestamp": 1760973820.882919,
+	"start_datetime": "2025-10-20T11:23:40.882919-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 36,
+			"upstream_bandwidth": 1000
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 8,
+			"rx_burst_size": 40,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 207.51,
+			"tx_datagram_rate": 17787.20
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 206.13,
+			"tx_datagram_rate": 17668.60,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1159.99,
+			"rx_datagram_rate": 97897.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 10869.10,
+			"tx_burst_size": 1.64,
+			"rx_burst_rate": 18371.20,
+			"rx_burst_size": 5.30,
+			"fd_ready_rate": 17817.20,
+			"fd_ready_size": 1.03,
+			"timer_coalesce_rate": 0.60,
+			"timer_coalesce_size": 2.33
+		},
+		"status": {
+			"tx_message_rate": 36.90,
+			"rx_message_rate": 20.10,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973830.883002,
+	"end_datetime": "2025-10-20T11:23:50.883002-04:00"
+}, {
+	"start_timestamp": 1760973830.883002,
+	"start_datetime": "2025-10-20T11:23:50.883002-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 884,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 8,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 7
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1304.80,
+			"tx_datagram_rate": 110237.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1300.77,
+			"tx_datagram_rate": 109902.70,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 36765.40,
+			"tx_burst_size": 3.00,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 45.40,
+			"fd_ready_size": 1.55,
+			"timer_coalesce_rate": 199.90,
+			"timer_coalesce_size": 2.01
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 69.70,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973840.883196,
+	"end_datetime": "2025-10-20T11:24:00.883196-04:00"
+}, {
+	"start_timestamp": 1760973840.883196,
+	"start_datetime": "2025-10-20T11:24:00.883196-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 848,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 8,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1901.34,
+			"tx_datagram_rate": 159394.54
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1906.75,
+			"tx_datagram_rate": 159847.84,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 30169.85,
+			"tx_burst_size": 5.28,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 27.87,
+			"fd_ready_size": 2.05,
+			"timer_coalesce_rate": 287.24,
+			"timer_coalesce_size": 2.01
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 57.15,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973850.892086,
+	"end_datetime": "2025-10-20T11:24:10.892086-04:00"
+}, {
+	"start_timestamp": 1760973850.892086,
+	"start_datetime": "2025-10-20T11:24:10.892086-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 5,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 1073
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 0,
+			"rx_burst_size": 25,
+			"fd_ready_size": 5,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1154.60,
+			"rx_datagram_rate": 98060.20,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 0.00,
+			"tx_burst_size": 0.00,
+			"rx_burst_rate": 34614.60,
+			"rx_burst_size": 2.84,
+			"fd_ready_rate": 28269.80,
+			"fd_ready_size": 1.22,
+			"timer_coalesce_rate": 15.20,
+			"timer_coalesce_size": 2.07
+		},
+		"status": {
+			"tx_message_rate": 69.50,
+			"rx_message_rate": 0.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973860.892182,
+	"end_datetime": "2025-10-20T11:24:20.892182-04:00"
+}, {
+	"start_timestamp": 1760973860.892182,
+	"start_datetime": "2025-10-20T11:24:20.892182-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 5,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 1073
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 0,
+			"rx_burst_size": 65,
+			"fd_ready_size": 5,
+			"timer_coalesce_size": 6
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1484.66,
+			"rx_datagram_rate": 125165.90,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 0.00,
+			"tx_burst_size": 0.00,
+			"rx_burst_rate": 30122.30,
+			"rx_burst_size": 4.15,
+			"fd_ready_rate": 22105.50,
+			"fd_ready_size": 1.36,
+			"timer_coalesce_rate": 36.20,
+			"timer_coalesce_size": 2.09
+		},
+		"status": {
+			"tx_message_rate": 60.90,
+			"rx_message_rate": 0.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973870.892279,
+	"end_datetime": "2025-10-20T11:24:30.892279-04:00"
+}, {
+	"start_timestamp": 1760973870.892279,
+	"start_datetime": "2025-10-20T11:24:30.892279-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 72,
+			"upstream_bandwidth": 554
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 10,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 947.28,
+			"tx_datagram_rate": 79149.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 945.73,
+			"tx_datagram_rate": 79020.50,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 306.58,
+			"rx_datagram_rate": 25756.30,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 13820.80,
+			"tx_burst_size": 5.73,
+			"rx_burst_rate": 8271.80,
+			"rx_burst_size": 3.10,
+			"fd_ready_rate": 8192.80,
+			"fd_ready_size": 1.01,
+			"timer_coalesce_rate": 7.50,
+			"timer_coalesce_size": 2.04
+		},
+		"status": {
+			"tx_message_rate": 16.60,
+			"rx_message_rate": 25.40,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973880.892280,
+	"end_datetime": "2025-10-20T11:24:40.892280-04:00"
+}, {
+	"start_timestamp": 1760973880.892280,
+	"start_datetime": "2025-10-20T11:24:40.892280-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 5,
+			"downstream_bandwidth": 272,
+			"upstream_bandwidth": 744
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 9,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1245.52,
+			"tx_datagram_rate": 104416.70
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1246.70,
+			"tx_datagram_rate": 104514.80,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 138.98,
+			"rx_datagram_rate": 11690.10,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 25091.60,
+			"tx_burst_size": 4.16,
+			"rx_burst_rate": 1300.00,
+			"rx_burst_size": 9.00,
+			"fd_ready_rate": 1332.20,
+			"fd_ready_size": 1.01,
+			"timer_coalesce_rate": 6.00,
+			"timer_coalesce_size": 2.23
+		},
+		"status": {
+			"tx_message_rate": 26.10,
+			"rx_message_rate": 46.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973890.892281,
+	"end_datetime": "2025-10-20T11:24:50.892281-04:00"
+}, {
+	"start_timestamp": 1760973890.892281,
+	"start_datetime": "2025-10-20T11:24:50.892281-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 11,
+			"downstream_bandwidth": 243,
+			"upstream_bandwidth": 1653
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 28,
+			"fd_ready_size": 9,
+			"timer_coalesce_size": 8
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 946.37,
+			"tx_datagram_rate": 80408.10
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 942.16,
+			"tx_datagram_rate": 80047.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1234.00,
+			"rx_datagram_rate": 105453.10,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 19737.20,
+			"tx_burst_size": 4.07,
+			"rx_burst_rate": 17501.40,
+			"rx_burst_size": 6.05,
+			"fd_ready_rate": 6926.00,
+			"fd_ready_size": 2.54,
+			"timer_coalesce_rate": 1988.70,
+			"timer_coalesce_size": 2.54
+		},
+		"status": {
+			"tx_message_rate": 99.90,
+			"rx_message_rate": 64.20,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973900.892517,
+	"end_datetime": "2025-10-20T11:25:00.892517-04:00"
+}, {
+	"start_timestamp": 1760973900.892517,
+	"start_datetime": "2025-10-20T11:25:00.892517-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 15,
+			"downstream_bandwidth": 243,
+			"upstream_bandwidth": 1889
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 50,
+			"fd_ready_size": 12,
+			"timer_coalesce_size": 12
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 673.14,
+			"tx_datagram_rate": 57923.80
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 677.72,
+			"tx_datagram_rate": 58316.10,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 2393.44,
+			"rx_datagram_rate": 202322.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 18151.60,
+			"tx_burst_size": 3.19,
+			"rx_burst_rate": 25448.30,
+			"rx_burst_size": 7.94,
+			"fd_ready_rate": 14116.30,
+			"fd_ready_size": 1.81,
+			"timer_coalesce_rate": 2012.60,
+			"timer_coalesce_size": 2.94
+		},
+		"status": {
+			"tx_message_rate": 100.40,
+			"rx_message_rate": 74.40,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973910.892586,
+	"end_datetime": "2025-10-20T11:25:10.892586-04:00"
+}, {
+	"start_timestamp": 1760973910.892586,
+	"start_datetime": "2025-10-20T11:25:10.892586-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 15,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 980
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 0,
+			"rx_burst_size": 42,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 3
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1514.48,
+			"rx_datagram_rate": 127641.50,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 0.00,
+			"tx_burst_size": 0.00,
+			"rx_burst_rate": 23034.80,
+			"rx_burst_size": 5.55,
+			"fd_ready_rate": 22145.70,
+			"fd_ready_size": 1.04,
+			"timer_coalesce_rate": 0.80,
+			"timer_coalesce_size": 2.12
+		},
+		"status": {
+			"tx_message_rate": 45.40,
+			"rx_message_rate": 0.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973920.892595,
+	"end_datetime": "2025-10-20T11:25:20.892595-04:00"
+}, {
+	"start_timestamp": 1760973920.892595,
+	"start_datetime": "2025-10-20T11:25:20.892595-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 844,
+			"upstream_bandwidth": 318
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 65,
+			"fd_ready_size": 7,
+			"timer_coalesce_size": 9
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 806.17,
+			"tx_datagram_rate": 68370.40
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 800.80,
+			"tx_datagram_rate": 67915.30,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1661.29,
+			"rx_datagram_rate": 140423.70,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 13414.90,
+			"tx_burst_size": 5.10,
+			"rx_burst_rate": 21030.90,
+			"rx_burst_size": 6.65,
+			"fd_ready_rate": 20017.00,
+			"fd_ready_size": 1.05,
+			"timer_coalesce_rate": 199.50,
+			"timer_coalesce_size": 2.11
+		},
+		"status": {
+			"tx_message_rate": 43.20,
+			"rx_message_rate": 26.40,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973930.892674,
+	"end_datetime": "2025-10-20T11:25:30.892674-04:00"
+}, {
+	"start_timestamp": 1760973930.892674,
+	"start_datetime": "2025-10-20T11:25:30.892674-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 7,
+			"downstream_bandwidth": 1396,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 6,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 6
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1854.58,
+			"tx_datagram_rate": 157333.50
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1859.88,
+			"tx_datagram_rate": 157782.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 31632.40,
+			"tx_burst_size": 4.97,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 70.50,
+			"fd_ready_size": 1.35,
+			"timer_coalesce_rate": 443.00,
+			"timer_coalesce_size": 2.00
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 94.80,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973940.892692,
+	"end_datetime": "2025-10-20T11:25:40.892692-04:00"
+}, {
+	"start_timestamp": 1760973940.892692,
+	"start_datetime": "2025-10-20T11:25:40.892692-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 1090,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 9,
+			"rx_burst_size": 0,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1963.66,
+			"tx_datagram_rate": 165379.20
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1961.85,
+			"tx_datagram_rate": 165226.60,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 26542.70,
+			"tx_burst_size": 6.23,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 41.80,
+			"fd_ready_size": 1.29,
+			"timer_coalesce_rate": 5.90,
+			"timer_coalesce_size": 2.07
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 53.20,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973950.892716,
+	"end_datetime": "2025-10-20T11:25:50.892716-04:00"
+}, {
+	"start_timestamp": 1760973950.892716,
+	"start_datetime": "2025-10-20T11:25:50.892716-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 9,
+			"downstream_bandwidth": 1610,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 9,
+			"rx_burst_size": 0,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 7
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 2722.39,
+			"tx_datagram_rate": 230271.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 2710.52,
+			"tx_datagram_rate": 229269.60,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 44601.80,
+			"tx_burst_size": 5.16,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 89.90,
+			"fd_ready_size": 1.32,
+			"timer_coalesce_rate": 2674.70,
+			"timer_coalesce_size": 2.12
+		},
+		"status": {
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 118.10,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973960.892767,
+	"end_datetime": "2025-10-20T11:26:00.892767-04:00"
+}, {
+	"start_timestamp": 1760973960.892767,
+	"start_datetime": "2025-10-20T11:26:00.892767-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 9,
+			"downstream_bandwidth": 818,
+			"upstream_bandwidth": 36
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 79,
+			"fd_ready_size": 3,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 661.85,
+			"tx_datagram_rate": 56042.90
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 675.20,
+			"tx_datagram_rate": 57165.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1358.72,
+			"rx_datagram_rate": 114072.60,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 10174.20,
+			"tx_burst_size": 5.51,
+			"rx_burst_rate": 14688.30,
+			"rx_burst_size": 7.80,
+			"fd_ready_rate": 14699.90,
+			"fd_ready_size": 1.00,
+			"timer_coalesce_rate": 465.60,
+			"timer_coalesce_size": 2.00
+		},
+		"status": {
+			"tx_message_rate": 29.00,
+			"rx_message_rate": 31.50,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973970.892859,
+	"end_datetime": "2025-10-20T11:26:10.892859-04:00"
+}, {
+	"start_timestamp": 1760973970.892859,
+	"start_datetime": "2025-10-20T11:26:10.892859-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 8,
+			"downstream_bandwidth": 818,
+			"upstream_bandwidth": 1627
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 7,
+			"rx_burst_size": 30,
+			"fd_ready_size": 7,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 118.15,
+			"tx_datagram_rate": 10809.10
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 113.93,
+			"tx_datagram_rate": 10461.50,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 865.77,
+			"rx_datagram_rate": 72882.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 2040.30,
+			"tx_burst_size": 5.30,
+			"rx_burst_rate": 19167.40,
+			"rx_burst_size": 3.81,
+			"fd_ready_rate": 17828.50,
+			"fd_ready_size": 1.08,
+			"timer_coalesce_rate": 90.50,
+			"timer_coalesce_size": 2.19
+		},
+		"status": {
+			"tx_message_rate": 39.50,
+			"rx_message_rate": 34.50,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973980.893015,
+	"end_datetime": "2025-10-20T11:26:20.893015-04:00"
+}, {
+	"start_timestamp": 1760973980.893015,
+	"start_datetime": "2025-10-20T11:26:20.893015-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 8,
+			"downstream_bandwidth": 770,
+			"upstream_bandwidth": 1627
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 8,
+			"rx_burst_size": 61,
+			"fd_ready_size": 8,
+			"timer_coalesce_size": 8
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 1561.53,
+			"tx_datagram_rate": 130507.20
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 1562.99,
+			"tx_datagram_rate": 130628.10,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 2305.01,
+			"rx_datagram_rate": 194301.20,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 19849.00,
+			"tx_burst_size": 6.58,
+			"rx_burst_rate": 19696.20,
+			"rx_burst_size": 9.84,
+			"fd_ready_rate": 5446.20,
+			"fd_ready_size": 3.63,
+			"timer_coalesce_rate": 3835.30,
+			"timer_coalesce_size": 2.19
+		},
+		"status": {
+			"tx_message_rate": 77.00,
+			"rx_message_rate": 70.50,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760973990.893119,
+	"end_datetime": "2025-10-20T11:26:30.893119-04:00"
+}, {
+	"start_timestamp": 1760973990.893119,
+	"start_datetime": "2025-10-20T11:26:30.893119-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 86,
+			"upstream_bandwidth": 244
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 8,
+			"rx_burst_size": 37,
+			"fd_ready_size": 6,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 79.15,
+			"tx_datagram_rate": 6732.30
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 82.32,
+			"tx_datagram_rate": 6997.50,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 594.59,
+			"rx_datagram_rate": 49707.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 915.10,
+			"tx_burst_size": 7.36,
+			"rx_burst_rate": 13517.20,
+			"rx_burst_size": 3.68,
+			"fd_ready_rate": 12646.80,
+			"fd_ready_size": 1.07,
+			"timer_coalesce_rate": 105.40,
+			"timer_coalesce_size": 2.05
+		},
+		"status": {
+			"tx_message_rate": 27.50,
+			"rx_message_rate": 12.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760974000.893175,
+	"end_datetime": "2025-10-20T11:26:40.893175-04:00"
+}, {
+	"start_timestamp": 1760974000.893175,
+	"start_datetime": "2025-10-20T11:26:40.893175-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 4,
+			"downstream_bandwidth": 0,
+			"upstream_bandwidth": 440
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 0,
+			"rx_burst_size": 20,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 4
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 0.00,
+			"tx_datagram_rate": 0.00,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 1219.88,
+			"rx_datagram_rate": 101979.90,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 0.00,
+			"tx_burst_size": 0.00,
+			"rx_burst_rate": 29858.50,
+			"rx_burst_size": 3.41,
+			"fd_ready_rate": 28262.80,
+			"fd_ready_size": 1.06,
+			"timer_coalesce_rate": 3.20,
+			"timer_coalesce_size": 2.28
+		},
+		"status": {
+			"tx_message_rate": 68.00,
+			"rx_message_rate": 0.00,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760974010.893176,
+	"end_datetime": "2025-10-20T11:26:50.893176-04:00"
+}, {
+	"start_timestamp": 1760974010.893176,
+	"start_datetime": "2025-10-20T11:26:50.893176-04:00",
+	"maximum": {
+		"allocated": {
+			"connection_count": 5,
+			"downstream_bandwidth": 508,
+			"upstream_bandwidth": 440
+		},
+		"system": {
+			"tx_overrun_size": 0,
+			"tx_burst_size": 10,
+			"rx_burst_size": 1,
+			"fd_ready_size": 4,
+			"timer_coalesce_size": 5
+		}
+	},
+	"average": {
+		"queued": {
+			"tx_ip_rate_mbps": 200.60,
+			"tx_datagram_rate": 16751.70
+		},
+		"delivered": {
+			"tx_ip_rate_mbps": 200.26,
+			"tx_datagram_rate": 16723.40,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 37.05,
+			"rx_datagram_rate": 3704.70,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 4606.30,
+			"tx_burst_size": 3.64,
+			"rx_burst_rate": 3700.30,
+			"rx_burst_size": 1.00,
+			"fd_ready_rate": 2904.10,
+			"fd_ready_size": 1.28,
+			"timer_coalesce_rate": 0.90,
+			"timer_coalesce_size": 2.33
+		},
+		"status": {
+			"tx_message_rate": 74.00,
+			"rx_message_rate": 8.50,
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	"end_timestamp": 1760974020.893178,
+	"end_datetime": "2025-10-20T11:27:00.893178-04:00"
+}],
+"data_record_count": 30,
+"counters": {
+	"setup": {
+		"requests_received": 191,
+		"accepts_sent": 191,
+		"rejects_sent": 0,
+		"invalid_protocol_ver": 0,
+		"invalid_setup_option": 0,
+		"bandwidth_exceeded": 0,
+		"connection_create_fail": 0,
+		"legacy_protocol_ver": 84
+	},
+	"activation": {
+		"timeout_waiting": 0,
+		"requests_received": 191,
+		"accepts_sent": 191,
+		"rejects_sent": 0,
+		"bad_parameter": 0
+	},
+	"control": {
+		"invalid_size": 0,
+		"invalid_format": 0,
+		"invalid_checksum": 0,
+		"auth_failure": 0,
+		"bad_auth_time": 0
+	},
+	"data": {
+		"load_invalid_size": 0,
+		"load_invalid_format": 0,
+		"load_invalid_checksum": 0,
+		"status_invalid_size": 0,
+		"status_invalid_format": 0,
+		"status_invalid_checksum": 0
+	}
+},
+"process_uptime": 510,
+"end_timestamp": 1760974020.893178,
+"end_datetime": "2025-10-20T11:27:00.893178-04:00"
+}
