@@ -1,0 +1,242 @@
+{
+"host_name": "ny4-vm2",
+"host_ip_address": "192.168.1.238",
+"control_port": 24601,
+"process_id": 3198,
+"software_version": "9.0.0",
+"protocol_version": 20,
+//
+// Schema version for this file's format, fields, and structures. Minor
+// changes that are generally transparent in JSON (e.g., adding a new
+// key-value pair) should be handled as only a point release.
+//
+"schema_version": 1.0,
+"jumbo_datagrams": false,
+"traditional_mtu": true,
+"gso_enabled": true,
+//
+// The maximum number of connections available for testing.
+//
+"max_connections": 254,
+//
+// The maximum bandwidth the server instance was configured
+// with via the '-B mbps' option. This is the total that can be
+// allocated to clients in each direction (used for admission control).
+//
+"max_bandwidth": 10000,
+//
+// Start timestamp for the period covered by this file.
+// All timestamps are the number of seconds since the Unix epoch (with
+// microsecond resolution).
+//
+"start_timestamp": 1760973720.882273,
+//
+// Start datetime string for the period covered by this file.
+// All datetime strings use the local system timezone (with microsecond
+// resolution and timezone offset [+/-hh:mm]). A timezone offset of
+// zero (UTC) is designated by a 'Z' suffix.
+//
+"start_datetime": "2025-10-20T11:22:00.882273-04:00",
+"data_records": [{
+	//
+	// Start timestamp for the period covered by this data record.
+	//
+	"start_timestamp": 1760973720.882273,
+	//
+	// Start datetime string for the period covered by this data record.
+	//
+	"start_datetime": "2025-10-20T11:22:00.882273-04:00",
+	"maximum": {
+		"allocated": {
+			//
+			// Maximum allocations of test resources during this
+			// record period include the maximum number of active
+			// test connections and the maximum bandwidth allocated
+			// to all clients (via the '-B mbps' option of each).
+			//
+			"connection_count": 10,
+			"downstream_bandwidth": 1544,
+			"upstream_bandwidth": 0
+		},
+		"system": {
+			//
+			// The maximum number of datagrams in any send request
+			// that were not accepted by the protocol stack for
+			// transmission. This is normally due to internal
+			// backpressure when attempting to send more data than
+			// the network interface can accommodate. Note, the
+			// protocol stack may still discard datagrams even
+			// after accepting them.
+			//
+			"tx_overrun_size": 0,
+			//
+			// The maximum size burst queued for transmisstion via
+			// sendmmsg() and the maximum size burst received via
+			// recvmmsg().
+			//
+			"tx_burst_size": 10,
+			"rx_burst_size": 0,
+			//
+			// The maximum number of file descriptors (i.e., test
+			// connections) that were ready at any one time with
+			// received datagrams waiting to be processed. This
+			// value increases as the number of simultaneous
+			// tests increases.
+			//
+			"fd_ready_size": 3,
+			//
+			// The maximum number of timer interrupts that
+			// coalesced into a single timer event.
+			//
+			"timer_coalesce_size": 5
+		}
+	},
+	//
+	// All average rates are per-second rates, averaged over this record
+	// period.
+	//
+	"average": {
+		//
+		// Average queued traffic rates.
+		// Queued metrics represent offered load to the protocol stack.
+		// This traffic was accepted for transmission but may not
+		// have been fully transmitted during this period. Also,
+		// acceptance does not guarantee transmission (discards are
+		// still possible).
+		//
+		"queued": {
+			"tx_ip_rate_mbps": 436.74,
+			"tx_datagram_rate": 37790.80
+		},
+		// 
+		// Average delivered traffic rates.
+		// Delivered traffic has either arrived at the remote end (and
+		// is being reported back via status messages) or has been
+		// received locally. Loss and out-of-order/duplicates are also
+		// from the receiver's perspective (so they represent
+		// end-to-end impairments).
+		//
+		// NOTE: Because the calculation time frames for queued and
+		// delivered transmit traffic are not synchronized, even
+		// with zero loss, they are expected to slightly differ.
+		// Additionally, although only rates are given, totals for any
+		// record interval can be obtained by reversing the calculation.
+		// For example, total IP megabytes transmitted is equal to
+		// tx_ip_rate_mbps * (end_timestamp - start_timestamp) / 8 = MB
+		//
+		"delivered": {
+			"tx_ip_rate_mbps": 442.72,
+			"tx_datagram_rate": 38297.70,
+			"tx_loss_rate": 0.00,
+			"tx_ooo_dup_rate": 0.00,
+			"rx_ip_rate_mbps": 0.00,
+			"rx_datagram_rate": 0.00,
+			"rx_loss_rate": 0.00,
+			"rx_ooo_dup_rate": 0.00
+		},
+		"system": {
+			//
+			// The average rate and size of metrics already
+			// described above.
+			//
+			"tx_overrun_rate": 0.00,
+			"tx_overrun_size": 0.00,
+			"tx_burst_rate": 17335.90,
+			"tx_burst_size": 2.18,
+			"rx_burst_rate": 0.00,
+			"rx_burst_size": 0.00,
+			"fd_ready_rate": 29.60,
+			"fd_ready_size": 1.25,
+			"timer_coalesce_rate": 122.90,
+			"timer_coalesce_size": 2.00
+		},
+		"status": {
+			//
+			// The average rate of status messages transmitted and
+			// received.
+			//
+			"tx_message_rate": 0.00,
+			"rx_message_rate": 36.40,
+			//
+			// The average rate of local and remote lost status
+			// messages.
+			//
+			"loc_message_loss_rate": 0.00,
+			"rem_message_loss_rate": 0.00,
+			//
+			// The average rate of local and remote traffic stopped
+			// indications.
+			//
+			"loc_traffic_stop_rate": 0.00,
+			"rem_traffic_stop_rate": 0.00
+		}
+	},
+	//
+	// End timestamp for the period covered by this data record.
+	//
+	"end_timestamp": 1760973730.882323,
+	//
+	// End datetime string for the period covered by this data record.
+	//
+	"end_datetime": "2025-10-20T11:22:10.882323-04:00"
+	//
+	// ...REMAINING 29 DATA RECORDS REMOVED FOR BREVITY.
+	//
+}],
+"data_record_count": 30, // Only the first record is actually included
+"counters": {
+	"setup": {
+		"requests_received": 191,
+		"accepts_sent": 191,
+		"rejects_sent": 0,
+		"invalid_protocol_ver": 0,	// Client too old
+		"invalid_setup_option": 0,	// See options '-j', '-T', etc.
+		"bandwidth_exceeded": 0,	// See "max_bandwidth"
+		"connection_create_fail": 0,	// See "max_connections"
+		"legacy_protocol_ver": 84	// Backward compatibility
+	},
+	"activation": {
+		"timeout_waiting": 0, // Expected test activation never arrived
+		"requests_received": 191,
+		"accepts_sent": 191,
+		"rejects_sent": 0,
+		"bad_parameter": 0
+	},
+	//
+	// Errors during the control phase of testing.
+	//
+	// NOTE: Internet port scanners may trigger size, format, or checksum
+	// errors on the control port (if reachable).
+	//
+	"control": {
+		"invalid_size": 0,
+		"invalid_format": 0,
+		"invalid_checksum": 0,
+		"auth_failure": 0,	// Authetication failure
+		"bad_auth_time": 0	// Inadequate client/server time sync
+	},
+	//
+	// Errors during the data phase of testing.
+	//
+	// NOTE: Internet port scanners may trigger size, format, or checksum
+	// errors on the ephemeral port used for a test (if reachable).
+	//
+	"data": {
+		"load_invalid_size": 0,
+		"load_invalid_format": 0,
+		"load_invalid_checksum": 0,
+		"status_invalid_size": 0,
+		"status_invalid_format": 0,
+		"status_invalid_checksum": 0
+	}
+},
+"process_uptime": 510, // Seconds since software start
+//
+// End timestamp for the period covered by this file.
+//
+"end_timestamp": 1760974020.893178,
+//
+// End datetime string for the period covered by this file.
+//
+"end_datetime": "2025-10-20T11:27:00.893178-04:00"
+}

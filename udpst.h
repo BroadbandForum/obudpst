@@ -48,27 +48,37 @@
 //
 // General
 //
-#define SOFTWARE_TITLE    "UDP Speed Test"
-#define USTEST_TEXT       "Upstream"
-#define DSTEST_TEXT       "Downstream"
-#define TIME_FORMAT       "%Y-%m-%d %H:%M:%S"
-#define STRING_SIZE       1024               // String buffer size
-#define AUTH_KEY_SIZE     64                 // Authentication key size
-#define MAX_KEY_ENTRIES   256                // Maximum key entries
-#define HS_DELTA_BACKUP   3                  // High-speed delta backup multiplier
-#define MAX_SERVER_CONN   256                // Max server connections
-#define MAX_CLIENT_CONN   (MAX_MC_COUNT + 1) // Max client connections (plus aggregate)
-#define MAX_EPOLL_EVENTS  MAX_SERVER_CONN    // Max epoll events handled at one time
-#define AGG_QUERY_TIME    10                 // Query timer for aggregate connection (ms)
-#define MIN_RANDOM_START  5                  // Minimum used for random I/O start (ms)
-#define MAX_RANDOM_START  50                 // Maximum used for random I/O start (ms)
-#define AUTH_TIME_WINDOW  150                // Authentication +/- time windows (sec)
-#define AUTH_ENFORCE_TIME TRUE               // Enforce authentication time window
-#define ALERT_MSG_LIMIT   10                 // Alert message limit
-#define INFO_MSG_LIMIT    10                 // Info message limit (per connection)
-#define WARNING_MSG_LIMIT 10                 // Warning message limit (per connection)
-#define WARNING_NOTRAFFIC 1                  // Receive traffic stopped warning threshold (sec)
-#define TIMEOUT_NOTRAFFIC (WARNING_NOTRAFFIC + 2)
+#define SOFTWARE_VER       "9.0.0"
+#define SOFTWARE_TITLE     "UDP Speed Test"
+#define USTEST_TEXT        "Upstream"
+#define DSTEST_TEXT        "Downstream"
+#define TIME_FORMAT        "%Y-%m-%d %H:%M:%S"
+#define STRING_SIZE        1024               // String buffer size
+#define AUTH_KEY_SIZE      64                 // Authentication key size
+#define MAX_KEY_ENTRIES    256                // Maximum key entries
+#define HS_DELTA_BACKUP    3                  // High-speed delta backup multiplier
+#define MAX_SERVER_CONN    256                // Max server connections
+#define MAX_CLIENT_CONN    (MAX_MC_COUNT + 1) // Max client connections (plus aggregate)
+#define MAX_EPOLL_EVENTS   MAX_SERVER_CONN    // Max epoll events handled at one time
+#define AGG_QUERY_TIME     10                 // Query timer for aggregate connection (ms)
+#define IDLE_INTERVAL_USEC 10000              // Idle interval timer [server idle] (us)
+#define MIN_RANDOM_START   5                  // Minimum used for random I/O start (ms)
+#define MAX_RANDOM_START   50                 // Maximum used for random I/O start (ms)
+#define AUTH_TIME_WINDOW   5                  // Authentication +/- time windows (sec)
+#define AUTH_ENFORCE_TIME  TRUE               // Enforce authentication time window
+#define ALERT_MSG_LIMIT    10                 // Alert message limit
+#define INFO_MSG_LIMIT     10                 // Info message limit (per connection)
+#define WARNING_MSG_LIMIT  10                 // Warning message limit (per connection)
+#define WARNING_NOTRAFFIC  1                  // Receive traffic stopped warning threshold (sec)
+#define TIMEOUT_NOTRAFFIC  (WARNING_NOTRAFFIC + 2)
+//
+// Performance statistics
+//
+#define STATS_RECORD_INT  10  // Record interval (sec)
+#define STATS_FILE_INT    300 // File interval (sec)
+#define STATS_BUFFER_SIZE (((STATS_FILE_INT / STATS_RECORD_INT) + 1) * 2048)
+#define STATS_GMAX_TIMER  500 // Timer for global maximums (ms)
+#define STATS_SCHEMA_VER  1.0 // Schema version of file and record format
 //
 // General status and status base values for warning and error ranges (ErrorStatus)
 //   See udpst_protocol.h for CHSR_CRSP_XXXX and CHTA_CRSP_XXXX values
@@ -89,6 +99,8 @@
 #define WARN_LOC_STOPPED 3 // Locally received traffic has stopped
 #define WARN_REM_STOPPED 4 // Remotely received traffic has stopped
 #define WARN_RX_INVPDU   5 // Received invalid PDU
+#define WARN_LOC_ECNBLCH 6 // Locally received ECN bleaching detected
+#define WARN_REM_ECNBLCH 7 // Remotely received ECN bleaching detected
 // Configuration errors (offset of STATUS_CONF_ERRBASE)
 #define ERROR_CONF_GENERIC 0 // Generic configuration issue
 #define ERROR_CONF_KEYFILE 1 // Configuration issue with/within key file
@@ -116,31 +128,32 @@
 //
 // Default and min/max parameter values
 //
-#define DEF_JUMBO_STATUS     TRUE       // Enable/disable jumbo datagram sizes
-#define DEF_USE_OWDELVAR     FALSE      // Use one-way delay instead of RTT
-#define DEF_IGNORE_OOODUP    TRUE       // Ignore Out-of-Order/Duplicate datagrams
-#define DEF_MC_COUNT         1          // Multi-connection test count
-#define MIN_MC_COUNT         1          //
-#define MAX_MC_COUNT         24         //
-#define DEF_IPTOS_BYTE       0          // IP ToS byte for testing
-#define MIN_IPTOS_BYTE       0          //
-#define MAX_IPTOS_BYTE       UINT8_MAX  //
-#define DEF_SRINDEX_CONF     UINT16_MAX // Sending rate index, <Auto> = UINT16_MAX
-#define MIN_SRINDEX_CONF     0          //
+#define DEF_JUMBO_STATUS     TRUE           // Enable/disable jumbo datagram sizes
+#define DEF_USE_OWDELVAR     FALSE          // Use one-way delay instead of RTT
+#define DEF_IGNORE_OOODUP    TRUE           // Ignore Out-of-Order/Duplicate datagrams
+#define DEF_SEQNUM_ADJ       TRUE           // Adjust seq. numbers from backpressure
+#define DEF_MC_COUNT         1              // Multi-connection test count
+#define MIN_MC_COUNT         1              //
+#define MAX_MC_COUNT         24             //
+#define DEF_DSCPECN_BYTE     0              // DSCP+ECN byte for testing
+#define MIN_DSCPECN_BYTE     0              //
+#define MAX_DSCPECN_BYTE     UINT8_MAX      //
+#define DEF_SRINDEX_CONF     CHTA_SRIDX_DEF // Sending rate index, <Auto> = UINT16_MAX
+#define MIN_SRINDEX_CONF     0              //
 #define MAX_SRINDEX_CONF     (MAX_SENDING_RATES - 1)
 #define SRIDX_ISSTART_PREFIX '@'        // Prefix char for sending rate starting point
 #define DEF_TESTINT_TIME     10         // Test interval time (sec)
 #define MIN_TESTINT_TIME     5          //
 #define MAX_TESTINT_TIME     3600       //
-#define DEF_SUBINT_PERIOD    1          // Sub-interval period (sec)
-#define MIN_SUBINT_PERIOD    1          //
-#define MAX_SUBINT_PERIOD    10         //
-#define DEF_CONTROL_PORT     25000      // Control port
+#define DEF_SUBINT_PERIOD    1000       // Sub-interval period (ms)
+#define MIN_SUBINT_PERIOD    100        //
+#define MAX_SUBINT_PERIOD    10000      //
+#define DEF_CONTROL_PORT     24601      // Control port (previously 25000)
 #define MIN_CONTROL_PORT     1          //
 #define MAX_CONTROL_PORT     UINT16_MAX //
 #define DEF_BIMODAL_COUNT    0          // Bimodal initial sub-interval count
 #define MIN_BIMODAL_COUNT    1          //
-#define MAX_BIMODAL_COUNT    (MAX_TESTINT_TIME / MIN_SUBINT_PERIOD)
+#define MAX_BIMODAL_COUNT    ((MAX_TESTINT_TIME * MSECINSEC) / MIN_SUBINT_PERIOD)
 #define DEF_SOCKET_BUF       1024000        // Socket buffer to request
 #define MIN_SOCKET_BUF       0              // (0 = System default/minimum)
 #define MAX_SOCKET_BUF       16777216       //
@@ -165,13 +178,16 @@
 #define DEF_LOGFILE_MAX      1000           // Log file max size (KBytes)
 #define MIN_LOGFILE_MAX      10             //
 #define MAX_LOGFILE_MAX      1000000        //
-#define MIN_REQUIRED_BW      1              // Required OR available bandwidth (Mbps)
+#define MIN_REQUIRED_BW      0              // Required OR available bandwidth (Mbps)
 #define MAX_CLIENT_BW        INT16_MAX      // (MSb for direction [CHSR_USDIR_BIT])
 #define MAX_SERVER_BW        100000         //
 #define DEF_RA_ALGO          CHTA_RA_ALGO_B // Default rate adjustment algorithm
 #define DEF_KEY_ID           0              // Key ID
 #define MIN_KEY_ID           0              //
 #define MAX_KEY_ID           UINT8_MAX      //
+#define DEF_ECN_CE_TH        0              // ECN CE threshold
+#define MIN_ECN_CE_TH        1              //
+#define MAX_ECN_CE_TH        UINT8_MAX      //
 
 //----------------------------------------------------------------------------
 //
@@ -266,14 +282,16 @@ struct configuration {
         int bimodalCount;                // Bimodal initial sub-interval count
         BOOL useOwDelVar;                // Use one-way delay instead of RTT
         BOOL ignoreOooDup;               // Ignore Out-of-Order/Duplicate datagrams
+        BOOL seqNumAdjust;               // Adjust seq. numbers from backpressure
         char authKey[AUTH_KEY_SIZE + 4]; // Authentication key (from command-line)
         int keyId;                       // Authentication key ID
         char *keyFile;                   // Authentication key file
-        int ipTosByte;                   // IP ToS byte for testing
+        int dscpEcn;                     // DSCP+ECN byte for testing
         int srIndexConf;                 // Configured sending rate index
         BOOL srIndexIsStart;             // Configured SR index is starting point
+        int srAdjSuppCount;              // Sending rate adj. suppression count
         int testIntTime;                 // Test interval time (sec)
-        int subIntPeriod;                // Sub-interval period (sec)
+        int subIntPeriod;                // Sub-interval period (ms)
         int controlPort;                 // Control port number for setup requests
         int sockSndBuf;                  // Socket send buffer size
         int sockRcvBuf;                  // Socket receive buffer size
@@ -285,10 +303,13 @@ struct configuration {
         int seqErrThresh;                // Sequence error threshold
         int maxBandwidth;                // Required OR available bandwidth
         BOOL intfForMax;                 // Local interface used for maximum
-        char intfName[IFNAMSIZ + 4];     // Local interface for supplemental stats
+        char intfName[IFNAMSIZ + 4];     // Local interface for supplemental data
         int logFileMax;                  // Maximum log file size
         char *logFile;                   // Name of log file
         char *outputFile;                // Name of output (export) file
+        BOOL outputFileAll;              // Output (export) all metadata
+        char *psFile;                    // Name of performance statistics file
+        int ecnCEThresh;                 // ECN CE threshold
 };
 //----------------------------------------------------------------------------
 //
@@ -305,23 +326,92 @@ struct serverId {
         int port;                   // Server control port number
 };
 struct testSummary {
-        unsigned int rxDatagrams; // Total rx datagrams
-        unsigned int seqErrLoss;  // Loss sum
-        unsigned int seqErrOoo;   // Out-of-Order sum
-        unsigned int seqErrDup;   // Duplicate sum
-        unsigned int delayVarMin; // Delay variation minimum
-        unsigned int delayVarMax; // Delay variation maximum
-        unsigned int delayVarSum; // Delay variation sum
-        unsigned int rttMinimum;  // Minimum round-trip time
-        unsigned int rttMaximum;  // Maximum round-trip time
-        double rateSumL3;         // Rate sum at L3
-        double rateSumIntf;       // Rate sum of local interface
-        unsigned int sampleCount; // Sample count
+        unsigned int rxDatagrams;   // Total rx datagrams
+        unsigned int seqErrLoss;    // Loss sum
+        unsigned int seqErrOoo;     // Out-of-Order sum
+        unsigned int seqErrDup;     // Duplicate sum
+        unsigned int delayVarMin;   // Delay variation minimum
+        unsigned int delayVarMax;   // Delay variation maximum
+        unsigned int delayVarSum;   // Delay variation sum
+        unsigned int rttVarMinimum; // RTT variation minimum
+        unsigned int rttVarMaximum; // RTT variation maximum
+        unsigned int rttVarSum;     // RTT variation sum
+        unsigned int rttVarCnt;     // RTT variation count
+        unsigned int rxCECount;     // Receive CE count total
+        double rateSumL3;           // Rate sum at L3
+        double rateSumIntf;         // Rate sum of local interface
+        unsigned int sampleCount;   // Sample count
+};
+struct perfStatsMaximums {
+        unsigned int connCount;       // Connection count
+        unsigned int usBandwidth;     // Upstream bandwidth allocated
+        unsigned int dsBandwidth;     // Downstream bandwidth allocated
+        unsigned int txOverrunSize;   // Queued transmit overrun size
+        unsigned int txBurstSize;     // Transmit burst size
+        unsigned int rxBurstSize;     // Received burst size
+        unsigned int fdReadySize;     // FD ready size
+        unsigned int timCoalesceSize; // Timer coalesce size
+};
+struct perfStatsAverages {
+        unsigned long long qdBytes;    // Queued transmit bytes (64 bits)
+        unsigned long long txBytes;    // Transmitted bytes (64 bits)
+        unsigned long long rxBytes;    // Received bytes (64 bits)
+        unsigned int qdDatagrams;      // Queued transmit datagrams
+        unsigned int txDatagrams;      // Transmitted datagrams
+        unsigned int rxDatagrams;      // Received datagrams
+        unsigned int txSeqErrLoss;     // Transmitted loss
+        unsigned int txSeqErrOooDup;   // Transmitted out-of-order + duplicates
+        unsigned int rxSeqErrLoss;     // Received loss
+        unsigned int rxSeqErrOooDup;   // Received out-of-order + duplicates
+        unsigned int txOverrunCount;   // Queued transmit overrun indications
+        unsigned int txOverrunTotal;   // Queued transmit overrun total count
+        unsigned int txBurstCount;     // Transmitted bursts
+        unsigned int txBurstTotal;     // Transmitted burst total count
+        unsigned int rxBurstCount;     // Received bursts
+        unsigned int rxBurstTotal;     // Received burst total count
+        unsigned int fdReadyCount;     // FD ready indications
+        unsigned int fdReadyTotal;     // FD ready total count
+        unsigned int timCoalesceCount; // Timer coalesce count
+        unsigned int timCoalesceTotal; // Timer coalesce total
+        unsigned int txStatusMsgs;     // Transmitted status messages
+        unsigned int rxStatusMsgs;     // Received status messages
+        unsigned int locStatusLoss;    // Local status messages lost
+        unsigned int remStatusLoss;    // Remote status messages lost
+        unsigned int locTrafficStop;   // Local traffic stop indications
+        unsigned int remTrafficStop;   // Remote traffic stop indications
+};
+struct perfStatsCounters {
+        unsigned int setupRequestCnt;     // Setup request count
+        unsigned int setupAcceptCnt;      // Setup accepted count
+        unsigned int setupRejectCnt;      // Setup rejected count
+        unsigned int invalidProtocolVer;  // Invalid protocol version
+        unsigned int invalidSetupOption;  // Invalid setup option
+        unsigned int bandwidthExceeded;   // Bandwidth exceeded
+        unsigned int connCreateFail;      // Connection creation failure
+        unsigned int legacyProtocolVer;   // Connection with legacy protocol
+        unsigned int timeoutAwaitingAct;  // Timeout awaiting test activation
+        unsigned int actRequestCnt;       // Test activation request count
+        unsigned int actAcceptCnt;        // Test activation accepted count
+        unsigned int actRejectCnt;        // Test activation rejected count
+        unsigned int badActParameter;     // Bad test activation parameter
+        unsigned int ctrlInvalidSize;     // Invalid control msg size
+        unsigned int ctrlInvalidFormat;   // Invalid control msg format
+        unsigned int ctrlInvalidChksum;   // Invalid control msg checksum
+        unsigned int ctrlAuthFailure;     // Auth. failure of control msg
+        unsigned int ctrlBadAuthTime;     // Bad auth. time in control msg
+        unsigned int loadInvalidSize;     // Invalid load msg size
+        unsigned int loadInvalidFormat;   // Invalid load msg format
+        unsigned int loadInvalidChksum;   // Invalid load msg checksum
+        unsigned int statusInvalidSize;   // Invalid status msg size
+        unsigned int statusInvalidFormat; // Invalid status msg format
+        unsigned int statusInvalidChksum; // Invalid status msg checksum
 };
 struct repository {
         struct timespec systemClock;          // Clock reference (CLOCK_REALTIME)
+        struct timespec startTime;            // Process start time
         int epollFD;                          // Epoll file descriptor
         int maxConnIndex;                     // Largest (current) connection index
+        int idleConnIndex;                    // Idle connection index
         int mcIdent;                          // Multi-connection identifier
         struct sendingRate *sendingRates;     // Sending rate table (array)
         int maxSendingRates;                  // Size (rows) of sending rate table
@@ -331,6 +421,7 @@ struct repository {
         char *sndBufRand;                     // Send buffer for randomized load PDUs
         char *rcvDataPtr;                     // Received data pointer for load PDUs
         int rcvDataSize;                      // Received data size in default buffer
+        int rcvEcnBits;                       // Received ECN bits in packet header
         struct sockaddr_storage remSas;       // Remote IP sockaddr storage
         socklen_t remSasLen;                  // Remote IP sockaddr storage length
         BOOL isServer;                        // Execute as server
@@ -348,19 +439,33 @@ struct repository {
         double siAggRateL2;                   // Sub-interval L2 aggregate rate
         double siAggRateL1;                   // Sub-interval L1 aggregate rate
         double siAggRateL0;                   // Sub-interval L1+VLAN aggregate rate
-        struct testSummary testSum;           // Test summary statistics
-        int intfFD;                           // File descriptor to read interface stats
-        unsigned long long intfBytes;         // Last byte counter of interface stats
-        struct timespec intfTime;             // Sample time of interface stats
+        struct testSummary testSum[2];        // Test summary statistics (bimodal)
+        int intfFD;                           // File descriptor to read interface data
+        int intfFDAlt;                        // Interface FD (alternate direction)
+        unsigned long long intfBytes;         // Last byte counter of interface data
+        unsigned long long intfBytesAlt;      // Interface data (alternate direction)
+        struct timespec intfTime;             // Sample time of interface data
         struct timespec timeOfMax[2];         // Time of maximums (bimodal)
+        char *psBuffer;                       // Performance statistics output buffer
+        int psBufSize;                        // Performance statistics buffer size
+        FILE *psFilePtr;                      // Performance statistics file pointer
+        time_t psFileTime;                    // Performance statistics file time (sec)
+        struct timespec psRecordTime;         // Performance statistics record time
+        int psRecordCount;                    // Performance statistics record count
+        struct perfStatsCounters psCounters;  // Performance statistics (Counters)
+        struct perfStatsMaximums psMaximums;  // Performance statistics (Maximums)
+        struct perfStatsAverages psAverages;  // Performance statistics (Averages)
         int actConnections[2];                // Active testing connections (bimodal)
         struct subIntStats sisMax[2];         // Sub-interval maximum stats (bimodal)
+        unsigned int sisMaxCECount[2];        // Sub-interval maximum CE counts (bimodal)
         double rateMaxL3[2];                  // L3 rate maximums (bimodal)
         double rateMaxL2[2];                  // L2 rate maximums (bimodal)
         double rateMaxL1[2];                  // L1 rate maximums (bimodal)
         double rateMaxL0[2];                  // L1+VLAN rate maximums (bimodal)
         double intfMax[2];                    // Interface maximums (bimodal)
+        unsigned int rttAverage[2];           // RTT variation average (bimodal)
         double intfMbps;                      // Last interface rate obtained
+        double intfMbpsAlt;                   // Last interface rate (alternate direction)
         int keyIndex;                         // Key index (used by client)
         int keyCount;                         // Number of keys defined
         struct keyEntry key[MAX_KEY_ENTRIES]; // Array of key entries
@@ -396,7 +501,7 @@ struct connection {
         BOOL dataReady;                  // Data ready indicator
         int serverIndex;                 // Index of server ID
         int ipProtocol;                  // IPPROTO_IP or IPPROTO_IPV6
-        int ipTosByte;                   // IP ToS byte for testing
+        int dscpEcn;                     // DSCP+ECN byte for testing
         char locAddr[INET6_ADDR_STRLEN]; // Local IP address as string
         int locPort;                     // Local port
         char remAddr[INET6_ADDR_STRLEN]; // Remote IP address as string
@@ -405,6 +510,7 @@ struct connection {
         //
         int srIndex;                 // Sending rate index
         struct sendingRate srStruct; // Sending rate structure
+        int srAdjSuppCount;          // Sending rate adj. suppression count
         unsigned int lpduSeqNo;      // Load PDU sequence number
         unsigned int spduSeqNo;      // Status PDU sequence number
         int spduSeqErr;              // Status PDU sequence error count
@@ -421,17 +527,23 @@ struct connection {
         int slowAdjCount;    // Slow rate adjustment counter
         int trialInt;        // Status feedback/trial interval (ms)
         int testIntTime;     // Test interval time (sec)
-        int subIntPeriod;    // Sub-interval period (sec)
+        int subIntPeriod;    // Sub-interval period (ms)
         int srIndexConf;     // Configured sending rate index
         BOOL srIndexIsStart; // Configured SR index is starting point
         int highSpeedDelta;  // High-speed row adjustment delta
         int seqErrThresh;    // Sequence error threshold
         BOOL randPayload;    // Payload randomization
         int rateAdjAlgo;     // Rate adjustment algorithm
+        int ecnCEThresh;     // ECN CE threshold
+        int ecnBleachCount;  // ECN bleach count (-1 after warning generated)
         //
         int algoCRetryCount;  // AlgoC: Waiting timer till next multiplicative retry
         int algoCRetryThresh; // AlgoC: Threshold for multiplicative retry
         BOOL algoCUpdate;     // AlgoC: Indicates when max send rate was updated
+        //
+        int authMode;                            // Authentication mode
+        unsigned char clientKey[SHA256_KEY_LEN]; // Client key via KDF
+        unsigned char serverKey[SHA256_KEY_LEN]; // Server key via KDF
         //
         struct timespec endTime;      // Connection end time
         int (*priAction)(int);        // Primary action upon IO
@@ -449,6 +561,8 @@ struct connection {
         struct subIntStats sisAct;   // Sub-interval active stats
         struct subIntStats sisSav;   // Sub-interval saved stats
         int subIntCount;             // Sub-interval count
+        unsigned int sisActCECount;  // Sub-interval active CE count
+        unsigned int sisSavCECount;  // Sub-interval saved CE count
         //
 #define LPDU_HISTORY_SIZE 32 // Size must be power of 2
 #define LPDU_HISTORY_MASK (LPDU_HISTORY_SIZE - 1)
@@ -459,20 +573,23 @@ struct connection {
         unsigned int seqErrOoo;                      // Out-of-Order sum
         unsigned int seqErrDup;                      // Duplicate sum
         //
-        BOOL useOwDelVar;         // Use one-way delay instead of RTT
-        int clockDeltaMin;        // Clock delta minimum
-        unsigned int delayVarMin; // Delay variation minimum
-        unsigned int delayVarMax; // Delay variation maximum
-        unsigned int delayVarSum; // Delay variation sum
-        unsigned int delayVarCnt; // Delay variation count
-        unsigned int rttMinimum;  // Minimum round-trip time
-        unsigned int rttSample;   // Last round-trip time (sampled)
-        BOOL delayMinUpd;         // Delay minimum(s) updated
+        BOOL useOwDelVar;          // Use one-way delay instead of RTT
+        int clockDeltaMin;         // Clock delta minimum
+        unsigned int delayVarMin;  // Delay variation minimum
+        unsigned int delayVarMax;  // Delay variation maximum
+        unsigned int delayVarSum;  // Delay variation sum
+        unsigned int delayVarCnt;  // Delay variation count
+        unsigned int rttMinimum;   // Minimum round-trip time
+        unsigned int rttVarSample; // Last RTT variation sample
+        unsigned int rttVarSum;    // RTT variation sum
+        unsigned int rttVarCnt;    // RTT variation count
+        BOOL delayMinUpd;          // Delay minimum(s) updated
         //
         struct timespec trialIntClock; // Trial interval clock
         unsigned int tiDeltaTime;      // Trial interval delta time
         unsigned int tiRxDatagrams;    // Trial interval receive datagrams
         unsigned int tiRxBytes;        // Trial interval receive bytes
+        unsigned int tiRxCECount;      // Trial interval receive CE count
         //
         int infoCount;             // Info message count
         int warningCount;          // Warning message count

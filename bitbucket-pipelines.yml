@@ -1,0 +1,37 @@
+image: debian:bookworm-slim
+
+pipelines:
+  default:
+    - step:
+        name: Build & package
+        script:
+          # Install build dependencies
+          - apt-get update
+          - apt-get install -qy --no-install-recommends libssl-dev libz-dev libevent-dev build-essential pkg-config cmake
+
+          # Remove bitbucket-pipelines.yml
+          - rm bitbucket-pipelines.yml
+
+          # Create source directory
+          - mkdir source
+
+          # Move all files into `source/`
+          - mv ./* source/ || true
+
+          # Create build directory
+          - mkdir -p build
+          - cd build
+
+          # Configure the project from the upper level source directory 
+          - cmake ../source
+
+          # Build it
+          - make -j
+
+          # Create tarball of the source
+          - cd ..
+          - mkdir artifacts
+          - tar --exclude=artifacts/*.tar.gz --exclude=.git -czf artifacts/source.tar.gz source
+
+        artifacts:
+          - artifacts/source.tar.gz

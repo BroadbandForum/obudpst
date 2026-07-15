@@ -23,8 +23,7 @@
 
 For any build considerations, please refer to the README.
 
-## Contributor License Agreement
+## Project Participation Agreement
 
-Any company or individual interested in participating in this open source project must sign a Contributor License Agreement (more details [here](https://wiki.broadband-forum.org/pages/viewpage.action?pageId=87557395)).
+Any company or individual interested in participating in this open source project must sign a Project Participation Agreement (more details [here](https://broadband-forum.atlassian.net/wiki/spaces/BBF/pages/46640109/Open+Broadband-UDP+Speed+Test+OB-UDPST)).
 
-Download the Agreement from here: [OB-UDPST Project CLA](https://wiki.broadband-forum.org/pages/viewpage.action?pageId=95945137)

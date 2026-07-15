@@ -1,9 +1,110 @@
-# CHANGELOG.MD for udpst 8.x.x Releases
+# Changelog for UDPST 9.x.x Releases
 
-*The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification can be found at
-https://www.broadband-forum.org/technical/download/TR-471.pdf*
+*The udpst utility conforms to TR-471 (Issue 4). The latest TR-471 specification
+can be found at https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2024-07-11: [UDPST 8.2.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.2.0)
+## 2026-07-14: [UDPST 9.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v9.0.0)
+
+**IMPORTANT: The default control port has changed from 25000 to 24601. For
+backward compatibility, 8.2.0 clients will either need to use the new control
+port via `-p 24601` or the server can be run with the legacy control port (via
+`-p 25000`).**
+
+The primary change in this release was making the software RFC 9946 compatible.
+This included enhancing authentication to cover each message exchanged in the
+control phase as well as the use of a KDF (Key Derivation Function) to create
+unique keys for both the client and server for each test. Note, authentication
+mode 2 (HMAC in status messages) was considered overkill and was therefore not
+implemented. An additional RFC requirement was the generation of a new Null
+Request control message sent from the server to the client immediately after
+the Setup Response. This enables client access, through the server's firewall,
+to the new UDP ephemeral port that is opened for testing. For servers protected
+by a standard firewall doing NAT, this should alleviate the need to have the
+entire UDP ephemeral port range open and accessible. Lastly, the default UDP
+control port needed to change from 25000 to 24601 and the protocol version
+needed to be bumped to 20. However, this release remains fully backward
+compatible with release 8.2.0 (protocol version 11).
+
+Another significant enhancement was the ability to produce periodic server
+performance statistics. Data records are created at regular intervals (10
+seconds by default) and include both maximums and averages of various
+rate-based performance metrics. The records, along with static instance
+information and numerous event/error counters, are periodically written to a
+filesystem file (as JSON) every 5 minutes (by default) -- see README for
+specifics. Additionally, the following changes are also included...
+
+* The sub-interval time period is now specified in ms instead of seconds
+(`-P period`). The default time period remains the same (1000 ms). To go along
+with this change the text output now displays the sub-interval seconds with a
+single decimal digit (e.g., "1.0" instead of "1").
+* While a server process is idling and awaiting test requests it will reduce
+its primary timer interrupt interval from 100 us to 10 ms. This significantly
+reduces the CPU utilization of server instances while not actively testing.
+* The metadata export file now captures both traffic directions for an
+interface specified via `-E intf`.
+* The bandwidth option `-B mbps` now allows a zero mbps parameter. Although
+this has no effect, and is equivalent to not providing the option at all, it
+was done to simplify command-line parameter processing when using automated
+scripts.
+* Secondary (and unnecessary) recvmmsg() calls are no longer performed when all
+messages are read on the first call. This is also true of received status
+messages (given the long inter-arrival times).
+* When datagrams are not accepted for transmission by the protocol stack, due
+to internal backpressure, sequence numbers are adjusted to eliminate loss that
+can be accounted for. This new functionality can be disabled via the `-n`
+option.
+* An out-of-order or duplicate status message will now produce a better WARNING
+message instead of just using a max loss value of 65535 (-1). For example,
+"REMOTE WARNING: Incoming status feedback messages lost (OoO/Dup)".
+* RTT variation output now includes an average (in addition to the min and max).
+Accordingly, the text output has changed from "min-max" to "min/avg/max" (the
+same as one-way delay variation). Also, the JSON output now includes a "RTTAvg"
+key in addition to "RTTMin" and "RTTMax".
+* The default output (export) functionality has been modified to only write
+metadata entries when an RTT sample is available (i.e., only when a status
+message exchange occurs). As a result, the option parameter now allows a
+plus-sign filename prefix (`-O [+]file`) to indicate that the original
+behavior is actually desired. That is, all metadata should be output. This
+change in the default operation should drastically reduce the number of
+metadata entries written when testing at higher speeds.
+* The count parameter for the bimodal option now accepts a minus sign prefix
+(`-i [-]count`). This prefix suppresses sending rate adjustments during the
+initial mode. This allows for **Dual-Phase Testing** where the initial mode uses
+one rate and the second mode uses another (either fixed or variable).
+See README file for additional details.
+* Overall, bimodal usage is now accompanied by a change in the summary output info.
+The single text line "Summary" will now be two lines, one for each mode, output as
+"Sum[#-#]". The JSON object "Summary" will now only cover the first mode and the
+second mode summary will be in an array called "ModalSummary". This is consistent
+with the existing "AtMax" and "ModalResult" structure for the maximum rate. Also, the
+JSON "Input" object will now contain a field called "NumberFirstModeSuppSubIntervals"
+that contains the number of sub-intervals with sending rate adjustments suppressed.
+When the minus sign prefix is used, this will equal "NumberFirstModeTestSubIntervals".
+* For compliance with the protocol specified in RFC 9946, padding normally
+inserted by the C compiler in the subIntStats structure is removed via a pair of
+"#pragma pack" statements. This improves interoperability with platforms and
+devices where C padding rules do not apply. This change does not impact backward
+compatibility with 8.2.0.
+* The client's JSON output now contains a "MaxRequiredBandwidth" field in the
+"Input" object. This value shows the max bandwidth option (`-B mbps`) provided
+on the command line.
+* All JSON example files are now located in a "json_examples" subdirectory.
+* Support for Explicit Congestion Notification (ECN) has been added. The rate
+adjustment algorithm will now consider the proportion of packets received with
+ECN bits set to CE (Congestion Experienced) [binary 11]. This metric is only
+utilized if a CE threshold is specified via the `-Z thresh` option. If the
+proportion of CE packets is not above this threshold, traffic may increase
+(contingent on loss and delay limits); if the proportion exceeds the threshold,
+traffic is decreased. To use this functionality, a packet-marking octet must be
+defined via `-m value` to signal that packets are ECN-capable, using either
+ECT(0)/Classic [binary 10] or ECT(1)/L4S [binary 01]. Lastly, the JSON output
+now includes fields for the ECN value and CE threshold as well as a count and
+percentage of received CE packets in each section of test results. The text
+output will include CE counts when a CE threshold is specified.
+
+# Changelog for UDPST 8.x.x Releases
+
+## 2024-07-11: [UDPST 8.2.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.2.0)
 
 This release addresses the need to always handle interface byte counters as 64-bit values,
 regardless of the machine architecture (OBUDPST-56). Also, for improved management of large-scale
@@ -32,7 +133,7 @@ data PDUs (both can be suppressed via compilation flags, causing them to be sile
 * A fix was added for scenarios where a timeout occurs, due to a lost test activation request, and
 the allocated upstream bandwidth on the server is never deallocated
 
-# 2023-11-17: [UDPST 8.1.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
+## 2023-11-17: [UDPST 8.1.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.1.0)
 
 The main feature in this release is the option of exporting received load traffic metadata (sequence
 numbers, timestamps,...) in CSV format. See README for feature details.
@@ -43,7 +144,7 @@ at 1 (one) - although only a handful are currently used. Error values start at 5
 maximum of 255 (see udpst.h for details). Additionally, an ErrorMessage2 text field was also added to
 better communicate the cause-and-effect relationship between typical message pairs.
 
-# 2023-04-07: [UDPST 8.0.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.0.0)
+## 2023-04-07: [UDPST 8.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v8.0.0)
 
 The primary new feature in this release is support for multiple connections (UDP flows) between
 the client and one or more server instances (i.e., distributed servers). Additionally,...
@@ -59,12 +160,12 @@ the client and one or more server instances (i.e., distributed servers). Additio
 *With these changes, new fields were required in the setup and load PDUs. As a result,
 both the current and minimum protocol version needed to be bumped to 10.*
 
-# CHANGELOG.MD for udpst 7.x.x Releases
+# Changelog for UDPST 7.x.x Releases
 
 *The udpst utility conforms to TR-471 (Issue 3). The latest TR-471 specification can be found at
 https://www.broadband-forum.org/technical/download/TR-471.pdf*
 
-# 2022-11-18: [UDPST 7.5.1] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.1)
+## 2022-11-18: [UDPST 7.5.1](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.1)
 
 This release has one new feature, which is a response to testing/experience on mobile access:
 
@@ -72,7 +173,7 @@ This release has one new feature, which is a response to testing/experience on m
 
 Also, this release makes several updates to documentation (reflecting the latest features implemented in the utility). 
 
-# 2022-05-05: [UDPST 7.5.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.0)
+## 2022-05-05: [UDPST 7.5.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.5.0)
 
 This release has one major new feature, which was anticipated by the version 9 protocol:
 
@@ -82,7 +183,7 @@ This release has one major new feature, which was anticipated by the version 9 p
 * This algorithm supports a search over the full range of rates, even if the subscribed rate is >1Gbps
 * The Type B algorithm remains the default, for testing that does not benefit from "Multiply and Retry" aspects
 
-# 2022-02-24: [UDPST 7.4.0] (https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.4.0)
+## 2022-02-24: [UDPST 7.4.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.4.0)
 
 This release has many new features, supported by the version 9 protocol:
 
@@ -98,7 +199,7 @@ This release has many new features, supported by the version 9 protocol:
 * Backward compatibility: Servers can test with both protocol version 8 and version 9.
 * Additional JSON fields: example files have been updated (additions only)
 
-# 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.3.0)
+## 2021-11-17: [UDPST 7.3.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.3.0)
 
 This release has a greatly expanded (optional) JSON-formatted version of the command-line output.
 
@@ -134,8 +235,6 @@ Also, an optional JSON-formatted version of the command-line output.
 This release addressed the following issues and new features: 
 * Add guards to avoid errors in inclusion files
 * The test protocol is described in detail in file ./protocol.md
-
-# CHANGELOG.MD for udpst 7.0.0 Release
 
 ## 2020-12-11: [UDPST 7.0.0](https://github.com/BroadbandForum/OBUDPST/releases/tag/v7.0.0)
 

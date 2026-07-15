@@ -64,10 +64,10 @@ $ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T <Local_IP10>
 
 Alternate 100G server example using different UDP control ports.
 
-$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 25001 <Local_IP>
-$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 25002 <Local_IP>
+$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 24601 <Local_IP>
+$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 24602 <Local_IP>
 ...
-$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 25010 <Local_IP>
+$ taskset -c 0-13,28-41 udpst -x -j -B 10000 -T -p 24610 <Local_IP>
 ```
 
 ## Client Devices (with the following assumptions)...
@@ -101,9 +101,9 @@ $ taskset -c 1-3 udpst -d -j -B <mbps> -E <intf> -M -T -f jsonf -C 8 \
 Alternate client example using different UDP control ports.
 
 $ taskset -c 1-3 udpst -d -j -B <mbps> -E <intf> -M -T -f jsonf -C 8 \
-  <Server1_IP>:25005 <Server1_IP>:25006 <Server1_IP>:25007 <Server1_IP>:25008 \
-  <Server2_IP>:25001 <Server2_IP>:25002 <Server2_IP>:25003 <Server2_IP>:25004 \
-  <Server3_IP>:25002 <Server3_IP>:25004 <Server3_IP>:25006 <Server3_IP>:25008 \
+  <Server1_IP>:24605 <Server1_IP>:24606 <Server1_IP>:24607 <Server1_IP>:24608 \
+  <Server2_IP>:24601 <Server2_IP>:24602 <Server2_IP>:24603 <Server2_IP>:24604 \
+  <Server3_IP>:24602 <Server3_IP>:24604 <Server3_IP>:24606 <Server3_IP>:24608 \
   >udpst.json
 ```
 ```
