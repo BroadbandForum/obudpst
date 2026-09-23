@@ -1,0 +1,12 @@
+[Unit]
+Description=OB-UDPST is a utility to perform UDP-based IP capacity measurements
+Requires=network-online.target
+After=network.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/udpst
+
+[Install]
+WantedBy=multi-user.target
+

@@ -14,3 +14,4 @@ udpst
 config.h
 build
 vmlinux.h
+udpst.1.gz
